@@ -21,8 +21,11 @@ window.ZX = window.ZX || {};
     if (override) return String(override).replace(/\/+$/, '');
     try {
       var loc = window.location;
-      /* 后端静态托管前端时为同源，直接用 origin，避免跨域 */
-      if ((loc.protocol === 'http:' || loc.protocol === 'https:') && loc.port === '8787') {
+      /* http/https 一律优先用同源 origin：
+         - 本地：后端 8787 静态托管前端，同源
+         - 云端：反代域名下前后端同源，端口与域名均可能变化
+         仅 file:// 才需要绝对地址。 */
+      if (loc.protocol === 'http:' || loc.protocol === 'https:') {
         return loc.origin;
       }
     } catch (e) { /* file:// 场景 */ }

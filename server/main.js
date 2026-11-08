@@ -1,9 +1,13 @@
 'use strict';
 /* 诺瓦 Nova · HTTP 入口
  *
- * 契约：docs/HANDOFF.md §5（基址 http://127.0.0.1:8787，前缀 /api）
+ * 契约：docs/HANDOFF.md §5（前缀 /api）
  * 同时静态托管前端：GET / → index.html，/assets/* 与 /shared/* 直出，
- * 因此 http://127.0.0.1:8787/ 可直接跑完整前端（前后端同源）。
+ * 因此根路径即可跑完整前端（前后端同源）。
+ *
+ * 部署适配：
+ * - 端口取 PORT 环境变量（部署环境注入），本地默认 8787
+ * - 绑定 0.0.0.0 以便反向代理接入；本地收紧可用 HOST=127.0.0.1
  *
  * 零第三方依赖，只用 node: 内置模块。
  */
@@ -17,7 +21,8 @@ const { createRouter, ApiError } = require('./api/routes.js');
 const store = require('./store/memory.js');
 
 const ROOT = path.resolve(__dirname, '..');
-const HOST = '127.0.0.1';
+/* 绑定地址：部署环境要求 0.0.0.0 才能被反向代理访问；本地开发可用 HOST=127.0.0.1 收紧。 */
+const DEFAULT_HOST = '0.0.0.0';
 const DEFAULT_PORT = 8787;
 const MAX_BODY_BYTES = 1024 * 1024;
 
@@ -40,14 +45,23 @@ const MIME = {
 };
 
 /**
- * CORS：仅放行本机来源（http://127.0.0.1:* / http://localhost:* / file:// 的 null origin）。
- * 这样 file:// 双击打开的前端也能连上后端；任何外部站点一律拒绝。
+ * CORS 策略：
+ * 1. 本机来源（127.0.0.1 / localhost / file:// 的 null origin）——支持 file:// 双击打开的前端连后端；
+ * 2. 同源来源（Origin 的 host 与请求 Host 一致）——支持云端部署后前端与 API 同源互调。
+ * 其余外部站点一律拒绝。
  */
 function corsHeaders(req) {
   const origin = req.headers.origin;
   if (!origin) return {};
   const local = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin) || origin === 'null';
-  if (!local) return {};
+  let sameOrigin = false;
+  if (!local) {
+    try {
+      const originHost = new URL(origin).host;
+      sameOrigin = !!originHost && originHost === req.headers.host;
+    } catch (e) { /* origin 非法则不放行 */ }
+  }
+  if (!local && !sameOrigin) return {};
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -154,7 +168,7 @@ function createServer() {
   return http.createServer((req, res) => {
     let parsed;
     try {
-      parsed = new URL(req.url, 'http://' + (req.headers.host || HOST + ':' + DEFAULT_PORT));
+      parsed = new URL(req.url, 'http://' + (req.headers.host || DEFAULT_HOST + ':' + DEFAULT_PORT));
     } catch (e) {
       sendError(res, 'E1001', 'URL 非法', 400);
       return;
@@ -192,10 +206,16 @@ function createServer() {
 }
 
 /** 启动服务；port 传 0 表示随机端口（测试用） */
+function resolveHost() {
+  const env = process.env.HOST;
+  if (env) return env;
+  return DEFAULT_HOST;
+}
+
 function start(port, host) {
   const server = createServer();
   const p = port === undefined || port === null ? DEFAULT_PORT : port;
-  const h = host || HOST;
+  const h = host || resolveHost();
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(p, h, () => {
@@ -213,7 +233,7 @@ function start(port, host) {
 
 if (require.main === module) {
   const envPort = process.env.PORT ? parseInt(process.env.PORT, 10) : DEFAULT_PORT;
-  start(envPort, HOST).then((h) => {
+  start(envPort, resolveHost()).then((h) => {
     process.stdout.write('诺瓦 Nova · 服务已启动 http://' + h.host + ':' + h.port + '\n');
     process.stdout.write('  GET  /api/health        健康检查\n');
     process.stdout.write('  GET  /api/state         初始全量状态\n');
