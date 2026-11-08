@@ -19,6 +19,7 @@ tmp/
 
 # 本地工具产物
 .playwright-cli/
+.hallmark/
 
 # 编辑器与系统
 .vscode/
