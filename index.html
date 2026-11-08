@@ -3,10 +3,14 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<meta name="theme-color" content="#07080A" />
+<meta name="theme-color" content="#18151B" />
+<meta name="description" content="诺瓦 Nova：面向大学生的私人日常助理。以课表为硬骨架，把作业 DDL 与考试节点排进空档；自然语言排程、四级重排与中断挽救，全部由确定性引擎计算，可解释、可复现、零惩罚。" />
+<meta property="og:title" content="诺瓦 Nova · 大学生日常助理" />
+<meta property="og:description" content="以课表为硬骨架，说一句话就能排程、重排、复盘。确定性引擎驱动，同一输入必得同一输出。" />
+<meta property="og:type" content="website" />
 <meta name="color-scheme" content="dark" />
-<title>诺瓦 Nova · 学生日程助理</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2307080A'/%3E%3Cg fill='%23D8F65C'%3E%3Crect x='3.2' y='3.2' width='2.2' height='2.2'/%3E%3Crect x='6.9' y='6.9' width='2.2' height='2.2'/%3E%3Crect x='10.6' y='10.6' width='2.2' height='2.2'/%3E%3C/g%3E%3C/svg%3E" />
+<title>诺瓦 Nova · 大学生日常助理</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2318151B'/%3E%3Cg fill='%23F2C879'%3E%3Crect x='3.2' y='3.2' width='2.2' height='2.2'/%3E%3Crect x='6.9' y='6.9' width='2.2' height='2.2'/%3E%3Crect x='10.6' y='10.6' width='2.2' height='2.2'/%3E%3C/g%3E%3C/svg%3E" />
 <script>
   /* 首帧前应用本地视觉偏好，避免主题闪烁（与 assets/js/util.js 共用同一存储键） */
   (function () {
@@ -23,13 +27,14 @@
 <link rel="stylesheet" href="assets/css/app.css" />
 </head>
 <body>
+<a class="skip-link" href="#main">跳到主内容</a>
 <div class="app">
   <header class="topbar">
     <div class="brand">
       <div class="glyph" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
       <div>
         <div class="brand-cn">诺瓦 Nova</div>
-        <div class="brand-en">学生日程助理</div>
+        <div class="brand-en">大学生日常助理</div>
       </div>
     </div>
     <nav class="tnav" id="rail" aria-label="主导航"></nav>
@@ -46,32 +51,33 @@
         <div class="avatar" aria-hidden="true">序</div>
         <div>
           <div class="cp-title">小序</div>
-          <div class="cp-sub">STUDENT ASSISTANT</div>
+          <div class="cp-sub">Student assistant</div>
         </div>
         <div class="spacer"></div>
         <div class="cp-live"><span class="dot ac"></span>在线</div>
         <button class="cp-close" data-act="cp-close" aria-label="关闭对话">×</button>
       </div>
-      <div class="cp-body" id="chat"></div>
+      <div class="cp-body" id="chat" role="log" aria-live="polite" aria-relevant="additions" aria-label="与小序的对话记录"></div>
       <div class="cp-foot">
+        <div class="cp-acts-h"><span>一站式指令</span><span>Quick actions</span></div>
         <div class="chips" id="chips"></div>
         <form class="composer" id="form">
           <span class="caret">&gt;</span>
-          <input id="input" autocomplete="off" placeholder="说点什么，比如「这周太乱，帮我重排」" />
+          <input id="input" autocomplete="off" aria-label="给小序发消息" placeholder="说点什么，比如「这周太乱，帮我重排」" />
           <button class="send" type="submit" aria-label="发送">
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8h11M9 4l4 4-4 4"/></svg>
           </button>
         </form>
-        <div class="cp-note">演示版 · 意图为关键词匹配 · 排程计算确定性可复现</div>
+        <div class="cp-note">一站式 · 对话即操作　｜　关键词匹配 · 确定性计算</div>
       </div>
     </section>
 
-    <main class="bench">
+    <main class="bench" id="main">
       <div class="bench-head">
         <div class="bt" id="btTitle"><b>今日</b></div>
         <div class="ctx ctx-bench">
-          <span>目标 <b>2027 考研 · 计算机</b></span>
-          <span>基础期 · 第 3 周</span>
+          <span>目标 <b id="ctxGoal">2027 考研 · 计算机</b></span>
+          <span>秋季学期 · 第 3 周</span>
           <span class="r" id="ctxR">R 1.08</span>
         </div>
         <div class="spacer"></div>

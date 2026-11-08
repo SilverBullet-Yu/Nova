@@ -401,7 +401,7 @@ window.ZX = window.ZX || {};
       rows.push(row('压缩', o.items.length + ' 项 · ' +
         o.items.map(function (i) { return i.from + ' → ' + i.est + ' min'; }).join('、')));
       rows.push(row('放弃', o.dropped.length
-        ? o.dropped.length + ' 项 · ' + o.dropped.map(function (d) { return d.subject + ' · ' + d.title + '（' + d.est + ' min）'; }).join('、')
+        ? o.dropped.length + ' 项 · ' + o.dropped.map(function (d) { return U.esc(d.subject) + ' · ' + U.esc(d.title) + '（' + d.est + ' min）'; }).join('、')
         : '0 项'));
     } else if (o.key === 'defer') {
       rows.push(row('顺延', DEFER_DAYS + ' 天 · 截止 ' + o.deadlineAfter));
@@ -410,7 +410,7 @@ window.ZX = window.ZX || {};
     } else {
       rows.push(row('目标', (o.targetFrom ? o.targetFrom + ' → ' + o.targetAfter + ' 分' : '已下调')));
       rows.push(row('放弃', o.dropped.length
-        ? o.dropped.length + ' 项 · ' + o.dropped.map(function (d) { return d.subject + ' · ' + d.title + '（' + d.est + ' min）'; }).join('、')
+        ? o.dropped.length + ' 项 · ' + o.dropped.map(function (d) { return U.esc(d.subject) + ' · ' + U.esc(d.title) + '（' + d.est + ' min）'; }).join('、')
         : '0 项'));
     }
 
@@ -508,7 +508,7 @@ window.ZX = window.ZX || {};
     if (o.key === 'compress') {
       lines.push('<p>按「压缩」把计划接回来了：' + o.items.length + ' 项工时下调到 ' +
         o.items.map(function (i) { return i.est + ' 分钟'; }).join(' / ') +
-        (o.dropped.length ? '，放弃 ' + o.dropped.length + ' 项（' + o.dropped[0].title + '，权重 ' + o.dropped[0].weight.toFixed(2) + '）' : '') +
+        (o.dropped.length ? '，放弃 ' + o.dropped.length + ' 项（' + U.esc(o.dropped[0].title) + '，权重 ' + o.dropped[0].weight.toFixed(2) + '）' : '') +
         '。缺口 ' + U.hm(before.gap) + ' → ' + U.hm(o.gap) + '。</p>');
       lines.push('<p style="color:var(--txt3);font-size:11px">压缩项标记为降级完成，按「做完」记录即可，不再追加补作。</p>');
     } else if (o.key === 'defer') {
@@ -520,7 +520,7 @@ window.ZX = window.ZX || {};
       lines.push('<p>按「降级」把计划接回来了：目标 ' +
         (o.targetFrom ? o.targetFrom + ' → ' + o.targetAfter + ' 分' : '已下调') + '，放弃权重最低的 ' +
         o.dropped.length + ' 项' +
-        (o.dropped.length ? '（' + o.dropped.map(function (d) { return d.title; }).join('、') + '）' : '') +
+        (o.dropped.length ? '（' + o.dropped.map(function (d) { return U.esc(d.title); }).join('、') + '）' : '') +
         '。缺口 ' + U.hm(before.gap) + ' → ' + U.hm(o.gap) + '。</p>');
       lines.push('<p style="color:var(--txt3);font-size:11px">目标下调后，剩下的项按原工时执行，不再往前追赶。</p>');
     }

@@ -145,6 +145,8 @@ window.ZX = window.ZX || {};
 
   function cell(v) {
     var s = (v === undefined || v === null) ? '' : String(v);
+    /* 防公式注入：以 = + - @ 开头的文本在 Excel/WPS 打开时会被当公式执行 */
+    if (/^[=+\-@]/.test(s)) s = "'" + s;
     return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   }
 
@@ -189,6 +191,14 @@ window.ZX = window.ZX || {};
       rows.map(function (r) { return r.map(cell).join(','); }).join('\n') + '\n';
   }
 
+  /* 数据行数在组装时统计，避免按换行符拆分把引号内换行误算成多行 */
+  function csvRowCount() {
+    var n = 0;
+    (ZX.state.tasks || []).forEach(function () { n++; });
+    (ZX.state.sessions || []).forEach(function () { n++; });
+    return n;
+  }
+
   function download(filename, text) {
     var blob = new Blob(['\ufeff' + text], { type: 'text/csv;charset=utf-8' });
     var url = URL.createObjectURL(blob);
@@ -206,7 +216,7 @@ window.ZX = window.ZX || {};
 
   function exportCsv() {
     var text = csv();
-    var rows = text.replace(/\n$/, '').split('\n').length - 1;
+    var rows = csvRowCount();
     var d = new Date();
     var filename = 'nova-export-' + d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate()) + '.csv';
     download(filename, text);

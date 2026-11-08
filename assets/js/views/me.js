@@ -65,11 +65,11 @@ window.ZX = window.ZX || {};
 
       '<div class="sec-h"><span class="n">02</span><span class="t">通知策略</span><span class="rule"></span><span class="r">分级可关</span></div>' +
       '<div class="panel"><div class="panel-b">' +
-        swRow('每日提醒', '19:00 · 今日 3 项', 'daily') +
+        swRow('每日提醒', '19:00 · 今日 ' + S.tasks.filter(function (t) { return !t.done && !t.skipped; }).length + ' 项', 'daily') +
         swRow('周报', '周日 20:00 · 最少打扰', 'weekly') +
         swRow('进度预警', '必须附带补救方案', 'alert') +
-        swRow('中断挽救', '连续 3 天无记录时触发', 'rescue') +
-        '<div class="sw"><div><span class="n">夜间静默</span><small>22:00–08:00 · 服务端裁决</small></div><span class="spacer"></span><span class="tg on lock"></span></div>' +
+        swRow('中断挽救', '连续 ' + (ZX.flows && ZX.flows.rescue && ZX.flows.rescue.THRESHOLD ? ZX.flows.rescue.THRESHOLD : 3) + ' 天无记录时触发', 'rescue') +
+        '<div class="sw"><div><span class="n">夜间静默</span><small>22:00–08:00 · 服务端裁决</small></div><span class="spacer"></span><span class="tg on lock" aria-hidden="true"></span></div>' +
       '</div></div>' +
 
       ZX.ui.fold('me:data', {
@@ -95,11 +95,11 @@ window.ZX = window.ZX || {};
 
       ZX.ui.fold('me:display', {
         title: '显示与动效',
-        meta: '网格 · 辉光 · 字号',
+        meta: '底纹 · 暖光 · 字号',
         body:
           fontRow() +
-          prefRow('科技网格', '背景坐标网格 · 低频漂移', 'grid') +
-          prefRow('辉光与扫描', '顶部扫光 · 运行时高亮', 'glow') +
+          prefRow('日程底纹', '背景方格纸 · 可关闭', 'grid') +
+          prefRow('暖光氛围', '环境暖光 · 高亮辉光', 'glow') +
           prefRow('界面动效', '入场级联 · 图表绘制 · 进度增长', 'motion') +
           '<p class="pref-note">偏好写入浏览器本地（localStorage），仅影响本机视觉；系统开启「减少动态效果」时动效始终关闭。</p>'
       }) +
@@ -131,16 +131,19 @@ window.ZX = window.ZX || {};
       '</span></div>';
   }
 
+  /* 开关统一用真 button（键盘可达），role=switch 同步状态 */
   function prefRow(n, sub, key) {
     var p = ZX.util.prefs();
     return '<div class="sw"><div><span class="n">' + n + '</span><small>' + sub + '</small></div>' +
-      '<span class="spacer"></span><span class="tg ' + (p[key] ? 'on' : '') + '" data-act="pref" data-key="' + key + '"></span></div>';
+      '<span class="spacer"></span><button type="button" class="tg ' + (p[key] ? 'on' : '') + '" data-act="pref" data-key="' + key + '"' +
+      ' role="switch" aria-checked="' + (p[key] ? 'true' : 'false') + '" aria-label="' + n + '"></button></div>';
   }
 
   function swRow(n, sub, key) {
     var S = ZX.state;
     return '<div class="sw"><div><span class="n">' + n + '</span><small>' + sub + '</small></div>' +
-      '<span class="spacer"></span><span class="tg ' + (S.notif[key] ? 'on' : '') + '" data-act="tg" data-key="' + key + '"></span></div>';
+      '<span class="spacer"></span><button type="button" class="tg ' + (S.notif[key] ? 'on' : '') + '" data-act="tg" data-key="' + key + '"' +
+      ' role="switch" aria-checked="' + (S.notif[key] ? 'true' : 'false') + '" aria-label="' + n + '"></button></div>';
   }
 
   ZX.views = ZX.views || {};

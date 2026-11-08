@@ -11,8 +11,8 @@ window.ZX = window.ZX || {};
   function $$(sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); }
 
   function esc(s) {
-    return String(s === undefined || s === null ? '' : s).replace(/[&<>"]/g, function (c) {
-      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c];
+    return String(s === undefined || s === null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
     });
   }
 
@@ -25,6 +25,19 @@ window.ZX = window.ZX || {};
   }
 
   function nowStr() { var d = new Date(); return pad2(d.getHours()) + ':' + pad2(d.getMinutes()); }
+  /* 毫秒时间戳 → HH:MM（快照 / 重排记录等展示用；非法输入返回空串） */
+  function tsHM(ms) {
+    var d = new Date(ms);
+    return isNaN(d.getTime()) ? '' : pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  }
+  /* ISO 周数（周一为一周之始），周报与趋势图标注用 */
+  function isoWeek(date) {
+    var d = date ? new Date(date) : new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
+    var w1 = new Date(d.getFullYear(), 0, 4);
+    return 1 + Math.round(((d - w1) / 86400000 - 3 + ((w1.getDay() + 6) % 7)) / 7);
+  }
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   function clone(v) { return v === undefined ? v : JSON.parse(JSON.stringify(v)); }
   function num(v, dft) { var n = Number(v); return isFinite(n) ? n : dft; }
@@ -78,7 +91,7 @@ window.ZX = window.ZX || {};
 
   ZX.util = {
     $: $, $$: $$, esc: esc, pad2: pad2, hm: hm,
-    nowStr: nowStr, sleep: sleep, clone: clone, num: num,
+    nowStr: nowStr, tsHM: tsHM, isoWeek: isoWeek, sleep: sleep, clone: clone, num: num,
     prefs: prefs, applyPrefs: applyPrefs, togglePref: togglePref, setPref: setPref
   };
   ZX.$ = $;

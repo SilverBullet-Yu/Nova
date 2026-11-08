@@ -8,6 +8,20 @@ window.ZX = window.ZX || {};
 
   var U = ZX.util;
   var SUBJ = ZX.SUBJ;
+  var WD = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+  /* 头部日期取真实日期（MM.DD · 周X）；阶段周数无数据源，不再展示 */
+  function todayEyebrow() {
+    var d = new Date();
+    return U.pad2(d.getMonth() + 1) + '.' + U.pad2(d.getDate()) + ' · ' + WD[d.getDay()];
+  }
+
+  /* 今日弹性位分钟数：取周表中 today 行的 buf，与 buffer.time 同源 */
+  function todayBufMin() {
+    var S = ZX.state;
+    var w = S.week.filter(function (d) { return d.today; })[0] || S.week[S.week.length - 1] || {};
+    return U.num(w.buf, 0);
+  }
 
   /* Stage C-1：计划 / 已投入 / 达成率改为视图层口径（过滤 skipped），
      核心派生函数留在 state.js 不动；exec.js 未加载时退回原口径。 */
@@ -36,9 +50,9 @@ window.ZX = window.ZX || {};
     return '<div class="wrap">' +
       rescueBanner() +
       '<div class="vhead"><div>' +
-        '<div class="eyebrow">11.08 · 周日 · 第 3 周</div>' +
-        '<h1>今日<span class="sub">基础期 · 距阶段结束 5 周</span></h1>' +
-        '<p class="vlede">' + (todo.length ? '还剩 ' + todo.length + ' 项，' + U.hm(m.remain) + '。留一个弹性位，宁可不满，不可缓冲耗尽。' : (m.skipped ? '今日未完成项已跳过，不计入欠账，弹性位保留。' : '今日计划已全部记录，弹性位保留。')) + '</p>' +
+        '<div class="eyebrow">' + todayEyebrow() + '</div>' +
+        '<h1>今日<span class="sub">基础期</span></h1>' +
+        '<p class="vlede">' + (todo.length ? '还剩 ' + todo.length + ' 项，' + U.hm(Math.max(0, m.remain)) + '。留一个弹性位，宁可不满，不可缓冲耗尽。' : (m.skipped ? '今日未完成项已跳过，不计入欠账，弹性位保留。' : '今日计划已全部记录，弹性位保留。')) + '</p>' +
       '</div>' +
       '<div class="vstats">' +
         '<div class="vs"><span>计划</span><b>' + U.hm(m.planned) + '</b></div>' +
@@ -49,7 +63,7 @@ window.ZX = window.ZX || {};
       '</div></div>' +
 
       '<div class="sec-h"><span class="n">01</span><span class="t">今日任务</span><span class="rule"></span>' +
-        '<span class="r">上限 4 项 · 超出部分折叠为可选</span>' +
+        '<span class="r">共 ' + list.length + ' 项</span>' +
         '<button type="button" class="sc-link" data-sc="backfill">补录</button></div>' +
       '<div class="tasks">' + list.map(function (t, i) { return taskRow(t, i); }).join('') + bufferRow() + movedRow() + '</div>' +
       skippedBlock() +
@@ -89,10 +103,10 @@ window.ZX = window.ZX || {};
     return '<article class="task ' + (t.done ? 'done' : '') + ' ' + (running ? 'run' : '') + (paused ? ' sc-run-paused' : '') + '" data-task="' + t.id + '">' +
       '<div class="tk-idx">' + (t.done ? '✓' : U.pad2(i + 1)) + '</div>' +
       '<div class="tk-main">' +
-        '<div class="tk-line"><span class="subj" style="--c:' + c + '">' + t.s + '</span><h3>' + U.esc(t.title) + '</h3></div>' +
-        '<div class="tk-meta"><span class="mono">' + U.hm(t.est) + '</span><span class="sep">·</span><span>' + t.time + '</span>' +
+        '<div class="tk-line"><span class="subj" style="--c:' + c + '">' + U.esc(t.s) + '</span><h3>' + U.esc(t.title) + '</h3></div>' +
+        '<div class="tk-meta"><span class="mono">' + U.hm(t.est) + '</span><span class="sep">·</span><span>' + U.esc(t.time) + '</span>' +
           '<span class="sep">·</span><span>权重 ' + t.weight.toFixed(2) + '</span>' +
-          (t.why ? '<span class="sep">·</span><span class="why">' + t.why + '</span>' : '') +
+          (t.why ? '<span class="sep">·</span><span class="why">' + U.esc(t.why) + '</span>' : '') +
           (paused ? '<span class="sc-paused">已暂停</span>' : '') +
           (!t.done && t.partial ? '<span class="sc-part">已完成 ' + t.partial + '% · 余 ' + U.hm(t.est) + '</span>' : '') +
         '</div>' +
@@ -105,7 +119,8 @@ window.ZX = window.ZX || {};
     var S = ZX.state;
     return '<div class="buffer">' +
       '<div class="ico">◇</div>' +
-      '<div class="bf-main"><div class="bf-t"><b>弹性位</b><span>' + S.buffer.time + ' · 60 min</span></div>' +
+      '<div class="bf-main"><div class="bf-t"><b>弹性位</b><span>' + U.esc(S.buffer.time) +
+        (todayBufMin() ? ' · ' + U.hm(todayBufMin()) : '') + '</span></div>' +
         '<p>刻意留空，用于吸收欠账。每日保留约 15%，自动排程不得占满。</p></div>' +
       '<div class="tk-act"><button class="btn ghost" data-act="buffer">占用</button></div>' +
     '</div>';
@@ -156,27 +171,36 @@ window.ZX = window.ZX || {};
 
   function summaryBlock(m) {
     var S = ZX.state;
-    var over = S.tasks.some(function (t) { return t.done && (t.actual || t.est) > t.est; });
+    /* 超出预估最多的已完成任务：科目与超时分钟取自真实记录，不写死 */
+    var overTask = null;
+    S.tasks.forEach(function (t) {
+      if (!t.done) return;
+      var overMin = (t.actual || t.est) - t.est;
+      if (overMin > 0 && (!overTask || overMin > (overTask.actual || overTask.est) - overTask.est)) overTask = t;
+    });
+    var bufMin = todayBufMin();
     return '<div class="note">' +
       '<div class="note-h">今日总结<span>' + U.nowStr() + '</span></div>' +
       '<p>已完成 <b>' + m.done + ' / ' + m.total + '</b> 项，累计 <b>' + U.hm(m.worked) + '</b>，达成率 <b>' + m.rate + '%</b>。' +
       (m.skipped ? '跳过 ' + m.skipped + ' 项不计入欠账。' : '') +
       (m.backfill ? '补录 ' + U.hm(m.backfill) + ' 不计入达成率。' : '') +
-      (over ? '数学超出预估 40 分钟，超出部分已顺延至周六弹性位。' : '剩余任务已顺延至本周弹性位，未占用明天。') +
-      ' 今日留白 60 分钟。</p></div>';
+      (overTask ? U.esc(overTask.s) + '超出预估 ' + U.hm((overTask.actual || overTask.est) - overTask.est) + '，超出部分已顺延至本周弹性位。' : '剩余任务已顺延至本周弹性位，未占用明天。') +
+      (bufMin ? ' 今日留白 ' + U.hm(bufMin) + '。' : '') + '</p></div>';
   }
 
   function signalsBlock() {
+    /* 弹性位占用取自真实状态；其余三行为静态演示口径（无对应数据源），meta 已注明 */
+    var bufUsed = (ZX.state.buffer && ZX.state.buffer.free === false) ? 1 : 0;
     var body = '<div class="sig">' +
         '<div class="sig-h">当前命中项<span>insight v1.4</span></div>' +
         '<div class="sig-row"><span class="k">连续低完成</span><span class="m">近 2 日 58% / 62% · 阈值 60%</span><span class="x warn">命中</span></div>' +
         '<div class="sig-row"><span class="k">滚动欠账</span><span class="m">未来 7 天欠账 150 min · 阈值 150</span><span class="x warn">临界</span></div>' +
-        '<div class="sig-row"><span class="k">弹性位占用</span><span class="m">0 / 1 · 上限 50%</span><span class="x ok">正常</span></div>' +
+        '<div class="sig-row"><span class="k">弹性位占用</span><span class="m">' + bufUsed + ' / 1 · 上限 50%</span><span class="x ' + (bufUsed ? 'warn">已占用' : 'ok">正常') + '</span></div>' +
         '<div class="sig-row"><span class="k">锁定块变更</span><span class="m">0 项 · 重排保护生效</span><span class="x ok">正常</span></div>' +
       '</div>';
     return ZX.ui.fold('today:signals', {
       title: '偏差信号',
-      meta: '4 项检测 · 每 10 分钟扫描',
+      meta: '4 项检测 · 部分为静态演示',
       body: body
     });
   }

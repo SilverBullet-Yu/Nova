@@ -181,16 +181,48 @@ window.ZX = window.ZX || {};
     '</section>';
   }
 
-  /** 轻提示 */
+  /** 轻提示（role=status 供读屏播报；多条同现时向上错开，避免完全重叠） */
   function toast(text, kind) {
-    var t = node('<div class="toast ' + (kind || '') + '">' + U.esc(text) + '</div>');
+    var prev = document.querySelectorAll('.toast:not(.out)').length;
+    var t = node('<div class="toast ' + (kind || '') + '" role="status">' + U.esc(text) + '</div>');
+    if (prev) t.style.marginBottom = (prev * 46) + 'px';
     document.body.appendChild(t);
     setTimeout(function () { t.classList.add('out'); }, 2200);
     setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 2600);
   }
 
+  /**
+   * 数字滚动：把元素上的数值平滑补间到新值
+   * 首次调用（无 dataset.num）直接落值，不产生无意义动画；
+   * 动效关闭或数值非法时同同步落值。fmt 负责拼单位（如 'R ' + v.toFixed(2)）。
+   */
+  function countTo(el, to, fmt, dur) {
+    if (!el) return;
+    var f = typeof fmt === 'function' ? fmt : function (v) { return String(Math.round(v)); };
+    var end = Number(to);
+    if (!isFinite(end)) return;
+    var from = Number(el.dataset.num);
+    if (!isFinite(from)) from = end;
+    var done = function () { el.textContent = f(end); el.dataset.num = String(end); };
+    if (from === end || !U.prefs().motion || typeof requestAnimationFrame !== 'function') { done(); return; }
+    var token = (el._ct || 0) + 1;
+    el._ct = token;
+    var t0 = 0;
+    var D = dur || 420;
+    function frame(now) {
+      if (el._ct !== token) return;
+      if (!t0) t0 = now;
+      var t = Math.min(1, (now - t0) / D);
+      var e = 1 - Math.pow(1 - t, 3);
+      el.textContent = f(from + (end - from) * e);
+      if (t < 1) requestAnimationFrame(frame);
+      else done();
+    }
+    requestAnimationFrame(frame);
+  }
+
   ZX.ui = {
     sheet: sheet, confirm: confirm, toast: toast, close: close,
-    fold: fold, loadFolds: loadFolds, saveFolds: saveFolds
+    fold: fold, loadFolds: loadFolds, saveFolds: saveFolds, countTo: countTo
   };
 })(window.ZX);

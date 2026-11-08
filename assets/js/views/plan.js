@@ -16,8 +16,8 @@ window.ZX = window.ZX || {};
     var vc = f.verdict === '充裕' || f.verdict === '合理' ? '' : 'warn';
     return '<div class="wrap">' +
       '<div class="vhead"><div>' +
-        '<div class="eyebrow">GOAL · ' + S.goal.deadline + '</div>' +
-        '<h1>' + S.goal.name + '<span class="sub">目标 ' + S.goal.target + '</span></h1>' +
+        '<div class="eyebrow">GOAL · ' + U.esc(S.goal.deadline) + '</div>' +
+        '<h1>' + U.esc(S.goal.name) + '<span class="sub">目标 ' + U.esc(S.goal.target) + '</span></h1>' +
         '<p class="vlede">可行性评估只在目标、可用时段或模板变更时重算，不在每次打开时施压。</p>' +
         '<div class="sa-goal-act"><button type="button" class="btn sa-goal-new" data-goal-new>新建目标</button>' +
           '<button type="button" class="btn sc2-replan" data-replan-run>重新安排</button>' +
@@ -29,11 +29,11 @@ window.ZX = window.ZX || {};
       '</div></div>' +
 
       '<div class="sec-h"><span class="n">01</span><span class="t">可行性 R</span><span class="rule"></span>' +
-        '<span class="r">T / D · 折扣系数 0.85</span></div>' +
+        '<span class="r">T / D · 折扣系数 ' + S.feas.discount + '</span></div>' +
       '<div class="feas">' +
         '<div class="feas-l">' +
           '<div class="r-big"><b>' + f.R.toFixed(2) + '</b><span class="v ' + vc + '">' + f.verdict + '</span></div>' +
-          '<div class="formula">T = <b>' + S.feas.weeklyH + ' h/周 × ' + S.feas.weeks + ' 周 × 0.85</b> = ' + f.T + ' h　｜　D = Σ 节点标准工时 × 基础系数 = ' + f.D + ' h</div>' +
+          '<div class="formula">T = <b>' + S.feas.weeklyH + ' h/周 × ' + S.feas.weeks + ' 周 × ' + S.feas.discount + '</b> = ' + f.T + ' h　｜　D = Σ 节点标准工时 × 基础系数 = ' + f.D + ' h</div>' +
           '<div class="meter"><div class="meter-track">' +
             '<div class="zone z1" style="width:43.75%"></div><div class="zone z2" style="width:12.5%"></div>' +
             '<div class="zone z3" style="width:18.75%"></div><div class="zone z4" style="width:25%"></div>' +
@@ -61,7 +61,7 @@ window.ZX = window.ZX || {};
           '<div class="sec-h"><span class="n">04</span><span class="t">计划项</span><span class="rule"></span><span class="r">plan_item.status 状态机</span></div>' +
           planItems()
       }) +
-      '<div class="foot-note"><span>日程已排定</span><span>68ms</span><span>弹性位 1/1 保留</span></div>' +
+      '<div class="foot-note"><span>日程已排定</span><span>本机计算</span><span>弹性位保留</span></div>' +
     '</div>';
   }
 
@@ -164,7 +164,7 @@ window.ZX = window.ZX || {};
       '<div class="week">' + data.map(function (d) {
         return '<div class="wk ' + (d.today ? 'on' : '') + '">' +
           '<div class="wk-stack">' +
-            d.segs.map(function (s) { return '<i style="height:' + (s[1] / max * H) + 'px;background:' + SUBJ[s[0]].c + '"></i>'; }).join('') +
+            d.segs.map(function (s) { return '<i style="height:' + (s[1] / max * H) + 'px;background:' + (SUBJ[s[0]] || { c: 'var(--txt3)' }).c + '"></i>'; }).join('') +
             '<i class="buf" style="height:' + (d.buf / max * H) + 'px"></i>' +
           '</div>' +
           '<div class="wk-lab">' + d.d + '</div>' +

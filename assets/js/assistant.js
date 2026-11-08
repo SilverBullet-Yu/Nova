@@ -20,8 +20,11 @@ window.ZX = window.ZX || {};
       '<div class="meta"><b>' + label + '</b><span class="t">' + U.nowStr() + '</span>' +
       (eng ? '<span class="eng">' + eng + '</span>' : '') + '</div>' +
       '<div class="txt">' + html + '</div>';
-    chatEl().appendChild(el);
-    chatEl().scrollTop = chatEl().scrollHeight;
+    var box = chatEl();
+    /* 对话日志上限：超出后丢弃最早节点，避免长会话 DOM 无限增长 */
+    while (box.children.length >= 120) box.removeChild(box.firstChild);
+    box.appendChild(el);
+    box.scrollTop = box.scrollHeight;
     return el;
   }
 
@@ -30,9 +33,11 @@ window.ZX = window.ZX || {};
 
   function typing() {
     var el = document.createElement('div');
-    el.className = 'msg a';
-    el.innerHTML = '<div class="meta"><b>小序</b><span class="t">' + U.nowStr() + '</span></div>' +
-      '<div class="txt" style="color:var(--txt3)"><span class="mono">···</span></div>';
+    el.className = 'msg a typing';
+    el.setAttribute('aria-hidden', 'true');
+    el.innerHTML = '<div class="meta"><b>小序</b><span class="t">' + U.nowStr() + '</span>' +
+      '<span class="eng">处理中</span></div>' +
+      '<div class="txt"><span class="typing-dots" role="status" aria-label="正在输入"><i></i><i></i><i></i></span></div>';
     chatEl().appendChild(el);
     chatEl().scrollTop = chatEl().scrollHeight;
     return el;
@@ -180,8 +185,10 @@ window.ZX = window.ZX || {};
      由结果层过滤命中锁定项的 diff，并记录「N 个锁定块未参与」。 */
   function replanFlow() {
     var S = ZX.state;
-    if (S.replanned) {
-      say('<p>这周已经重排过一次（11:04）。规则：同类触发 24 小时内去重，避免把重排本身变成新的干扰。</p>' +
+    /* 去重按快照时间真实计算 24h 窗口；无时间戳或已过期则允许再次重排 */
+    var lastTs = (S.replanned && S.snapshot) ? U.num(S.snapshot.timestamp, 0) : 0;
+    if (S.replanned && lastTs && (Date.now() - lastTs) < 24 * 60 * 60 * 1000) {
+      say('<p>这周已经重排过一次（' + (U.tsHM(lastTs) || '刚刚') + '）。规则：同类触发 24 小时内去重，避免把重排本身变成新的干扰。</p>' +
           '<p>如需回到重排前的状态，说「撤销」即可，基于快照反向应用，不需要重算。</p>', 'replan · dedup 24h');
       return;
     }
@@ -244,13 +251,13 @@ window.ZX = window.ZX || {};
       await U.sleep(300); step(0, S.tasks.filter(function (t) { return !t.done; }).length + ' 项 · ' + U.hm(S.remainMin()));
       await U.sleep(320); step(1, '计划过载 40%');
       await U.sleep(340);
-      step(2, undoCount + ' 项 → 弹性位 / 周六');
+      step(2, undoCount + ' 项 → 弹性位');
       await U.sleep(320);
       /* L1 校验：增幅由引擎给出，超限即回退 */
       if (l1Growth !== null && !sL1.applied) step(3, '+' + l1Growth + '% ✕ 超 20%', true);
       else step(3, '+' + (l1Growth === null ? '0' : l1Growth) + '% ✓');
       await U.sleep(340);
-      step(4, sL2 && sL2.applied ? '+' + (l2Growth === null ? pct(loadDelta) : l2Growth) + '% ✓' : '未通过');
+      step(4, sL2 ? (sL2.applied ? '+' + (l2Growth === null ? pct(loadDelta) : l2Growth) + '% ✓' : '未通过') : '未评估（L1 已生效）');
 
       S.replanned = true;
       /* 快照：契约形状 { tasks, week, timestamp }，撤销时反向应用、不重算 */
@@ -296,9 +303,10 @@ window.ZX = window.ZX || {};
       }).join('');
 
       var guardNote = [];
-      guardNote.push('L1 顺延后负载 +' + (l1Growth === null ? pct(loadDelta) : l1Growth) + '%，超过单次上限 20%，已回退该级');
+      if (sL1 && sL1.applied) guardNote.push('L1 顺延后负载 +' + (l1Growth === null ? pct(loadDelta) : l1Growth) + '%，未超单次上限 20%，直接生效');
+      else guardNote.push('L1 顺延后负载 +' + (l1Growth === null ? pct(loadDelta) : l1Growth) + '%，超过单次上限 20%，已回退该级');
       if (sL2 && sL2.applied) guardNote.push('L2 压缩低权重项后复核通过（+' + (l2Growth === null ? pct(loadDelta) : l2Growth) + '%），因此未进入替代与放弃');
-      else guardNote.push('L2 压缩后复核未通过，已进入后续级别');
+      else if (sL2) guardNote.push('L2 压缩后复核未通过，已进入后续级别');
 
       say('<div class="ecard">' +
         '<div class="ecard-h"><b>重排完成</b><span class="tag ' + tagCls + '">' + tagText + '</span></div>' +
@@ -335,6 +343,7 @@ window.ZX = window.ZX || {};
       return;
     }
     var snap = S.snapshot;
+    var snapTs = U.num(snap.timestamp, 0);
     var tasks = Array.isArray(snap.tasks) ? U.clone(snap.tasks) : [];
 
     /* 立即本地反向应用：与重排前逐条一致，不重算 */
@@ -342,7 +351,7 @@ window.ZX = window.ZX || {};
     S.snapshot = null;
     S.replanned = false;
     ZX.render();
-    say('<p>已撤销。计划恢复到 <span class="mono">11:04</span> 的快照，未重算，逐条一致。</p>' +
+    say('<p>已撤销。计划恢复到 <span class="mono">' + (U.tsHM(snapTs) || '此前') + '</span> 的快照，未重算，逐条一致。</p>' +
         '<p style="color:var(--txt3);font-size:11px">重排记录保留在 replan_record，不会因为撤销而丢失。</p>', 'replan · undo');
     ZX.setTab('plan');
 
@@ -370,7 +379,7 @@ window.ZX = window.ZX || {};
         '<div class="erow"><span class="k">缓冲</span><span class="why">真实可损耗余量</span><span class="v">' + Math.max(0, f.T - f.D) + ' h</span></div>' +
       '</div></div>' +
       '<p style="margin-top:10px">' + (f.R >= 1.2 ? '充裕。可以增加拓展内容或提高目标，但不强制。' :
-        f.R >= 0.9 ? '合理。可以进入拆解。<b>1.08 意味着没有多余缓冲</b>：每周少 3 小时就会掉到偏紧。' :
+        f.R >= 0.9 ? '合理。可以进入拆解。<b>' + f.R.toFixed(2) + ' 意味着没有多余缓冲</b>：每周少 3 小时就会掉到偏紧。' :
         '偏紧。需要先提高周投入、延长周期或缩小范围，否则拆解会大面积裁剪。') + '</p>', 'feasibility · 11ms');
     ZX.setTab('plan');
     setTimeout(function () {
@@ -411,7 +420,7 @@ window.ZX = window.ZX || {};
 
   /* ---------- flow：周报 ---------- */
   function weeklyFlow() {
-    say('<p>第 45 周周报已生成。按「结论 / 依据 / 已执行的动作」三段式，最后一条不是建议，是已经排进下周的 block。</p>', 'insight · 41ms');
+    say('<p>第 ' + U.isoWeek() + ' 周周报已生成。按「结论 / 依据 / 已执行的动作」三段式，最后一条不是建议，是已经排进下周的 block。</p>', 'insight · weekly');
     ZX.setTab('data');
     return U.sleep(120);
   }

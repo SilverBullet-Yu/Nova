@@ -16,13 +16,13 @@ window.ZX = window.ZX || {};
   ];
 
   var BT_META = {
-    today: '本机优先 · 已读取 8ms',
-    plan: '日程已排定 · 68ms',
-    data: '本周回顾 · 41ms',
+    today: '本机优先 · 本地计算',
+    plan: '日程已排定 · 本地计算',
+    data: '本周回顾 · 本机计算',
     me: '你的节奏 · 可用时段'
   };
 
-  var CHIPS = ['今天怎么安排', '这周太乱，帮我重排', '我的计划可行吗', '生成周报', '今天有点累'];
+  var CHIPS = ['今天怎么安排', '这周太乱，帮我重排', '我断了四天', '我的计划可行吗', '生成周报', '今天有点累'];
 
   function tabLabel(id) {
     for (var i = 0; i < TABS.length; i++) if (TABS[i].id === id) return TABS[i].label;
@@ -99,12 +99,23 @@ window.ZX = window.ZX || {};
 
   ZX.render = function () {
     var S = ZX.state;
-    var f = S.feasibility();
-    U.$('#ctxR').textContent = 'R ' + f.R.toFixed(2);
-    U.$('#btTitle').innerHTML = '<b>' + tabLabel(S.tab) + '</b>';
-    U.$('#btMeta').textContent = BT_META[S.tab];
-    U.$('#view').innerHTML = ZX.views[S.tab]();
-    if (S.running) ZX.assistant.tickTimer();
+    try {
+      var f = S.feasibility();
+      var rEl = U.$('#ctxR');
+      if (rEl) ZX.ui.countTo(rEl, f.R, function (v) { return 'R ' + v.toFixed(2); });
+      U.$('#btTitle').innerHTML = '<b>' + tabLabel(S.tab) + '</b>';
+      U.$('#btMeta').textContent = BT_META[S.tab];
+      U.$('#view').innerHTML = ZX.views[S.tab]();
+      var gEl = U.$('#ctxGoal');
+      if (gEl) gEl.textContent = S.goal.name;
+      if (S.running) ZX.assistant.tickTimer();
+    } catch (e) {
+      /* 单个视图异常不拖垮全局：记录错误并给出可恢复的占位 */
+      if (window.console && console.error) console.error('[zx] render failed:', e);
+      U.$('#view').innerHTML = '<div class="wrap"><div class="banner">' +
+        '<div class="bt">这个视图渲染出错了</div>' +
+        '<div class="bs">其他功能不受影响；可切换页签或刷新恢复。</div></div></div>';
+    }
   };
 
   ZX.setTab = function (id) {
@@ -178,7 +189,11 @@ window.ZX = window.ZX || {};
       closeCopilot();
       return;
     }
-    if (e.key === '/' && document.activeElement !== U.$('#input')) {
+    /* 「/」聚焦输入框：仅在未处于任何输入态、且无弹层时生效，避免劫持表单焦点 */
+    var ae = document.activeElement;
+    var typing = !!ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' ||
+      ae.tagName === 'SELECT' || ae.isContentEditable);
+    if (e.key === '/' && !typing && !document.querySelector('.ovl')) {
       e.preventDefault();
       U.$('#input').focus();
     }
@@ -225,6 +240,28 @@ window.ZX = window.ZX || {};
   }
 
   /* ---------- 启动 ---------- */
+  /* 开场问候：时段、姓名、已记录项、剩余量与权重最高项全部取自当前 state，不写死 */
+  function greetingHtml() {
+    var S = ZX.state;
+    var h = new Date().getHours();
+    var greet = h < 11 ? '上午好' : h < 18 ? '下午好' : '晚上好';
+    var done = S.tasks.filter(function (t) { return t.done; });
+    var todo = S.tasks.filter(function (t) { return !t.done && !t.skipped; });
+    var p1 = greet + '，' + U.esc(S.user.name) + '。';
+    if (done.length) {
+      p1 += U.esc(done[0].s) + '「' + U.esc(done[0].title) + '」已记录 <b>' + U.hm(done[0].actual || done[0].est) + '</b>。';
+    }
+    p1 += '今天还剩 <b>' + todo.length + '</b> 项、<b>' + U.hm(S.remainMin()) + '</b>' +
+      (S.buffer && S.buffer.time ? '，' + U.esc(S.buffer.time) + ' 留了一个弹性位' : '') + '。';
+    var heavy = null;
+    todo.forEach(function (t) { if (!heavy || U.num(t.weight, 0) > U.num(heavy.weight, 0)) heavy = t; });
+    var p2 = heavy
+      ? U.esc(heavy.s) + '是今天权重最高的一项（' + U.num(heavy.weight, 0).toFixed(2) + '）' +
+        (heavy.time ? '，' + U.esc(heavy.time.split('–')[0]) + ' 开始' : '') + '。'
+      : '';
+    return '<p>' + p1 + '</p><p>' + p2 + '要先开始，还是先说这周的情况？</p>';
+  }
+
   function boot() {
     ZX.util.applyPrefs();
     ZX.state.folds = ZX.ui.loadFolds();
@@ -238,8 +275,7 @@ window.ZX = window.ZX || {};
     ZX.renderRail();
     ZX.render();
 
-    ZX.assistant.say('<p>上午好，林清。英语精读已经记录，<b>60 分钟</b>。今天还剩 3 项、<b>3 小时 30 分</b>，20:30 留了一个弹性位。</p>' +
-      '<p>数学极限题是今天权重最高的一项（0.92），10:30 是你的高效时段。要先开始，还是先说这周的情况？</p>', '日程 · 68ms');
+    ZX.assistant.say(greetingHtml(), '日程 · 本地');
 
     setTimeout(function () {
       ZX.assistant.say('<p style="color:var(--txt3);font-size:11px">提示：右侧工作台会跟随对话变化。点下方快捷语句，或直接输入「重排」「周报」「撤销」「数学多给两小时」。</p>', '');

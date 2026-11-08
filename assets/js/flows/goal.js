@@ -576,6 +576,8 @@ window.ZX = window.ZX || {};
     /* 新目标生效后，旧计时与旧重排快照都失去对应任务，一并作废 */
     S.running = null;
     S.timerStart = null;
+    S.pausedAt = null;
+    S.pausedTotal = 0;
     S.replanned = false;
     S.snapshot = null;
     S.replanRecord = null;
