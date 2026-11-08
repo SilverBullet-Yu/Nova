@@ -23,7 +23,22 @@ npm test         # 运行引擎单测 + HTTP 冒烟
 
 浏览器访问 `http://127.0.0.1:8787/` 走同源 API；直接双击 `index.html` 走 `file://` 本地引擎兜底。
 
-**环境要求**：Node.js 22+（用到内置 `node:sqlite` 之前的版本也兼容——本项目仅用 `node:http`/`node:fs` 等稳定 API）。**零第三方依赖**。
+**环境要求**：Node.js 22+，**零第三方依赖**（仅用 `node:http` / `node:fs` / `node:url` 等稳定 API）。
+
+### 云端部署适配
+
+服务已按部署环境的单端口反代契约改造，可直接部署：
+
+| 项 | 约定 | 实现 |
+|---|---|---|
+| 端口 | 必须读 `PORT` 环境变量 | `server/main.js` 已支持，缺省 8787 |
+| 绑定地址 | 必须绑 `0.0.0.0` | 默认 `0.0.0.0`；本地收紧用 `HOST=127.0.0.1` |
+| 前端 API 基址 | 须随部署域名变化 | `assets/js/api.js` 中 http/https 一律取同源 `origin` |
+| CORS | 须放行同源 | `server/main.js` 中 `Origin.host === req.headers.host` 即放行 |
+
+```bash
+PORT=8080 HOST=0.0.0.0 node server/main.js   # 模拟部署环境启动
+```
 
 ---
 
