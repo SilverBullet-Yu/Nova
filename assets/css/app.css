@@ -220,7 +220,13 @@ button{font-family:inherit;color:inherit}
   border-radius:var(--r);padding:1px 6px;background:rgba(255,255,255,.03);
 }
 
-.shell{flex:1;display:grid;grid-template-columns:436px minmax(0,1fr);min-height:0}
+.shell{flex:1;display:grid;grid-template-columns:minmax(0,1fr);min-height:0}
+
+/* 对话是主页面（默认页签）：copilot 与 bench 互斥显示，由 html[data-tab] 驱动。
+   聊天 DOM 持久（不走 ZX.views 重绘），切页不丢消息历史。 */
+.copilot{display:none}
+html[data-tab="chat"] .copilot{display:flex}
+html[data-tab="chat"] .bench{display:none}
 
 /* ---------- 顶栏导航 ---------- */
 .tnav{display:flex;align-items:stretch;height:56px;margin-left:12px;flex:0 0 auto}
@@ -247,19 +253,14 @@ button{font-family:inherit;color:inherit}
 /* ---------- copilot：主入口层 ---------- */
 /* 对话区是产品第一入口：比工作台亮一档，右缘一条活性光带把它「托」起来 */
 .copilot{
-  position:relative;border-right:1px solid var(--cp-line);
+  position:relative;border-right:0;
   background:
     radial-gradient(560px 280px at 16% -10%,var(--ac-a08),transparent 64%),
     linear-gradient(180deg,var(--cp-bg),var(--cp-bg2));
-  display:flex;flex-direction:column;min-height:0;
-  box-shadow:inset -1px 0 0 var(--ac-a05),18px 0 46px -34px rgba(0,0,0,.95);
+  flex-direction:column;min-height:0;
   isolation:isolate;
 }
-.copilot::after{
-  content:"";position:absolute;top:0;bottom:0;right:-1px;width:1px;pointer-events:none;
-  background:linear-gradient(180deg,transparent,var(--ac-a60) 14%,var(--ac-a12) 56%,transparent);
-  opacity:calc(.9 * var(--glow-opacity));
-}
+.copilot::after{content:none}   /* 曾是侧栏右缘光带；对话升为主页面后随 border-right 一并退役 */
 .cp-head{height:62px;flex:0 0 62px;display:flex;align-items:center;gap:11px;padding:0 18px;border-bottom:1px solid var(--line);position:relative}
 .cp-head::after{content:"";position:absolute;left:18px;right:18px;bottom:-1px;height:1px;background:linear-gradient(90deg,var(--ac2),transparent 62%);opacity:.7}
 /* 助理头像：单字「序」，比声波图形更贴合「一个人替你记事」的设定 */
@@ -288,6 +289,8 @@ button{font-family:inherit;color:inherit}
 .cp-body::-webkit-scrollbar{width:6px}
 .cp-body::-webkit-scrollbar-thumb{background:rgba(228,216,200,.16);border-radius:0}
 .msg{margin-bottom:24px;animation:msgIn .42s var(--ease) both}
+/* 对话升为全宽主页面：限制消息行宽，保证可读性（长句不横贯整屏） */
+.cp-body .msg{max-width:820px}
 @keyframes msgIn{from{opacity:0;transform:translateY(10px) scale(.995);filter:blur(3px)}to{opacity:1;transform:none;filter:none}}
 .meta{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:11px;color:var(--txt3)}
 .meta b{font-weight:600;color:var(--txt2);font-size:11.5px;letter-spacing:.08em}
@@ -757,7 +760,6 @@ svg.ch{display:block;width:100%;height:auto}
    860 的规则仍按阶段分散在 7 个同名媒体块（grep "860 移动块" 可索引全部）；
    物理合并需移动规则、有层叠顺序风险，暂维持分块。小屏微调另有 640 三块。 */
 @media (max-width:1080px){
-  .shell{grid-template-columns:360px minmax(0,1fr)}
   .ctx-bench{display:none}
   .vstats{display:none}
   .feas{grid-template-columns:1fr}
@@ -1390,14 +1392,12 @@ html[data-font="l"]{--fs-body:16px;--lh-body:1.6}
 /* 移动端外壳：底部导航与对话入口（桌面隐藏） */
 .sd-mnav{display:none}
 .cp-open{display:none}
-.cp-close{display:none}
 
 /* 860 移动块 5/7 · 主块：单列外壳 / 顶栏 / 任务卡 / 触控目标（Stage D 主体） */
 @media (max-width:860px){
   /* 单列：只保留工作台 */
   .shell{grid-template-columns:minmax(0,1fr)}
   .tnav{display:none}
-  .copilot{display:none}
 
   /* 顶栏精简 */
   .topbar{height:52px;flex:0 0 52px;padding:0 14px;gap:12px}
@@ -1440,7 +1440,7 @@ html[data-font="l"]{--fs-body:16px;--lh-body:1.6}
 
   /* 底部导航：1px 发丝线 + 活性色指示条，不做胶囊 */
   .sd-mnav{
-    display:grid;grid-template-columns:repeat(4,minmax(0,1fr));
+    display:grid;grid-template-columns:repeat(5,minmax(0,1fr));
     position:fixed;left:0;right:0;bottom:0;z-index:40;
     height:calc(56px + env(safe-area-inset-bottom));
     padding-bottom:env(safe-area-inset-bottom);
@@ -1469,21 +1469,7 @@ html[data-font="l"]{--fs-body:16px;--lh-body:1.6}
     background:var(--ac);box-shadow:0 0 10px var(--acglow);
   }
 
-  /* 对话全屏覆盖层 */
-  html.sd-cp-open{overflow:hidden}
-  html.sd-cp-open .copilot{
-    display:flex;position:fixed;inset:0;z-index:50;border-right:0;
-    background:linear-gradient(180deg,var(--cp-bg),var(--cp-bg2));
-    animation:sdCpIn .2s var(--ease) both;
-  }
   .cp-head{flex:0 0 56px;height:56px;padding:0 14px}
-  .cp-close{
-    display:grid;place-items:center;flex:0 0 28px;width:28px;height:28px;
-    margin-left:4px;padding:0;border:1px solid var(--line2);border-radius:var(--r);
-    background:none;color:var(--txt3);font-size:15px;line-height:1;cursor:pointer;
-    transition:color var(--dur) var(--ease),border-color var(--dur) var(--ease),background var(--dur) var(--ease);
-  }
-  .cp-close:hover{color:var(--ac);border-color:var(--ac2);background:var(--acbg)}
   .cp-body{padding:16px 14px 8px}
   .cp-foot{padding:10px 12px calc(10px + env(safe-area-inset-bottom))}
   .cp-note{display:none}
@@ -1493,10 +1479,7 @@ html[data-font="l"]{--fs-body:16px;--lh-body:1.6}
   .btn{min-height:44px}
   .composer{height:54px}
   .send{flex:0 0 40px;width:40px;height:40px}
-  .cp-close{flex:0 0 44px;width:44px;height:44px}
 }
-
-@keyframes sdCpIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 
 /* 移动端顶栏的对话入口：不遮挡任务操作区 */
 /* 860 移动块 6/7 · 顶栏「序」入口 / 输入 16px / stage·item 收列 / 小交互件放大 */

@@ -9,6 +9,7 @@ window.ZX = window.ZX || {};
   var U = ZX.util;
 
   var TABS = [
+    { id: 'chat',  label: '对话', icon: '<path d="M2.6 3.4h10.8a1 1 0 0 1 1 1v5.6a1 1 0 0 1-1 1H7.6L4.8 13.4v-2.4H3.6a1 1 0 0 1-1-1V4.4a1 1 0 0 1 1-1z"/><path d="M5.4 7.4h5.2"/><path d="M5.4 5.4h3.4"/>' },
     { id: 'today', label: '今日', icon: '<path d="M1.9 12.4h12.2"/><path d="M4.1 12.4a3.9 3.9 0 0 1 7.8 0"/><path d="M8 2.3v2.1"/><path d="M3.3 4.9l1.5 1.5"/><path d="M12.7 4.9l-1.5 1.5"/>' },
     { id: 'plan',  label: '计划', icon: '<rect x="2.3" y="3.4" width="11.4" height="10.1" rx="1.3"/><path d="M2.3 6.6h11.4"/><path d="M5.7 2.2v2.4"/><path d="M10.3 2.2v2.4"/><circle cx="8" cy="9.9" r="1"/>' },
     { id: 'data',  label: '数据', icon: '<path d="M1.8 8.6h2.5l1.4-4.2 2.2 7.2 1.7-4.4 1.1 1.4h2.5"/>' },
@@ -16,6 +17,7 @@ window.ZX = window.ZX || {};
   ];
 
   var BT_META = {
+    chat: '与小序对话 · 自然语言驱动',
     today: '本机优先 · 本地计算',
     plan: '日程已排定 · 本地计算',
     data: '本周回顾 · 本机计算',
@@ -79,31 +81,18 @@ window.ZX = window.ZX || {};
     }).join('');
   }
 
-  /* 移动端对话覆盖层：打开锁滚动，关闭恢复；桌面端不生效（CSS 只在 ≤860 启用） */
-  function openCopilot() {
-    document.documentElement.classList.add('sd-cp-open');
-    var body = U.$('#chat');
-    if (body) body.scrollTop = body.scrollHeight;
-    var input = U.$('#input');
-    if (input) { try { input.focus(); } catch (e) { /* 忽略 */ } }
-  }
-
-  function closeCopilot() {
-    if (!document.documentElement.classList.contains('sd-cp-open')) return;
-    document.documentElement.classList.remove('sd-cp-open');
-    var opener = U.$('.cp-open');
-    if (opener) { try { opener.focus(); } catch (e) { /* 忽略 */ } }
-  }
-
+  /* 对话是主页面签：顶栏「序」入口与底部导航都只是切到该页，无覆盖层状态。
+     聊天 DOM 持久（消息历史在 #chat 内），不参与 #view 重绘。 */
   ZX.render = function () {
     var S = ZX.state;
+    document.documentElement.dataset.tab = S.tab;
     try {
       var f = S.feasibility();
       var rEl = U.$('#ctxR');
       if (rEl) ZX.ui.countTo(rEl, f.R, function (v) { return 'R ' + v.toFixed(2); });
       U.$('#btTitle').innerHTML = '<b>' + tabLabel(S.tab) + '</b>';
-      U.$('#btMeta').textContent = BT_META[S.tab];
-      U.$('#view').innerHTML = ZX.views[S.tab]();
+      U.$('#btMeta').textContent = BT_META[S.tab] || '';
+      if (S.tab !== 'chat') U.$('#view').innerHTML = ZX.views[S.tab]();
       var gEl = U.$('#ctxGoal');
       if (gEl) gEl.textContent = S.goal.name;
       if (S.running) ZX.assistant.tickTimer();
@@ -120,7 +109,14 @@ window.ZX = window.ZX || {};
     ZX.state.tab = id;
     ZX.renderRail();
     ZX.render();
-    U.$('#view').scrollTop = 0;
+    if (id === 'chat') {
+      var body = U.$('#chat');
+      if (body) body.scrollTop = body.scrollHeight;
+      var input = U.$('#input');
+      if (input) { try { input.focus(); } catch (e) { /* 忽略 */ } }
+    } else {
+      U.$('#view').scrollTop = 0;
+    }
   };
 
   /* ---------- 事件 ---------- */
@@ -165,8 +161,7 @@ window.ZX = window.ZX || {};
     if (act === 'wipe') { ZX.flows.settings.confirmWipe(); return; }
     if (act === 'trash-restore') { ZX.flows.settings.restore(); return; }
     if (act === 'font') { ZX.flows.settings.setFont(b.dataset.v); return; }
-    if (act === 'cp-open') { openCopilot(); return; }
-    if (act === 'cp-close') { closeCopilot(); return; }
+    if (act === 'cp-open') { ZX.setTab('chat'); return; }
   });
 
   U.$('#form').addEventListener('submit', async function (e) {
@@ -182,24 +177,15 @@ window.ZX = window.ZX || {};
   });
 
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && !document.querySelector('.ovl') &&
-        document.documentElement.classList.contains('sd-cp-open')) {
-      closeCopilot();
-      return;
-    }
-    /* 「/」聚焦输入框：仅在未处于任何输入态、且无弹层时生效，避免劫持表单焦点 */
+    /* 「/」进入对话页并聚焦输入框：仅在未处于任何输入态、且无弹层时生效 */
     var ae = document.activeElement;
     var typing = !!ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' ||
       ae.tagName === 'SELECT' || ae.isContentEditable);
     if (e.key === '/' && !typing && !document.querySelector('.ovl')) {
       e.preventDefault();
-      U.$('#input').focus();
+      if (ZX.state.tab !== 'chat') ZX.setTab('chat');
+      else { var input = U.$('#input'); if (input) { try { input.focus(); } catch (err) { /* 忽略 */ } } }
     }
-  });
-
-  /* 视口放大到桌面宽度时收起覆盖层，避免状态残留 */
-  window.addEventListener('resize', function () {
-    if (window.innerWidth > 860) closeCopilot();
   });
 
   document.addEventListener('click', function (e) {
@@ -276,7 +262,7 @@ window.ZX = window.ZX || {};
     ZX.assistant.say(greetingHtml(), '日程 · 本地');
 
     setTimeout(function () {
-      ZX.assistant.say('<p style="color:var(--txt3);font-size:11px">提示：右侧工作台会跟随对话变化。点下方快捷语句，或直接输入「重排」「周报」「撤销」「数学多给两小时」。</p>', '');
+      ZX.assistant.say('<p style="color:var(--txt3);font-size:11px">提示：说一句话，小序会驱动顶栏的「今日 / 计划 / 数据」工作台。点下方快捷语句，或直接输入「重排」「周报」「撤销」「数学多给两小时」。</p>', '');
     }, 520);
 
     setInterval(function () { if (ZX.state.running) ZX.assistant.tickTimer(); }, 1000);

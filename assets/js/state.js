@@ -180,7 +180,7 @@ window.ZX = window.ZX || {};
   })();
 
   var state = {
-    tab: 'today',
+    tab: 'chat',   /* 对话是主页面（默认页签）；今日 / 计划 / 数据 / 我的 为菜单子页 */
     user: seed.user,
     goal: seed.goal,
     feas: seed.feas,
