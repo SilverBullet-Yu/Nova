@@ -26,7 +26,6 @@ window.ZX = window.ZX || {};
       '<div class="vhead"><div>' +
         '<div class="eyebrow">ABOUT · ' + U.esc(S.user.name) + '</div>' +
         '<h1>我的<span class="sub">可用时段与通知策略</span></h1>' +
-        '<p class="vlede">可用时段是排程的输入，不是结果。修改后 24 小时内自动重算拆解并提示影响范围。</p>' +
       '</div><div class="vstats">' +
         '<div class="vs"><span>周可用</span><b>' + S.user.weeklyH + ' h</b></div>' +
         '<div class="vs"><span>每日上限</span><b>' + S.user.dailyCapMin + ' min</b></div>' +
@@ -59,8 +58,7 @@ window.ZX = window.ZX || {};
           '<button class="btn" data-act="avail-bulk" data-kind="clear">全部清空</button>' +
           '<button class="btn" data-act="avail-bulk" data-kind="reset">恢复默认</button>' +
         '</div>' +
-        '<p class="sd-avail-note">可用窗口是能排程的时间带，实际投入仍以每周可用小时 ' + S.user.weeklyH +
-          ' h 为准。22:00–08:00 为夜间静默，不可开启。</p>' +
+        '<p class="sd-avail-note">22:00–08:00 为夜间静默，不可开启。</p>' +
       '</div></div>' +
 
       '<div class="sec-h"><span class="n">02</span><span class="t">通知策略</span><span class="rule"></span><span class="r">分级可关</span></div>' +
@@ -103,7 +101,6 @@ window.ZX = window.ZX || {};
           prefRow('界面动效', '入场级联 · 图表绘制 · 进度增长', 'motion') +
           '<p class="pref-note">偏好写入浏览器本地（localStorage），仅影响本机视觉；系统开启「减少动态效果」时动效始终关闭。</p>'
       }) +
-      '<div class="foot-note"><span>identity</span><span>tz ' + S.user.tz + '</span><span>软删 7 天可撤回</span></div>' +
     '</div>';
   }
 

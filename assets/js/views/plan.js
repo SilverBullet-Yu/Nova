@@ -18,14 +18,12 @@ window.ZX = window.ZX || {};
       '<div class="vhead"><div>' +
         '<div class="eyebrow">GOAL · ' + U.esc(S.goal.deadline) + '</div>' +
         '<h1>' + U.esc(S.goal.name) + '<span class="sub">目标 ' + U.esc(S.goal.target) + '</span></h1>' +
-        '<p class="vlede">可行性评估只在目标、可用时段或模板变更时重算，不在每次打开时施压。</p>' +
         '<div class="sa-goal-act"><button type="button" class="btn sa-goal-new" data-goal-new>新建目标</button>' +
           '<button type="button" class="btn sc2-replan" data-replan-run>重新安排</button>' +
           '</div>' +
       '</div><div class="vstats">' +
         '<div class="vs"><span>剩余</span><b>' + S.goal.weeks + ' 周</b></div>' +
         '<div class="vs"><span>阶段</span><b>基础期</b></div>' +
-        '<div class="vs"><span>单 active 目标</span><b>1</b></div>' +
       '</div></div>' +
 
       '<div class="sec-h"><span class="n">01</span><span class="t">可行性 R</span><span class="rule"></span>' +
@@ -52,16 +50,6 @@ window.ZX = window.ZX || {};
       '<div class="sec-h"><span class="n">02</span><span class="t">未来 7 天负载</span><span class="rule"></span>' +
         '<span class="r">' + replanLabel() + '</span></div>' +
       weekChart() +
-      ZX.ui.fold('plan:detail', {
-        title: '阶段与计划项',
-        meta: '3 阶段 · ' + S.tasks.length + ' 项任务 · 展开查看',
-        body:
-          '<div class="sec-h"><span class="n">03</span><span class="t">阶段结构</span><span class="rule"></span><span class="r">配比 45 / 35 / 20</span></div>' +
-          stageRows() +
-          '<div class="sec-h"><span class="n">04</span><span class="t">计划项</span><span class="rule"></span><span class="r">plan_item.status 状态机</span></div>' +
-          planItems()
-      }) +
-      '<div class="foot-note"><span>日程已排定</span><span>本机计算</span><span>弹性位保留</span></div>' +
     '</div>';
   }
 
@@ -73,21 +61,6 @@ window.ZX = window.ZX || {};
     if (!rec || typeof rec.loadDelta !== 'number') return '已重排';
     var pct = (Math.round(rec.loadDelta * 1000) / 10) + '%';
     return '已重排 · 增幅 +' + pct;
-  }
-
-  function stageRows() {    var rows = [
-      { n: '基础期', w: '第 1–26 周', p: 62, on: true },
-      { n: '强化期', w: '第 27–46 周', p: 0, on: false },
-      { n: '冲刺期', w: '第 47–58 周', p: 0, on: false }
-    ];
-    return rows.map(function (r) {
-      return '<div class="stage ' + (r.on ? 'on' : '') + '">' +
-        '<div class="nm"><i></i><span>' + r.n + '</span></div>' +
-        '<div class="bar"><i style="width:' + r.p + '%"></i></div>' +
-        '<div class="wk-range">' + r.w + '</div>' +
-        '<div class="pct">' + r.p + '%</div>' +
-      '</div>';
-    }).join('');
   }
 
   /* 周图数据源：
@@ -180,43 +153,6 @@ window.ZX = window.ZX || {};
       chartNote() +
     '</div>';
   }
-
-  function planItems() {
-    var S = ZX.state;
-    /* 被压缩的计划项，工时取引擎 diff 的实际压缩值（不硬编码 45→30）；
-       已被逐条否决的压缩不计入（工时已从快照恢复） */
-    var P = ZX.flows && ZX.flows.planedit;
-    var vetoed = (P && P.vetoedSubjects) ? P.vetoedSubjects() : {};
-    var polEst = 45;
-    var rec = S.replanRecord;
-    if (rec && Array.isArray(rec.diff)) {
-      rec.diff.forEach(function (d) {
-        if (d.op === 'compress' && d.subject === '政治' && !vetoed['政治']) {
-          var n = parseInt(d.to, 10);
-          if (!isNaN(n)) polEst = n;
-        }
-      });
-    }
-    var polSt = S.replanned ? (vetoed['政治'] ? ['已否决', 'deg'] : ['降级 压缩', 'deg']) : ['已排程', 'sch'];
-    var items = [
-      { id: 'p_1042', n: '高数 · 极限与连续', s: '数学', est: 90, st: ['已排程', 'sch'] },
-      { id: 'p_1043', n: '阅读真题 2019 · 精读', s: '英语', est: 60, st: ['已完成', 'done'] },
-      { id: 'p_1044', n: '树与二叉树 · 应用', s: '408', est: 75, st: ['已排程', 'sch'] },
-      { id: 'p_1045', n: '马原 第 2 章 · 多选', s: '政治', est: polEst, st: polSt },
-      { id: 'p_1046', n: '线性表 · 选择题 30', s: '408', est: 40, st: ['计划中', ''] },
-      { id: 'p_1047', n: '长难句 · 定语从句', s: '英语', est: 35, st: ['计划中', ''] }
-    ];
-    return '<div class="items">' + items.map(function (i) {
-      return '<div class="item">' +
-        '<span class="id">' + i.id + '</span>' +
-        '<span class="nm">' + i.n + '</span>' +
-        '<span class="sub">' + i.s + '</span>' +
-        '<span class="sub mono">' + U.hm(i.est) + '</span>' +
-        '<span class="st ' + i.st[1] + '">' + i.st[0] + '</span>' +
-      '</div>';
-    }).join('') + '</div>';
-  }
-
   ZX.views = ZX.views || {};
   ZX.views.plan = plan;
 

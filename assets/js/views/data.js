@@ -49,7 +49,6 @@ window.ZX = window.ZX || {};
       '<div class="vhead"><div>' +
         '<div class="eyebrow">WEEK ' + U.isoWeek() + ' · ' + weekRange() + '</div>' +
         '<h1>数据<span class="sub">周报与归因</span></h1>' +
-        '<p class="vlede">北极星：人均有效学习周数。达成率 ≥ 70% 且有效学习 ≥ 目标 60% 才计为一周。</p>' +
       '</div></div>' +
 
       '<div class="sec-h"><span class="n">01</span><span class="t">本周概览</span><span class="rule"></span></div>' +
@@ -73,7 +72,6 @@ window.ZX = window.ZX || {};
           '<div class="sec-h"><span class="n">04</span><span class="t">结构与归因</span><span class="rule"></span></div>' +
           '<div class="grid2">' + subjectBars() + attribution() + '</div>'
       }) +
-      '<div class="foot-note"><span>回顾 · 本机计算</span><span>数值取自 weekStats</span><span>建议必须落成具体安排</span></div>' +
     '</div>';
   }
 
@@ -128,7 +126,6 @@ window.ZX = window.ZX || {};
               '<span class="p">' + U.num(mix[n], 0) + '%</span></div>';
           }).join('') + '</div>'
         : '<div class="empty">暂无科目数据</div>') +
-      '<p style="margin:12px 0 0;font-size:10px;color:var(--txt3);line-height:1.55">政治连续 3 周低于 10%，已被归因引擎标记为结构性缺口。</p>' +
     '</div></div>';
   }
 
@@ -143,7 +140,6 @@ window.ZX = window.ZX || {};
               '<div class="t"><i style="width:' + U.num(attr[n], 0) + '%;background:' + meta[0] + '"></i></div><p>' + meta[1] + '</p></div>';
           }).join('') + '</div>'
         : '<div class="empty">暂无归因数据</div>') +
-      '<p style="margin:11px 0 0;font-size:10px;color:var(--txt3);line-height:1.55">固定判定顺序：先排除计划问题，再归因用户侧。把「过载」误判为「执行力不足」，系统就会加压。</p>' +
     '</div></div>';
   }
 
