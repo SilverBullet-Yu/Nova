@@ -15,7 +15,7 @@ window.ZX = window.ZX || {};
   function pushMsg(who, html, eng) {
     var el = document.createElement('div');
     el.className = 'msg ' + who;
-    var label = who === 'a' ? '节律' : '你';
+    var label = who === 'a' ? '小序' : '你';
     el.innerHTML =
       '<div class="meta"><b>' + label + '</b><span class="t">' + U.nowStr() + '</span>' +
       (eng ? '<span class="eng">' + eng + '</span>' : '') + '</div>' +
@@ -31,7 +31,7 @@ window.ZX = window.ZX || {};
   function typing() {
     var el = document.createElement('div');
     el.className = 'msg a';
-    el.innerHTML = '<div class="meta"><b>节律</b><span class="t">' + U.nowStr() + '</span></div>' +
+    el.innerHTML = '<div class="meta"><b>小序</b><span class="t">' + U.nowStr() + '</span></div>' +
       '<div class="txt" style="color:var(--txt3)"><span class="mono">···</span></div>';
     chatEl().appendChild(el);
     chatEl().scrollTop = chatEl().scrollHeight;
@@ -39,22 +39,37 @@ window.ZX = window.ZX || {};
   }
 
   /* ---------- 执行动作 ---------- */
+  /* 计时口径（Stage C-1）：扣掉累计暂停与本次暂停，暂停时返回冻结值 */
+  function elapsedMs() {
+    var S = ZX.state;
+    if (!S.timerStart) return 0;
+    var now = Date.now();
+    var total = U.num(S.pausedTotal, 0);
+    var cur = S.pausedAt ? (now - S.pausedAt) : 0;
+    return Math.max(0, now - S.timerStart - total - cur);
+  }
+
   function startTask(id) {
     var S = ZX.state;
+    var t = S.tasks.filter(function (x) { return x.id === id; })[0];
+    var restored = !!(t && t.skipped);
+    if (restored) { t.skipped = false; t.skipReason = null; }
     S.running = id;
     S.timerStart = Date.now();
+    S.pausedAt = null;
+    S.pausedTotal = 0;
     ZX.render();
-    var t = S.tasks.filter(function (x) { return x.id === id; })[0];
     if (!t) return;
-    say('<p>计时已开始：<b>' + U.esc(t.title) + '</b>。目标 ' + U.hm(t.est) + '，结束时会记录实际时长与完成度。</p>' +
-        '<p style="color:var(--txt3);font-size:11px">演示环境可直接点「按预估记录」完成，不必真等 ' + U.hm(t.est) + '。</p>', 'session · running');
+    say('<p>计时已开始：<b>' + U.esc(t.title) + '</b>。目标 ' + U.hm(t.est) + '，结束时会记录实际时长与完成度。' +
+        (restored ? '　该项此前在「已跳过」里，已恢复。' : '') + '</p>' +
+        '<p style="color:var(--txt3);font-size:11px">演示环境可直接点「按预估记录」完成，不必真等 ' + U.hm(t.est) + '；中途离开可以暂停，暂停不计入时长。</p>', 'session · running');
   }
 
   function tickTimer() {
     var S = ZX.state;
     var el = document.getElementById('timer');
     if (!el || !S.timerStart) return;
-    var sec = Math.floor((Date.now() - S.timerStart) / 1000);
+    var sec = Math.floor(elapsedMs() / 1000);
     el.textContent = U.pad2(Math.floor(sec / 60)) + ':' + U.pad2(sec % 60);
   }
 
@@ -62,32 +77,38 @@ window.ZX = window.ZX || {};
     var S = ZX.state;
     var t = S.tasks.filter(function (x) { return x.id === id; })[0];
     if (!t) return;
-    var mins = t.est;
-    if (S.running === id && !useEst) {
-      mins = Math.max(1, Math.round((Date.now() - S.timerStart) / 60000));
+    var exec = ZX.flows && ZX.flows.exec;
+
+    /* 结束（有计时）→ 记录弹层：完成度 / 状态；按预估记录 → 直接 100% */
+    if (!useEst && S.running === id) {
+      if (exec && exec.openRecord) { exec.openRecord(id); return; }
     }
+
+    var mins = t.est;
+    var startAt = null;
+    if (S.running === id && !useEst) {
+      mins = exec && exec.elapsedMin ? exec.elapsedMin() : Math.max(1, Math.floor(elapsedMs() / 60000));
+      startAt = S.timerStart;
+    }
+
+    if (exec && exec.commitRecord) {
+      exec.commitRecord(id, mins, 100, '', startAt || (Date.now() - mins * 60000), Date.now());
+      return;
+    }
+
+    /* 兜底：flows/exec.js 未加载时保持既有行为 */
     t.done = true;
     t.actual = mins;
     S.running = null;
     S.timerStart = null;
-
-    /* 写操作先入 op 队列（离线亦可记录，联网后清 pending） */
-    var op = ZX.api.queueOp({
+    ZX.render();
+    ZX.api.queueOp({
       entity: 'task', entityId: t.id, field: 'done',
       value: { done: true, actual: mins, est: t.est }
     });
-    try {
-      ZX.api.postSession({
-        opId: op.opId, taskId: t.id, durationMin: mins, completion: 1
-      }).catch(function () { /* 离线：留在 op 队列等待上行 */ });
-    } catch (e) { /* 忽略 */ }
-
-    ZX.render();
     var left = S.tasks.filter(function (x) { return !x.done; }).length;
-    var msg = left
-      ? '已记录：' + U.esc(t.title) + '，' + U.hm(mins) + '。今日达成率 <b class="ac">' + S.rate() + '%</b>，还剩 ' + left + ' 项。'
-      : '今天 ' + S.tasks.length + ' 项全部记录，累计 <b class="ac">' + U.hm(S.workedMin()) + '</b>。弹性位留空 60 分钟，明天 19:00 从 408 图论开始。';
-    say('<p>' + msg + '</p>' + (left ? '' : '<p style="color:var(--txt3);font-size:11px">没有追加任务。按计划结束，比多学 20 分钟更重要。</p>'), 'execution · 12ms');
+    say('<p>已记录：' + U.esc(t.title) + '，' + U.hm(mins) + '。今日达成率 <b class="ac">' + S.rate() + '%</b>' +
+      (left ? '，还剩 ' + left + ' 项。' : '。') + '</p>', 'execution · 12ms');
   }
 
   function bufferWarn() {
@@ -97,6 +118,8 @@ window.ZX = window.ZX || {};
 
   /* ---------- 意图路由 ---------- */
   var INTENTS = [
+    { k: ['我断了四天', '断了', '中断', '挽救', '没打开'], run: rescueFlow },
+    { k: ['新建目标', '定目标', '改目标'], run: goalFlow },
     { k: ['撤销', '恢复', '撤回'], run: undoReplan },
     { k: ['数学', '多给', '加时间', '延长一点'], run: adjustMath },
     { k: ['重排', '落下', '落后', '来不及', '崩'], run: replanFlow },
@@ -121,9 +144,40 @@ window.ZX = window.ZX || {};
     else fallback();
   }
 
+  /* ---------- flow：新建目标（Stage A · 目标落地） ---------- */
+  function goalFlow() {
+    if (!ZX.flows || !ZX.flows.goal) {
+      say('<p>目标流程还没加载完成，刷新页面后再试一次。</p>', 'goal · pending');
+      return;
+    }
+    say('<p>目标分四步落地：设定 → 可行性 → 拆解 → 生效。R 低于 0.70 时会先给三条校准路径，不直接砍计划。</p>',
+      'goal · flow');
+    ZX.flows.goal.open();
+  }
+
+  /* ---------- flow：中断挽救（Stage B · F-7.1 F-7.2 F-7.3） ----------
+     演示入口：真实环境由执行记录（连续无记录天数）调用 ZX.flows.rescue.detect()。
+     这里写入演示天数后走同一套判定与弹层，口径与产品一致。 */
+  function rescueFlow() {
+    if (!ZX.flows || !ZX.flows.rescue) {
+      say('<p>挽救流程还没加载完成，刷新页面后再试一次。</p>', 'rescue · pending');
+      return;
+    }
+    var R = ZX.flows.rescue;
+    ZX.state.consecutiveZeroDays = R.DEMO_ZERO_DAYS;
+    R.detect();
+    var m = R.metrics();
+    say('<p>连续 ' + R.DEMO_ZERO_DAYS + ' 天没有记录。计划还在：这周还剩 ' + m.days + ' 天，缺口 ' +
+      U.hm(m.gap) + '。下一步给三种接法，选一个就行，不需要补记录。</p>', 'rescue · detect');
+    ZX.setTab('today');
+    R.open();
+  }
+
   /* ---------- flow：重排（L1 回退 L2） ----------
      C2 要求：卡片上的每一个数值都必须来自引擎返回值，不得硬编码。
-     因此先 await 引擎结果，再据此渲染步骤动画与 diff 明细。 */
+     因此先 await 引擎结果，再据此渲染步骤动画与 diff 明细。
+     Stage C-2：锁定项随输入下行（locked 字段）；引擎不识别锁定，
+     由结果层过滤命中锁定项的 diff，并记录「N 个锁定块未参与」。 */
   function replanFlow() {
     var S = ZX.state;
     if (S.replanned) {
@@ -132,8 +186,12 @@ window.ZX = window.ZX || {};
       return;
     }
 
+    var locks = (S.locks && typeof S.locks === 'object') ? S.locks : {};
+    var input = S.replanInput();
+    input.tasks.forEach(function (t) { t.locked = !!locks[t.id]; });
+
     /* 计算走统一入口：后端优先，失败自动降级本地引擎 */
-    ZX.engine.replan(S.replanInput()).then(function (res) {
+    ZX.engine.replan(input).then(function (res) {
       S.replanRecord = res;
       renderReplanResult(res);
     }, function () { /* engine 内部已降级，不会走到这里 */ });
@@ -143,7 +201,13 @@ window.ZX = window.ZX || {};
   function renderReplanResult(res) {
     var S = ZX.state;
     var strategies = (res && Array.isArray(res.strategies)) ? res.strategies : [];
-    var diff = (res && Array.isArray(res.diff)) ? res.diff : [];
+    var rawDiff = (res && Array.isArray(res.diff)) ? res.diff : [];
+    /* Stage C-2：锁定块不参与本轮变更 —— 从结果层过滤，并在卡片注明数量 */
+    var locks = (S.locks && typeof S.locks === 'object') ? S.locks : {};
+    var lockIds = {};
+    rawDiff.forEach(function (d) { if (locks[d.taskId]) lockIds[d.taskId] = true; });
+    var lockCount = Object.keys(lockIds).length;
+    var diff = rawDiff.filter(function (d) { return !locks[d.taskId]; });
     var loadDelta = res && typeof res.loadDelta === 'number' ? res.loadDelta : 0;
     var guards = (res && res.guards) ? res.guards : {};
 
@@ -195,10 +259,11 @@ window.ZX = window.ZX || {};
         week: U.clone(S.week),
         timestamp: Date.now()
       };
-      /* 压缩项按引擎 diff 落到本地任务上（仅压缩类改工时；顺延不改本地任务） */
+      /* 压缩项按引擎 diff 落到本地任务上（仅压缩类改工时；顺延不改本地任务）；
+         锁定项即使被引擎命中也不落盘，工时保持不变 */
       S.tasks = S.tasks.map(function (t) {
         var hit = compressed.find(function (d) { return d.taskId === t.id; });
-        if (hit && !t.done) {
+        if (hit && !t.done && !locks[t.id]) {
           return Object.assign({}, t, { est: parseInt(hit.to, 10) || t.est, compressed: true });
         }
         return t;
@@ -214,15 +279,20 @@ window.ZX = window.ZX || {};
         : '未通过校验';
       var tagCls = appliedLevel ? 'ac' : 'warn';
 
-      var diffHtml = diff.map(function (d) {
+      /* Stage C-2：顺延 / 压缩行右侧挂「否决」，逐条回滚；放弃行不提供（需整单确认） */
+      var diffHtml = diff.map(function (d, idx) {
         var cls = d.op === 'compress' ? 'cp' : 'mv';
         var label = d.op === 'compress' ? '压缩' : d.op === 'defer' ? '顺延' : d.op === 'abandon' ? '放弃' : d.op;
         var detail = d.op === 'compress'
           ? d.from + ' → ' + d.to + ' min · degraded'
           : (d.detail || (d.from + ' → ' + d.to));
-        return '<div class="diff-line"><span class="s ' + cls + '">' + label + '</span>' +
+        var veto = (d.op === 'compress' || d.op === 'defer')
+          ? '<button type="button" class="btn sc2-veto" data-veto="' + U.esc(d.taskId) + '" data-vop="' + d.op + '"' +
+            ' aria-label="否决：' + U.esc(label + ' ' + (d.subject || '')) + '">否决</button>'
+          : '';
+        return '<div class="diff-line sc2-diff" data-diff="' + idx + '"><span class="s ' + cls + '">' + label + '</span>' +
           '<span class="n">' + U.esc(d.subject || '') + '</span>' +
-          '<span class="d">' + U.esc(detail) + '</span></div>';
+          '<span class="d">' + U.esc(detail) + '</span>' + veto + '</div>';
       }).join('');
 
       var guardNote = [];
@@ -234,9 +304,10 @@ window.ZX = window.ZX || {};
         '<div class="ecard-h"><b>重排完成</b><span class="tag ' + tagCls + '">' + tagText + '</span></div>' +
         '<div class="ecard-b">' +
           '<div class="erow"><span class="k">变更</span><span class="why">延期 ' + deferred.length + ' · 压缩 ' + compressed.length + ' · 放弃 ' + abandoned.length + '</span><span class="v">未来 7 天 ' + (loadDelta >= 0 ? '+' : '') + pct(loadDelta) + '</span></div>' +
+          (lockCount ? '<div class="erow"><span class="k">锁定</span><span class="why">重排不会改动已锁定的块</span><span class="v ac">' + lockCount + ' 个锁定块未参与</span></div>' : '') +
           '<div class="erow"><span class="k">弹性位</span><span class="why">每日 60 min 未被清空</span><span class="v ac">' + (guards.bufferPreserved === false ? '已侵占' : '1 / 1 保留') + '</span></div>' +
           diffHtml +
-          '<div class="ecard-f"><span class="note">' + guardNote.join('；') + '。</span></div>' +
+          '<div class="ecard-f"><span class="note">' + guardNote.join('；') + '。' + (lockCount ? '锁定的 ' + lockCount + ' 块保持原工时与原落点。' : '') + '</span></div>' +
           '<div class="ecard-f"><button class="btn" data-act="undo">撤销本次重排</button><span class="note mono">snapshot 已留存</span></div>' +
         '</div></div>', 'replan · 412ms');
 
@@ -331,7 +402,7 @@ window.ZX = window.ZX || {};
         '<div class="erow"><span class="k">判定</span><span class="why">仍在合理区间，但缓冲从 73 h 降到 0</span><span class="v warn">' + f.verdict + '</span></div>' +
         '<div class="erow"><span class="k">影响</span><span class="why">阶段容量按 45/35/20 重新分配，政治基础期被压缩</span><span class="v">+7.4%</span></div>' +
       '</div></div>' +
-      '<p style="margin-top:10px">修改幅度 17%，未超过 30% 阈值，因此不阻断。计划草案已更新，可继续拖动调整。</p>', 'decompose · 15ms');
+      '<p style="margin-top:10px">修改幅度 17%，未超过 30% 阈值，因此不阻断。计划草案与阶段容量已同步更新。</p>', 'decompose · 15ms');
     ZX.setTab('plan');
     ZX.api.queueOp({
       entity: 'goal', entityId: (S.goal.id || 'g_2027'), field: 'feas.demand', value: S.feas.demand
@@ -443,8 +514,10 @@ window.ZX = window.ZX || {};
 
   ZX.assistant = {
     pushMsg: pushMsg, say: say, me: me, typing: typing,
-    startTask: startTask, tickTimer: tickTimer, finishTask: finishTask, bufferWarn: bufferWarn,
+    startTask: startTask, tickTimer: tickTimer, elapsedMs: elapsedMs, finishTask: finishTask, bufferWarn: bufferWarn,
     route: route, INTENTS: INTENTS,
+    goalFlow: goalFlow,
+    rescueFlow: rescueFlow,
     replanFlow: replanFlow, undoReplan: undoReplan, feasibilityFlow: feasibilityFlow,
     adjustMath: adjustMath, weeklyFlow: weeklyFlow, tiredFlow: tiredFlow,
     todayFlow: todayFlow, startFlow: startFlow, fallback: fallback,

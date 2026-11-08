@@ -1,69 +1,89 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-grid="on" data-glow="on" data-motion="on">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>诺瓦 Nova · 智能学习日程助理</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2308090B'/%3E%3Crect x='4' y='7' width='1.6' height='5' fill='%23D8F65C'/%3E%3Crect x='7.2' y='3' width='1.6' height='9' fill='%23D8F65C'/%3E%3Crect x='10.4' y='5.5' width='1.6' height='6.5' fill='%23D8F65C'/%3E%3C/svg%3E" />
+<meta name="theme-color" content="#07080A" />
+<meta name="color-scheme" content="dark" />
+<title>诺瓦 Nova · 学生日程助理</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2307080A'/%3E%3Cg fill='%23D8F65C'%3E%3Crect x='3.2' y='3.2' width='2.2' height='2.2'/%3E%3Crect x='6.9' y='6.9' width='2.2' height='2.2'/%3E%3Crect x='10.6' y='10.6' width='2.2' height='2.2'/%3E%3C/g%3E%3C/svg%3E" />
+<script>
+  /* 首帧前应用本地视觉偏好，避免主题闪烁（与 assets/js/util.js 共用同一存储键） */
+  (function () {
+    try {
+      var p = JSON.parse(localStorage.getItem('zx.ui_prefs') || '{}') || {};
+      var r = document.documentElement;
+      r.dataset.grid = p.grid === false ? 'off' : 'on';
+      r.dataset.glow = p.glow === false ? 'off' : 'on';
+      r.dataset.motion = p.motion === false ? 'off' : 'on';
+      r.dataset.font = (p.font === 'm' || p.font === 'l') ? p.font : '';
+    } catch (e) { /* 隐私模式禁用 localStorage 时保持默认 */ }
+  })();
+</script>
 <link rel="stylesheet" href="assets/css/app.css" />
 </head>
 <body>
 <div class="app">
   <header class="topbar">
     <div class="brand">
-      <div class="glyph"><i></i><i></i><i></i><i></i></div>
+      <div class="glyph" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
       <div>
         <div class="brand-cn">诺瓦 Nova</div>
-        <div class="brand-en">RHYTHM</div>
+        <div class="brand-en">学生日程助理</div>
       </div>
     </div>
-    <div class="ctx">
-      <span>目标 <b>2027 考研 · 计算机</b></span>
-      <span>基础期 · 第 3 周</span>
-      <span class="r" id="ctxR">R 1.08</span>
-    </div>
+    <nav class="tnav" id="rail" aria-label="主导航"></nav>
     <div class="spacer"></div>
-    <div class="sync" id="syncMain"><span class="dot" id="syncDot"></span><span id="syncText">本地优先 · 已同步</span> <span class="mono" id="syncSeq" style="color:var(--txt2)">seq 88123</span></div>
-    <div class="sync" id="syncPlanner" style="margin-left:6px"><span class="dot ac" id="plannerDot"></span><span id="plannerText">planner 在线</span></div>
+    <button class="cp-open" data-act="cp-open" type="button" aria-label="打开小序">序</button>
+    <div class="sync" id="syncMain"><span class="dot" id="syncDot"></span><span id="syncText">本地优先 · 已同步</span></div>
+    <div class="sync" id="syncPlanner" style="margin-left:6px"><span class="dot ac" id="plannerDot"></span><span id="plannerText">日程引擎 在线</span></div>
     <span class="kbd">/</span>
   </header>
 
   <div class="shell">
-    <nav class="rail" id="rail"></nav>
-
     <section class="copilot">
       <div class="cp-head">
-        <div class="wave"><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="avatar" aria-hidden="true">序</div>
         <div>
-          <div class="cp-title">节律</div>
-          <div class="cp-sub">ASSISTANT · 学习调度</div>
+          <div class="cp-title">小序</div>
+          <div class="cp-sub">STUDENT ASSISTANT</div>
         </div>
         <div class="spacer"></div>
-        <div class="cp-ver">v1.4</div>
+        <div class="cp-live"><span class="dot ac"></span>在线</div>
+        <button class="cp-close" data-act="cp-close" aria-label="关闭对话">×</button>
       </div>
       <div class="cp-body" id="chat"></div>
       <div class="cp-foot">
         <div class="chips" id="chips"></div>
         <form class="composer" id="form">
           <span class="caret">&gt;</span>
-          <input id="input" autocomplete="off" placeholder="说点什么，比如「这周落下了，帮我重排」" />
+          <input id="input" autocomplete="off" placeholder="说点什么，比如「这周太乱，帮我重排」" />
           <button class="send" type="submit" aria-label="发送">
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8h11M9 4l4 4-4 4"/></svg>
           </button>
         </form>
-        <div class="cp-note">规则引擎演示 · 意图为关键词匹配 · 核心计算确定性可复现</div>
+        <div class="cp-note">演示版 · 意图为关键词匹配 · 排程计算确定性可复现</div>
       </div>
     </section>
 
     <main class="bench">
       <div class="bench-head">
         <div class="bt" id="btTitle"><b>今日</b></div>
+        <div class="ctx ctx-bench">
+          <span>目标 <b>2027 考研 · 计算机</b></span>
+          <span>基础期 · 第 3 周</span>
+          <span class="r" id="ctxR">R 1.08</span>
+        </div>
         <div class="spacer"></div>
-        <div class="hm" id="btMeta">local-first · 读取本地库 8ms</div>
+        <div class="hm" id="btMeta">本机优先 · 已读取 8ms</div>
       </div>
       <div class="bench-body" id="view"></div>
     </main>
   </div>
+
+  <!-- 移动端（≤860px）：底部导航 + 对话浮动入口；桌面隐藏 -->
+  <nav class="sd-mnav" id="sdMnav" aria-label="主导航"></nav>
+  <button class="sd-fab" id="sdFab" data-act="cp-open" aria-label="打开对话" aria-expanded="false">序</button>
 </div>
 
 <!-- 共享双模模块（后端执行者维护，前端只读引用；缺失时自动降级到内置兜底） -->
@@ -75,6 +95,7 @@
 
 <!-- 前端脚本（经典 script，非 ESM：保证 file:// 双击直接打开） -->
 <script src="assets/js/util.js"></script>
+<script src="assets/js/ui.js"></script>
 <script src="assets/js/api.js"></script>
 <script src="assets/js/engine.js"></script>
 <script src="assets/js/state.js"></script>
@@ -83,6 +104,11 @@
 <script src="assets/js/views/data.js"></script>
 <script src="assets/js/views/me.js"></script>
 <script src="assets/js/assistant.js"></script>
+<script src="assets/js/flows/goal.js"></script>
+<script src="assets/js/flows/rescue.js"></script>
+<script src="assets/js/flows/exec.js"></script>
+<script src="assets/js/flows/planedit.js"></script>
+<script src="assets/js/flows/settings.js"></script>
 <script src="assets/js/main.js"></script>
 </body>
 </html>

@@ -30,17 +30,19 @@ window.ZX = window.ZX || {};
         '<div class="kpi"><span>记录天数</span><b>5<span class="u">/ 7</span></b><span class="d">无中断</span></div>' +
       '</div>' +
 
-      '<div class="sec-h"><span class="n">02</span><span class="t">达成率趋势</span><span class="rule"></span>' +
-        '<span class="r">8 周 · 虚线为 70% 目标</span></div>' +
-      lineChart() +
-
-      '<div class="sec-h"><span class="n">03</span><span class="t">结构与归因</span><span class="rule"></span></div>' +
-      '<div class="grid2">' + subjectBars() + attribution() + '</div>' +
-
-      '<div class="sec-h"><span class="n">04</span><span class="t">本周周报</span><span class="rule"></span>' +
+      '<div class="sec-h"><span class="n">02</span><span class="t">本周周报</span><span class="rule"></span>' +
         '<span class="r">结论 / 依据 / 已执行的动作</span></div>' +
       reportBlock() +
-      '<div class="foot-note"><span>insight v1.4</span><span>聚合 41ms</span><span>建议必须预置为具体 block</span></div>' +
+      ZX.ui.fold('data:trend', {
+        title: '趋势与归因',
+        meta: '8 周达成率 · 科目结构 · 3 类归因',
+        body:
+          '<div class="sec-h"><span class="n">03</span><span class="t">达成率趋势</span><span class="rule"></span><span class="r">8 周 · 虚线为 70% 目标</span></div>' +
+          lineChart() +
+          '<div class="sec-h"><span class="n">04</span><span class="t">结构与归因</span><span class="rule"></span></div>' +
+          '<div class="grid2">' + subjectBars() + attribution() + '</div>'
+      }) +
+      '<div class="foot-note"><span>回顾 · 41ms</span><span>本机计算</span><span>建议必须落成具体安排</span></div>' +
     '</div>';
   }
 
@@ -108,7 +110,7 @@ window.ZX = window.ZX || {};
       '<div class="rp-row"><div class="k">依据</div><div class="v">科目分布 数学 45% / 专业课 30% / 英语 20% / 政治 5%；归因 计划过载 40%、执行中断 35%、效率不足 25%。周三、周五各出现一次超时。</div></div>' +
       '<div class="rp-row"><div class="k">已执行</div><div class="v">下周计划已预置两处调整：周日上午 <b>08:00–10:00</b> 固定为政治时段；周三晚弹性位扩容 30 分钟。<b>不是建议，是已经排进日程的 block。</b></div></div>' +
       '<div class="preset"><span class="tx">预置：<b>周日 08:00–10:00 政治 · 马原第 3 章</b></span><span class="spacer"></span>' +
-        '<button class="btn ghost" data-act="preset">' + (S.presetActive ? '撤销预置' : '已撤销') + '</button></div>' +
+        '<button class="btn ghost" data-act="preset">' + (S.presetActive ? '撤销预置' : '恢复预置') + '</button></div>' +
     '</div>';
   }
 

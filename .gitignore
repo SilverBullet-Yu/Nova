@@ -17,6 +17,9 @@ tmp/
 .env.*
 !.env.example
 
+# 本地工具产物
+.playwright-cli/
+
 # 编辑器与系统
 .vscode/
 .idea/

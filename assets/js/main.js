@@ -9,20 +9,20 @@ window.ZX = window.ZX || {};
   var U = ZX.util;
 
   var TABS = [
-    { id: 'today', label: '今日', icon: '<path d="M2 9.5l4 4 8-9"/>' },
-    { id: 'plan',  label: '计划', icon: '<path d="M2.5 4.5h11M2.5 9h8M2.5 13.5h11"/>' },
-    { id: 'data',  label: '数据', icon: '<path d="M3 13V7M8 13V3M13 13v-4"/>' },
-    { id: 'me',    label: '我的', icon: '<circle cx="8" cy="5.5" r="2.6"/><path d="M2.8 13.6c.6-2.6 2.7-4 5.2-4s4.6 1.4 5.2 4"/>' }
+    { id: 'today', label: '今日', icon: '<path d="M1.9 12.4h12.2"/><path d="M4.1 12.4a3.9 3.9 0 0 1 7.8 0"/><path d="M8 2.3v2.1"/><path d="M3.3 4.9l1.5 1.5"/><path d="M12.7 4.9l-1.5 1.5"/>' },
+    { id: 'plan',  label: '计划', icon: '<rect x="2.3" y="3.4" width="11.4" height="10.1" rx="1.3"/><path d="M2.3 6.6h11.4"/><path d="M5.7 2.2v2.4"/><path d="M10.3 2.2v2.4"/><circle cx="8" cy="9.9" r="1"/>' },
+    { id: 'data',  label: '数据', icon: '<path d="M1.8 8.6h2.5l1.4-4.2 2.2 7.2 1.7-4.4 1.1 1.4h2.5"/>' },
+    { id: 'me',    label: '我的', icon: '<circle cx="8" cy="5.4" r="2.4"/><path d="M3.1 13.5c.5-2.4 2.5-3.8 4.9-3.8s4.4 1.4 4.9 3.8"/>' }
   ];
 
   var BT_META = {
-    today: 'local-first · 读取本地库 8ms',
-    plan: 'planner v1.4 · schedule 68ms',
-    data: 'insight · 聚合 41ms',
-    me: 'identity · 可用时段 7 日网格'
+    today: '本机优先 · 已读取 8ms',
+    plan: '日程已排定 · 68ms',
+    data: '本周回顾 · 41ms',
+    me: '你的节奏 · 可用时段'
   };
 
-  var CHIPS = ['今天学什么', '这周落下了，帮我重排', '我的计划可行吗', '生成周报', '我有点累'];
+  var CHIPS = ['今天怎么安排', '这周太乱，帮我重排', '我的计划可行吗', '生成周报', '今天有点累'];
 
   function tabLabel(id) {
     for (var i = 0; i < TABS.length; i++) if (TABS[i].id === id) return TABS[i].label;
@@ -33,7 +33,7 @@ window.ZX = window.ZX || {};
   function updateSync() {
     var online = ZX.api.isOnline();
     var pending = ZX.api.pendingCount();
-    var dot = U.$('#syncDot'), text = U.$('#syncText'), seq = U.$('#syncSeq');
+    var dot = U.$('#syncDot'), text = U.$('#syncText');
     if (dot && text) {
       if (online) {
         dot.className = 'dot';
@@ -45,12 +45,11 @@ window.ZX = window.ZX || {};
         dot.className = 'dot off';
         text.textContent = '离线 · 本地计算';
       }
-      if (seq) seq.textContent = 'seq ' + ZX.state.serverSeq;
     }
     var pDot = U.$('#plannerDot'), pText = U.$('#plannerText');
     if (pDot && pText) {
       pDot.className = online ? 'dot ac' : 'dot off';
-      pText.textContent = online ? 'planner 在线' : 'planner 本地';
+      pText.textContent = online ? '日程引擎 在线' : '日程引擎 离线';
     }
     var opEl = U.$('#opPending');
     if (opEl) opEl.textContent = pending;
@@ -60,11 +59,43 @@ window.ZX = window.ZX || {};
   ZX.renderRail = function () {
     U.$('#rail').innerHTML =
       TABS.map(function (t) {
-        return '<button data-act="tab" data-tab="' + t.id + '" class="' + (ZX.state.tab === t.id ? 'on' : '') + '">' +
+        var on = ZX.state.tab === t.id;
+        return '<button data-act="tab" data-tab="' + t.id + '" class="' + (on ? 'on' : '') + '"' +
+          (on ? ' aria-current="page"' : '') + '>' +
           '<svg viewBox="0 0 16 16">' + t.icon + '</svg><span>' + t.label + '</span></button>';
-      }).join('') +
-      '<div class="grow"></div><div class="foot">RHYTHM 1.4</div>';
+      }).join('');
+    renderMnav();
   };
+
+  /* 移动端底部导航：复用 TABS 图标与 data-act="tab" */
+  function renderMnav() {
+    var el = U.$('#sdMnav');
+    if (!el) return;
+    el.innerHTML = TABS.map(function (t) {
+      var on = ZX.state.tab === t.id;
+      return '<button data-act="tab" data-tab="' + t.id + '" class="' + (on ? 'on' : '') + '"' +
+        (on ? ' aria-current="page"' : '') + '>' +
+        '<svg viewBox="0 0 16 16" aria-hidden="true">' + t.icon + '</svg><span>' + t.label + '</span></button>';
+    }).join('');
+  }
+
+  /* 移动端对话覆盖层：打开锁滚动，关闭恢复；桌面端不生效（CSS 只在 ≤860 启用） */
+  function openCopilot() {
+    document.documentElement.classList.add('sd-cp-open');
+    var fab = U.$('#sdFab');
+    if (fab) fab.setAttribute('aria-expanded', 'true');
+    var body = U.$('#chat');
+    if (body) body.scrollTop = body.scrollHeight;
+    var input = U.$('#input');
+    if (input) { try { input.focus(); } catch (e) { /* 忽略 */ } }
+  }
+
+  function closeCopilot() {
+    if (!document.documentElement.classList.contains('sd-cp-open')) return;
+    document.documentElement.classList.remove('sd-cp-open');
+    var fab = U.$('#sdFab');
+    if (fab) { fab.setAttribute('aria-expanded', 'false'); try { fab.focus(); } catch (e) { /* 忽略 */ } }
+  }
 
   ZX.render = function () {
     var S = ZX.state;
@@ -91,6 +122,19 @@ window.ZX = window.ZX || {};
     var act = b.dataset.act;
 
     if (act === 'tab') { ZX.setTab(b.dataset.tab); return; }
+    if (act === 'fold') {
+      var box = b.closest ? b.closest('.fold') : null;
+      if (!box) return;
+      var open = !box.classList.contains('open');
+      box.classList.toggle('open', open);
+      b.setAttribute('aria-expanded', open ? 'true' : 'false');
+      var body = box.querySelector('.fold-b');
+      if (body) body.hidden = !open;
+      ZX.state.folds = ZX.state.folds || {};
+      ZX.state.folds[b.dataset.key] = open;
+      ZX.ui.saveFolds(ZX.state.folds);
+      return;
+    }
     if (act === 'start') { ZX.assistant.startTask(b.dataset.id); return; }
     if (act === 'finish') { ZX.assistant.finishTask(b.dataset.id, false); return; }
     if (act === 'done') { ZX.assistant.finishTask(b.dataset.id, true); return; }
@@ -99,7 +143,21 @@ window.ZX = window.ZX || {};
     if (act === 'tired') { ZX.assistant.adoptTired(); return; }
     if (act === 'preset') { ZX.assistant.togglePreset(); return; }
     if (act === 'tg') { ZX.assistant.toggleNotif(b.dataset.key); return; }
-    if (act === 'export') { ZX.assistant.exportPlan(); return; }
+    if (act === 'pref') { ZX.util.togglePref(b.dataset.key); ZX.render(); return; }
+
+    /* Stage D */
+    if (act === 'avail') { ZX.flows.settings.toggle(b.dataset.day, b.dataset.slot); return; }
+    if (act === 'avail-bulk') { ZX.flows.settings.bulk(b.dataset.kind); return; }
+    if (act === 'export') {
+      if (ZX.flows && ZX.flows.settings) ZX.flows.settings.exportCsv();
+      else ZX.assistant.exportPlan();
+      return;
+    }
+    if (act === 'wipe') { ZX.flows.settings.confirmWipe(); return; }
+    if (act === 'trash-restore') { ZX.flows.settings.restore(); return; }
+    if (act === 'font') { ZX.flows.settings.setFont(b.dataset.v); return; }
+    if (act === 'cp-open') { openCopilot(); return; }
+    if (act === 'cp-close') { closeCopilot(); return; }
   });
 
   U.$('#form').addEventListener('submit', async function (e) {
@@ -115,10 +173,20 @@ window.ZX = window.ZX || {};
   });
 
   document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !document.querySelector('.ovl') &&
+        document.documentElement.classList.contains('sd-cp-open')) {
+      closeCopilot();
+      return;
+    }
     if (e.key === '/' && document.activeElement !== U.$('#input')) {
       e.preventDefault();
       U.$('#input').focus();
     }
+  });
+
+  /* 视口放大到桌面宽度时收起覆盖层，避免状态残留 */
+  window.addEventListener('resize', function () {
+    if (window.innerWidth > 860) closeCopilot();
   });
 
   document.addEventListener('click', function (e) {
@@ -158,6 +226,9 @@ window.ZX = window.ZX || {};
 
   /* ---------- 启动 ---------- */
   function boot() {
+    ZX.util.applyPrefs();
+    ZX.state.folds = ZX.ui.loadFolds();
+    if (ZX.flows && ZX.flows.settings) ZX.flows.settings.init();
     ZX.api.onStatus(updateSync);
 
     U.$('#chips').innerHTML = CHIPS.map(function (c) {
@@ -168,7 +239,7 @@ window.ZX = window.ZX || {};
     ZX.render();
 
     ZX.assistant.say('<p>上午好，林清。英语精读已经记录，<b>60 分钟</b>。今天还剩 3 项、<b>3 小时 30 分</b>，20:30 留了一个弹性位。</p>' +
-      '<p>数学极限题是今天权重最高的一项（0.92），10:30 是你的高效时段。要先开始，还是先说这周的情况？</p>', 'schedule · 68ms');
+      '<p>数学极限题是今天权重最高的一项（0.92），10:30 是你的高效时段。要先开始，还是先说这周的情况？</p>', '日程 · 68ms');
 
     setTimeout(function () {
       ZX.assistant.say('<p style="color:var(--txt3);font-size:11px">提示：右侧工作台会跟随对话变化。点下方快捷语句，或直接输入「重排」「周报」「撤销」「数学多给两小时」。</p>', '');

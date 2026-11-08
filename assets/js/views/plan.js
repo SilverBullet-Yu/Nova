@@ -19,6 +19,9 @@ window.ZX = window.ZX || {};
         '<div class="eyebrow">GOAL · ' + S.goal.deadline + '</div>' +
         '<h1>' + S.goal.name + '<span class="sub">目标 ' + S.goal.target + '</span></h1>' +
         '<p class="vlede">可行性评估只在目标、可用时段或模板变更时重算，不在每次打开时施压。</p>' +
+        '<div class="sa-goal-act"><button type="button" class="btn sa-goal-new" data-goal-new>新建目标</button>' +
+          '<button type="button" class="btn sc2-replan" data-replan-run>重新安排</button>' +
+          '</div>' +
       '</div><div class="vstats">' +
         '<div class="vs"><span>剩余</span><b>' + S.goal.weeks + ' 周</b></div>' +
         '<div class="vs"><span>阶段</span><b>基础期</b></div>' +
@@ -45,18 +48,20 @@ window.ZX = window.ZX || {};
         '</div>' +
       '</div>' +
 
-      '<div class="sec-h"><span class="n">02</span><span class="t">阶段结构</span><span class="rule"></span>' +
-        '<span class="r">配比 45 / 35 / 20</span></div>' +
-      stageRows() +
-
-      '<div class="sec-h"><span class="n">03</span><span class="t">未来 7 天负载</span><span class="rule"></span>' +
+      boardHtml() +
+      '<div class="sec-h"><span class="n">02</span><span class="t">未来 7 天负载</span><span class="rule"></span>' +
         '<span class="r">' + replanLabel() + '</span></div>' +
       weekChart() +
-
-      '<div class="sec-h"><span class="n">04</span><span class="t">计划项</span><span class="rule"></span>' +
-        '<span class="r">plan_item.status 状态机</span></div>' +
-      planItems() +
-      '<div class="foot-note"><span>planner v1.4</span><span>schedule 68ms</span><span>弹性位 1/1 保留</span></div>' +
+      ZX.ui.fold('plan:detail', {
+        title: '阶段与计划项',
+        meta: '3 阶段 · ' + S.tasks.length + ' 项任务 · 展开查看',
+        body:
+          '<div class="sec-h"><span class="n">03</span><span class="t">阶段结构</span><span class="rule"></span><span class="r">配比 45 / 35 / 20</span></div>' +
+          stageRows() +
+          '<div class="sec-h"><span class="n">04</span><span class="t">计划项</span><span class="rule"></span><span class="r">plan_item.status 状态机</span></div>' +
+          planItems()
+      }) +
+      '<div class="foot-note"><span>日程已排定</span><span>68ms</span><span>弹性位 1/1 保留</span></div>' +
     '</div>';
   }
 
@@ -88,8 +93,9 @@ window.ZX = window.ZX || {};
   /* 周图数据源：
      基线 = seed.week；重排后 = 引擎 nextWeek 的真实每日负载（口径与「增幅」标签一致）。
      引擎 nextWeek 只给每日总分钟数（无科目分段），故分段色块按 weekShift 的科目占比
-     等比缩放到该日真实负载，保证「柱高 = 真实负载」「配色 = 科目构成」同时成立。 */
-  function weekChartData() {
+     等比缩放到该日真实负载，保证「柱高 = 真实负载」「配色 = 科目构成」同时成立。
+     Stage C-2：再叠加手工改期（state.dayAssign）的每日增量，色段按新总量等比缩放。 */
+  function baseWeekData() {
     var S = ZX.state;
     if (!S.replanned) return S.week.map(function (d) {
       return { d: d.d, segs: d.segs, buf: d.buf, total: d.total, today: d.today };
@@ -115,6 +121,40 @@ window.ZX = window.ZX || {};
     });
   }
 
+  /* delta = 迁入 − 迁出（见 flows/planedit.js weekDeltas） */
+  function weekChartData() {
+    var data = baseWeekData();
+    var P = ZX.flows && ZX.flows.planedit;
+    if (!P || !P.weekDeltas) return data;
+    var deltas = P.weekDeltas() || {};
+    return data.map(function (d) {
+      var delta = U.num(deltas[d.d], 0);
+      if (!delta) return d;
+      var real = Math.max(0, d.total + delta);
+      var segSum = d.segs.reduce(function (a, s) { return a + (s[1] || 0); }, 0);
+      var segs = segSum > 0
+        ? d.segs.map(function (s) { return [s[0], Math.round(s[1] / segSum * real)]; })
+        : d.segs;
+      return { d: d.d, segs: segs, buf: d.buf, total: real, today: d.today };
+    });
+  }
+
+  /* 本周日程块（Stage C-2）：flows/planedit.js 未加载时静默省略 */
+  function boardHtml() {
+    var P = ZX.flows && ZX.flows.planedit;
+    return (P && P.board) ? P.board() : '';
+  }
+
+  function chartNote() {
+    var P = ZX.flows && ZX.flows.planedit;
+    if (!P || !P.movedCount) return '';
+    var n = P.movedCount();
+    if (!n) return '';
+    var lk = P.lockedCount ? P.lockedCount() : 0;
+    return '<div class="sc2-chart-note"><span>含手工改期 ' + n + ' 项</span>' +
+      (lk ? '<span>已锁定 ' + lk + ' 项</span>' : '') + '</div>';
+  }
+
   function weekChart() {
     var data = weekChartData();
     var max = 360, H = 132;
@@ -137,27 +177,32 @@ window.ZX = window.ZX || {};
         '<span><i class="hatch"></i>弹性位</span>' +
         '<span class="load-sum">计划 ' + U.hm(total) + ' · 缓冲 ' + U.hm(buf) + '</span>' +
       '</div>' +
+      chartNote() +
     '</div>';
   }
 
   function planItems() {
     var S = ZX.state;
-    /* 被压缩的计划项，工时取引擎 diff 的实际压缩值（不硬编码 45→30） */
+    /* 被压缩的计划项，工时取引擎 diff 的实际压缩值（不硬编码 45→30）；
+       已被逐条否决的压缩不计入（工时已从快照恢复） */
+    var P = ZX.flows && ZX.flows.planedit;
+    var vetoed = (P && P.vetoedSubjects) ? P.vetoedSubjects() : {};
     var polEst = 45;
     var rec = S.replanRecord;
     if (rec && Array.isArray(rec.diff)) {
       rec.diff.forEach(function (d) {
-        if (d.op === 'compress' && d.subject === '政治') {
+        if (d.op === 'compress' && d.subject === '政治' && !vetoed['政治']) {
           var n = parseInt(d.to, 10);
           if (!isNaN(n)) polEst = n;
         }
       });
     }
+    var polSt = S.replanned ? (vetoed['政治'] ? ['已否决', 'deg'] : ['降级 压缩', 'deg']) : ['已排程', 'sch'];
     var items = [
       { id: 'p_1042', n: '高数 · 极限与连续', s: '数学', est: 90, st: ['已排程', 'sch'] },
       { id: 'p_1043', n: '阅读真题 2019 · 精读', s: '英语', est: 60, st: ['已完成', 'done'] },
       { id: 'p_1044', n: '树与二叉树 · 应用', s: '408', est: 75, st: ['已排程', 'sch'] },
-      { id: 'p_1045', n: '马原 第 2 章 · 多选', s: '政治', est: polEst, st: [S.replanned ? '降级 压缩' : '已排程', S.replanned ? 'deg' : 'sch'] },
+      { id: 'p_1045', n: '马原 第 2 章 · 多选', s: '政治', est: polEst, st: polSt },
       { id: 'p_1046', n: '线性表 · 选择题 30', s: '408', est: 40, st: ['计划中', ''] },
       { id: 'p_1047', n: '长难句 · 定语从句', s: '英语', est: 35, st: ['计划中', ''] }
     ];
