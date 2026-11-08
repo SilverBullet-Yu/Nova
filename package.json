@@ -1,0 +1,16 @@
+{
+  "name": "zhixue-jielv",
+  "version": "1.0.0",
+  "private": true,
+  "description": "诺瓦 Nova · 智能学习日程助理 Demo（确定性引擎 + REST API，零第三方依赖）",
+  "type": "commonjs",
+  "main": "server/main.js",
+  "scripts": {
+    "start": "node server/main.js",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT"
+}

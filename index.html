@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>诺瓦 Nova · 智能学习日程助理</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2308090B'/%3E%3Crect x='4' y='7' width='1.6' height='5' fill='%23D8F65C'/%3E%3Crect x='7.2' y='3' width='1.6' height='9' fill='%23D8F65C'/%3E%3Crect x='10.4' y='5.5' width='1.6' height='6.5' fill='%23D8F65C'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="assets/css/app.css" />
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="glyph"><i></i><i></i><i></i><i></i></div>
+      <div>
+        <div class="brand-cn">诺瓦 Nova</div>
+        <div class="brand-en">RHYTHM</div>
+      </div>
+    </div>
+    <div class="ctx">
+      <span>目标 <b>2027 考研 · 计算机</b></span>
+      <span>基础期 · 第 3 周</span>
+      <span class="r" id="ctxR">R 1.08</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="sync" id="syncMain"><span class="dot" id="syncDot"></span><span id="syncText">本地优先 · 已同步</span> <span class="mono" id="syncSeq" style="color:var(--txt2)">seq 88123</span></div>
+    <div class="sync" id="syncPlanner" style="margin-left:6px"><span class="dot ac" id="plannerDot"></span><span id="plannerText">planner 在线</span></div>
+    <span class="kbd">/</span>
+  </header>
+
+  <div class="shell">
+    <nav class="rail" id="rail"></nav>
+
+    <section class="copilot">
+      <div class="cp-head">
+        <div class="wave"><i></i><i></i><i></i><i></i><i></i></div>
+        <div>
+          <div class="cp-title">节律</div>
+          <div class="cp-sub">ASSISTANT · 学习调度</div>
+        </div>
+        <div class="spacer"></div>
+        <div class="cp-ver">v1.4</div>
+      </div>
+      <div class="cp-body" id="chat"></div>
+      <div class="cp-foot">
+        <div class="chips" id="chips"></div>
+        <form class="composer" id="form">
+          <span class="caret">&gt;</span>
+          <input id="input" autocomplete="off" placeholder="说点什么，比如「这周落下了，帮我重排」" />
+          <button class="send" type="submit" aria-label="发送">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8h11M9 4l4 4-4 4"/></svg>
+          </button>
+        </form>
+        <div class="cp-note">规则引擎演示 · 意图为关键词匹配 · 核心计算确定性可复现</div>
+      </div>
+    </section>
+
+    <main class="bench">
+      <div class="bench-head">
+        <div class="bt" id="btTitle"><b>今日</b></div>
+        <div class="spacer"></div>
+        <div class="hm" id="btMeta">local-first · 读取本地库 8ms</div>
+      </div>
+      <div class="bench-body" id="view"></div>
+    </main>
+  </div>
+</div>
+
+<!-- 共享双模模块（后端执行者维护，前端只读引用；缺失时自动降级到内置兜底） -->
+<script src="shared/data/seed.js"></script>
+<script src="shared/engine/feasibility.js"></script>
+<script src="shared/engine/schedule.js"></script>
+<script src="shared/engine/replan.js"></script>
+<script src="shared/engine/attribute.js"></script>
+
+<!-- 前端脚本（经典 script，非 ESM：保证 file:// 双击直接打开） -->
+<script src="assets/js/util.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/engine.js"></script>
+<script src="assets/js/state.js"></script>
+<script src="assets/js/views/today.js"></script>
+<script src="assets/js/views/plan.js"></script>
+<script src="assets/js/views/data.js"></script>
+<script src="assets/js/views/me.js"></script>
+<script src="assets/js/assistant.js"></script>
+<script src="assets/js/main.js"></script>
+</body>
+</html>
