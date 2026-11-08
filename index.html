@@ -45,6 +45,9 @@
     <span class="kbd">/</span>
   </header>
 
+  <!-- 主导航条：所有屏幕尺寸都位于顶端（桌面在顶栏内，移动端为顶栏下方的横向导航条） -->
+  <nav class="sd-mnav" id="sdMnav" aria-label="主导航"></nav>
+
   <div class="shell">
     <section class="copilot">
       <div class="cp-head">
@@ -86,8 +89,7 @@
     </main>
   </div>
 
-  <!-- 移动端（≤860px）：底部导航 + 顶栏「序」入口；桌面隐藏 -->
-  <nav class="sd-mnav" id="sdMnav" aria-label="主导航"></nav>
+  <!-- 移动端（≤860px）：导航条已上移至顶栏下方；桌面隐藏 -->
 </div>
 
 <!-- 共享双模模块（后端执行者维护，前端只读引用；缺失时自动降级到内置兜底） -->

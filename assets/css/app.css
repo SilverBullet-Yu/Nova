@@ -1408,11 +1408,11 @@ html[data-font="l"]{--fs-body:16px;--lh-body:1.6}
   #syncPlanner{display:none}
   .topbar .sync{font-size:11px;white-space:nowrap}
 
-  /* 工作台让出底部导航高度 */
+  /* 工作台：导航已移至顶端，不再让出底部高度 */
   .bench-head{padding:0 16px}
   .bench-head::after{left:16px}
   .bench-head .hm{font-size:10px;letter-spacing:.04em}
-  .bench-body{padding:18px 14px calc(72px + env(safe-area-inset-bottom))}
+  .bench-body{padding:18px 14px 40px}
 
   /* 视图内的多列在窄屏收成一列 */
   .vhead{flex-wrap:wrap;gap:14px;align-items:flex-start;padding-bottom:15px}
@@ -1438,18 +1438,16 @@ html[data-font="l"]{--fs-body:16px;--lh-body:1.6}
   .sd-avail-tag{margin-left:0}
   .sd-cell{height:30px}
 
-  /* 底部导航：1px 发丝线 + 活性色指示条，不做胶囊 */
+  /* 顶部导航条（≤860）：位于顶栏下方，随页面滚动；活性色指示条在标签下缘 */
   .sd-mnav{
     display:grid;grid-template-columns:repeat(5,minmax(0,1fr));
-    position:fixed;left:0;right:0;bottom:0;z-index:40;
-    height:calc(56px + env(safe-area-inset-bottom));
-    padding-bottom:env(safe-area-inset-bottom);
-    border-top:1px solid var(--line2);
+    position:relative;flex:0 0 52px;
+    height:52px;
+    border-top:0;border-bottom:1px solid var(--line2);
     background:rgba(20,17,23,.94);
-    -webkit-backdrop-filter:blur(12px) saturate(120%);backdrop-filter:blur(12px) saturate(120%);
   }
   .sd-mnav::before{
-    content:"";position:absolute;left:0;right:0;top:-1px;height:1px;pointer-events:none;
+    content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;pointer-events:none;
     background:linear-gradient(90deg,transparent,var(--cy-line) 22%,var(--cy-line) 78%,transparent);
   }
   .sd-mnav button{
@@ -1463,9 +1461,9 @@ html[data-font="l"]{--fs-body:16px;--lh-body:1.6}
     stroke-linecap:round;stroke-linejoin:round;
   }
   .sd-mnav button:hover{color:var(--txt2);background:rgba(255,255,255,.025)}
-  .sd-mnav button.on{color:var(--ac);background:linear-gradient(180deg,var(--ac-a05),transparent 70%)}
+  .sd-mnav button.on{color:var(--ac);background:linear-gradient(180deg,transparent,var(--ac-a05) 70%)}
   .sd-mnav button.on::before{
-    content:"";position:absolute;top:0;left:50%;width:24px;height:2px;margin-left:-12px;
+    content:"";position:absolute;bottom:0;left:50%;width:24px;height:2px;margin-left:-12px;
     background:var(--ac);box-shadow:0 0 10px var(--acglow);
   }
 
