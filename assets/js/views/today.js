@@ -189,14 +189,16 @@ window.ZX = window.ZX || {};
   }
 
   function signalsBlock() {
-    /* 弹性位占用取自真实状态；其余三行为静态演示口径（无对应数据源），meta 已注明 */
-    var bufUsed = (ZX.state.buffer && ZX.state.buffer.free === false) ? 1 : 0;
+    /* 弹性位占用 / 锁定块取自真实状态；前两行为静态演示口径（无对应数据源），meta 已注明 */
+    var S = ZX.state;
+    var bufUsed = (S.buffer && S.buffer.free === false) ? 1 : 0;
+    var lockN = Object.keys(S.locks || {}).length;
     var body = '<div class="sig">' +
         '<div class="sig-h">当前命中项<span>insight v1.4</span></div>' +
         '<div class="sig-row"><span class="k">连续低完成</span><span class="m">近 2 日 58% / 62% · 阈值 60%</span><span class="x warn">命中</span></div>' +
         '<div class="sig-row"><span class="k">滚动欠账</span><span class="m">未来 7 天欠账 150 min · 阈值 150</span><span class="x warn">临界</span></div>' +
         '<div class="sig-row"><span class="k">弹性位占用</span><span class="m">' + bufUsed + ' / 1 · 上限 50%</span><span class="x ' + (bufUsed ? 'warn">已占用' : 'ok">正常') + '</span></div>' +
-        '<div class="sig-row"><span class="k">锁定块变更</span><span class="m">0 项 · 重排保护生效</span><span class="x ok">正常</span></div>' +
+        '<div class="sig-row"><span class="k">锁定块变更</span><span class="m">' + lockN + ' 项 · 重排保护生效</span><span class="x ok">' + (lockN ? '已锁定' : '正常') + '</span></div>' +
       '</div>';
     return ZX.ui.fold('today:signals', {
       title: '偏差信号',

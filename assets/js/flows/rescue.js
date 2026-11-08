@@ -102,32 +102,7 @@ window.ZX = window.ZX || {};
     return list.reduce(function (a, t) { return a + U.num(t.est, 0); }, 0);
   }
 
-  function dateOf(str) {
-    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(str || ''));
-    if (!m) return null;
-    var d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-    d.setHours(0, 0, 0, 0);
-    return isNaN(d.getTime()) ? null : d;
-  }
-
-  function isoDay(d) {
-    return d.getFullYear() + '-' + U.pad2(d.getMonth() + 1) + '-' + U.pad2(d.getDate());
-  }
-
-  function plusDays(d, n) {
-    var x = new Date(d.getTime());
-    x.setDate(x.getDate() + n);
-    return x;
-  }
-
-  /* 压缩后按新工时重排结束时刻，保持 HH:MM–HH:MM 形态 */
-  function retime(time, est) {
-    var m = /^(\d{2}):(\d{2})/.exec(String(time || ''));
-    if (!m) return time;
-    var start = Number(m[1]) * 60 + Number(m[2]);
-    var end = start + U.num(est, 0);
-    return m[1] + ':' + m[2] + '–' + U.pad2(Math.floor(end / 60) % 24) + ':' + U.pad2(end % 60);
-  }
+  /* 日期 / 时段助手（parseDay / isoDay / addDays / retime）用 util.js 共用实现 */
 
   /* ---------- 三种挽救方式的推演（同一套缺口公式） ----------
      压缩 / 降级会删减或压缩本周工作，因此「计划」收敛为
@@ -140,7 +115,7 @@ window.ZX = window.ZX || {};
     if (key === 'defer') {
       var planMin = weekPlannedMin();
       var days = REMAIN_DAYS + DEFER_DAYS;
-      var base = dateOf(S.goal.deadline) || new Date();
+      var base = U.parseDay(S.goal.deadline) || new Date();
       return {
         key: 'defer', label: '顺延',
         planMin: planMin, days: days,
@@ -149,7 +124,7 @@ window.ZX = window.ZX || {};
         items: [],
         dropped: [],
         weeksAfter: U.num(S.feas.weeks, 1) + 1,
-        deadlineAfter: isoDay(plusDays(base, DEFER_DAYS))
+        deadlineAfter: U.isoDay(U.addDays(base, DEFER_DAYS))
       };
     }
 
@@ -249,43 +224,11 @@ window.ZX = window.ZX || {};
     }).join('');
   }
 
-  function setHead(eyebrow, title, sub) {
-    if (!api) return;
-    var h = api.root.querySelector('.sheet-h');
-    if (!h) return;
-    var e = h.querySelector('.sheet-eyebrow');
-    if (e) e.textContent = eyebrow;
-    var t = h.querySelector('h2');
-    if (t) t.textContent = title;
-    var p = h.querySelector('p');
-    if (p) p.textContent = sub;
-  }
-
-  function recallFocus() {
-    var el = document.activeElement;
-    if (!el || !api || !api.root.contains(el) || !el.dataset) return null;
-    if (!el.dataset.sb) return null;
-    return { act: el.dataset.sb, val: el.dataset.v || '' };
-  }
-
-  function restoreFocus(keep) {
-    if (!api) return;
-    var root = api.root;
-    if (keep) {
-      var sel = '[data-sb="' + keep.act + '"]' + (keep.val ? '[data-v="' + keep.val + '"]' : '');
-      var back = root.querySelector(sel);
-      if (back && !back.disabled) { try { back.focus(); return; } catch (e) { /* 忽略 */ } }
-    }
-    if (root.contains(document.activeElement)) return;
-    var el = root.querySelector('.sheet-b button:not([disabled])') ||
-      root.querySelector('.sheet-f .btn.pri:not([disabled])') ||
-      root.querySelector('.sheet-f button:not([disabled])');
-    if (el) { try { el.focus(); } catch (e2) { /* 忽略 */ } }
-  }
+  /* 弹层头 / 焦点记忆用 ui.js 共用实现（setHead / recallFocus / restoreFocus） */
 
   function render() {
     if (!api) return;
-    var keep = recallFocus();
+    var keep = ZX.ui.recallFocus(api, 'sb');
     var head;
     if (screen === 1) {
       head = ['RESCUE / 缺口', '把计划接回来', '先看这周缺口有多大，再决定怎么接；任何一步都不需要补记录。'];
@@ -300,8 +243,8 @@ window.ZX = window.ZX || {};
       api.setBody(bodyConfirm());
       api.setFooter(footConfirm());
     }
-    setHead(head[0], head[1], head[2]);
-    restoreFocus(keep);
+    ZX.ui.setHead(api, head[0], head[1], head[2]);
+    ZX.ui.restoreFocus(api, 'sb', keep);
   }
 
   /* ---------- 第 1 屏：缺口四宫格 ---------- */
@@ -343,6 +286,7 @@ window.ZX = window.ZX || {};
     var impact = '缺口 ' + U.hm(m.gap) + ' → ' + U.hm(o.gap) +
       (o.gap === 0 ? ' · 归零' : '');
     return '<button type="button" class="sb-opt' + (on ? ' on' : '') + '" role="radio" aria-checked="' + on + '"' +
+        ' tabindex="' + (on ? '0' : '-1') + '"' +   /* roving tabindex：Tab 只进选中项，方向键在组内移动 */
         ' data-sb="pick" data-v="' + key + '">' +
         '<div class="sb-opt-h"><b>' + o.label + '</b>' +
           (key === 'compress' ? '<span class="sb-tag">默认</span>' : '') +
@@ -447,7 +391,7 @@ window.ZX = window.ZX || {};
         var hit = null;
         for (var i = 0; i < o.items.length; i++) if (o.items[i].id === t.id) { hit = o.items[i]; break; }
         if (!hit) return t;
-        var next = Object.assign({}, t, { est: hit.est, time: retime(t.time, hit.est), degraded: true });
+        var next = Object.assign({}, t, { est: hit.est, time: U.retime(t.time, hit.est), degraded: true });
         return S.normTask ? S.normTask(next) : next;
       });
     } else if (o.key === 'downgrade') {
@@ -578,6 +522,24 @@ window.ZX = window.ZX || {};
     });
 
     api.root.addEventListener('click', onClick);
+
+    /* 三选一卡片的方向键导航（radio 惯例）：←↑ 上一项，→↓ 下一项，循环 */
+    api.root.addEventListener('keydown', function (e) {
+      if (screen !== 2 || api === null) return;
+      var delta = e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1
+        : e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : 0;
+      if (!delta) return;
+      var cards = api.root.querySelectorAll('[data-sb="pick"]');
+      if (!cards.length) return;
+      var idx = -1;
+      for (var i = 0; i < cards.length; i++) if (cards[i] === document.activeElement) idx = i;
+      if (idx < 0) return;   /* 焦点不在选项上：不接管方向键 */
+      e.preventDefault();
+      var next = (idx + delta + cards.length) % cards.length;
+      choice = cards[next].dataset.v || choice;
+      cards[next].focus();
+      render();
+    });
   }
 
   /* 今日页 banner 的按钮在视图里，事件在这里委托（不改 main.js） */

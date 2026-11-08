@@ -134,13 +134,11 @@ window.ZX = window.ZX || {};
     if (btn) { try { btn.focus(); } catch (e) { /* 忽略 */ } }
   }
 
-  /* ---------- 导出（本地 CSV，无后端可用） ---------- */
-  function pad2(n) { return String(n).padStart(2, '0'); }
-
+  /* ---------- 导出（本地 CSV，无后端可用；pad2 用 util.js 共用实现） ---------- */
   function ymd(ms) {
     var d = ms === undefined || ms === null ? new Date() : new Date(ms);
     if (isNaN(d.getTime())) return '';
-    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+    return d.getFullYear() + '-' + U.pad2(d.getMonth() + 1) + '-' + U.pad2(d.getDate());
   }
 
   function cell(v) {
@@ -218,7 +216,7 @@ window.ZX = window.ZX || {};
     var text = csv();
     var rows = csvRowCount();
     var d = new Date();
-    var filename = 'nova-export-' + d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate()) + '.csv';
+    var filename = 'nova-export-' + d.getFullYear() + U.pad2(d.getMonth() + 1) + U.pad2(d.getDate()) + '.csv';
     download(filename, text);
     ZX.state.exportLog = { at: Date.now(), rows: rows, filename: filename };
     ZX.api.queueOp({
@@ -314,6 +312,9 @@ window.ZX = window.ZX || {};
     var val = (v === 'm' || v === 'l') ? v : '';
     ZX.util.setPref('font', val);
     if (ZX.state.tab === 'me') ZX.render();
+    /* 全量重绘会丢焦点：放回当前档位按钮（与 toggle/bulk 的焦点重放一致） */
+    var btn = U.$('[data-act="font"][data-v="' + val + '"]');
+    if (btn) { try { btn.focus(); } catch (e) { /* 忽略 */ } }
   }
 
   /* ---------- 启动 ---------- */

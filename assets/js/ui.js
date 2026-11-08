@@ -181,6 +181,51 @@ window.ZX = window.ZX || {};
     '</section>';
   }
 
+  /* ---------- 弹层头/焦点助手（goal / rescue 等多步 flow 共用） ---------- */
+
+  /** 重绘弹层头三行文案（eyebrow / 标题 / 副标题） */
+  function setHead(api, eyebrow, title, sub) {
+    if (!api) return;
+    var h = api.root.querySelector('.sheet-h');
+    if (!h) return;
+    var e = h.querySelector('.sheet-eyebrow');
+    if (e) e.textContent = eyebrow;
+    var t = h.querySelector('h2');
+    if (t) t.textContent = title;
+    var p = h.querySelector('p');
+    if (p) p.textContent = sub;
+  }
+
+  /**
+   * 重绘前记忆焦点：attr 为该 flow 的委托属性名（goal 用 'sa'，rescue 用 'sb'）。
+   * 返回 { act, key }，key 取 data-v 或 data-id（哪边有值取哪边）。
+   */
+  function recallFocus(api, attr) {
+    var el = document.activeElement;
+    if (!el || !api || !api.root.contains(el) || !el.dataset) return null;
+    if (!el.dataset[attr]) return null;
+    return { act: el.dataset[attr], key: el.dataset.v || el.dataset.id || '' };
+  }
+
+  /** 重绘后把焦点放回原控件；找不到或已失效时落到弹层内首个可用控件 */
+  function restoreFocus(api, attr, keep) {
+    if (!api) return;
+    var root = api.root;
+    if (keep) {
+      var list = root.querySelectorAll('[data-' + attr + '="' + keep.act + '"]');
+      for (var i = 0; i < list.length; i++) {
+        var el = list[i];
+        var k = el.dataset.v || el.dataset.id || '';
+        if (k === keep.key && !el.disabled) { try { el.focus(); return; } catch (e) { /* 忽略 */ } }
+      }
+    }
+    if (root.contains(document.activeElement)) return;
+    var first = root.querySelector('.sheet-b button:not([disabled]),.sheet-b input:not([disabled])') ||
+      root.querySelector('.sheet-f .btn.pri:not([disabled])') ||
+      root.querySelector('.sheet-f button:not([disabled])');
+    if (first) { try { first.focus(); } catch (e2) { /* 忽略 */ } }
+  }
+
   /** 轻提示（role=status 供读屏播报；多条同现时向上错开，避免完全重叠） */
   function toast(text, kind) {
     var prev = document.querySelectorAll('.toast:not(.out)').length;
@@ -223,6 +268,7 @@ window.ZX = window.ZX || {};
 
   ZX.ui = {
     sheet: sheet, confirm: confirm, toast: toast, close: close,
+    setHead: setHead, recallFocus: recallFocus, restoreFocus: restoreFocus,
     fold: fold, loadFolds: loadFolds, saveFolds: saveFolds, countTo: countTo
   };
 })(window.ZX);

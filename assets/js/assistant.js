@@ -257,7 +257,7 @@ window.ZX = window.ZX || {};
       if (l1Growth !== null && !sL1.applied) step(3, '+' + l1Growth + '% ✕ 超 20%', true);
       else step(3, '+' + (l1Growth === null ? '0' : l1Growth) + '% ✓');
       await U.sleep(340);
-      step(4, sL2 ? (sL2.applied ? '+' + (l2Growth === null ? pct(loadDelta) : l2Growth) + '% ✓' : '未通过') : '未评估（L1 已生效）');
+      step(4, sL2 ? (sL2.applied ? '+' + (l2Growth === null ? U.pct(loadDelta) : l2Growth) + '% ✓' : '未通过') : '未评估（L1 已生效）');
 
       S.replanned = true;
       /* 快照：契约形状 { tasks, week, timestamp }，撤销时反向应用、不重算 */
@@ -303,15 +303,15 @@ window.ZX = window.ZX || {};
       }).join('');
 
       var guardNote = [];
-      if (sL1 && sL1.applied) guardNote.push('L1 顺延后负载 +' + (l1Growth === null ? pct(loadDelta) : l1Growth) + '%，未超单次上限 20%，直接生效');
-      else guardNote.push('L1 顺延后负载 +' + (l1Growth === null ? pct(loadDelta) : l1Growth) + '%，超过单次上限 20%，已回退该级');
-      if (sL2 && sL2.applied) guardNote.push('L2 压缩低权重项后复核通过（+' + (l2Growth === null ? pct(loadDelta) : l2Growth) + '%），因此未进入替代与放弃');
+      if (sL1 && sL1.applied) guardNote.push('L1 顺延后负载 +' + (l1Growth === null ? U.pct(loadDelta) : l1Growth) + '%，未超单次上限 20%，直接生效');
+      else guardNote.push('L1 顺延后负载 +' + (l1Growth === null ? U.pct(loadDelta) : l1Growth) + '%，超过单次上限 20%，已回退该级');
+      if (sL2 && sL2.applied) guardNote.push('L2 压缩低权重项后复核通过（+' + (l2Growth === null ? U.pct(loadDelta) : l2Growth) + '%），因此未进入替代与放弃');
       else if (sL2) guardNote.push('L2 压缩后复核未通过，已进入后续级别');
 
       say('<div class="ecard">' +
         '<div class="ecard-h"><b>重排完成</b><span class="tag ' + tagCls + '">' + tagText + '</span></div>' +
         '<div class="ecard-b">' +
-          '<div class="erow"><span class="k">变更</span><span class="why">延期 ' + deferred.length + ' · 压缩 ' + compressed.length + ' · 放弃 ' + abandoned.length + '</span><span class="v">未来 7 天 ' + (loadDelta >= 0 ? '+' : '') + pct(loadDelta) + '</span></div>' +
+          '<div class="erow"><span class="k">变更</span><span class="why">延期 ' + deferred.length + ' · 压缩 ' + compressed.length + ' · 放弃 ' + abandoned.length + '</span><span class="v">未来 7 天 ' + (loadDelta >= 0 ? '+' : '') + U.pct(loadDelta) + '</span></div>' +
           (lockCount ? '<div class="erow"><span class="k">锁定</span><span class="why">重排不会改动已锁定的块</span><span class="v ac">' + lockCount + ' 个锁定块未参与</span></div>' : '') +
           '<div class="erow"><span class="k">弹性位</span><span class="why">每日 60 min 未被清空</span><span class="v ac">' + (guards.bufferPreserved === false ? '已侵占' : '1 / 1 保留') + '</span></div>' +
           diffHtml +
@@ -323,16 +323,11 @@ window.ZX = window.ZX || {};
     })();
   }
 
-  /* 从引擎 reason 文本中提取负载增幅百分比（形如 "23.0%"） */
+  /* 从引擎 reason 文本中提取负载增幅百分比（形如 "23.0%"）；百分比格式化用 util.js 的 U.pct */
   function growthOf(reason) {
     if (!reason) return null;
     var m = String(reason).match(/(\d+(?:\.\d+)?)%/);
     return m ? m[1] : null;
-  }
-
-  function pct(v) {
-    if (typeof v !== 'number' || !isFinite(v)) return '0%';
-    return (Math.round(v * 1000) / 10) + '%';
   }
 
   /* ---------- flow：撤销 ---------- */
@@ -425,17 +420,33 @@ window.ZX = window.ZX || {};
     return U.sleep(120);
   }
 
-  /* ---------- flow：降载建议 ---------- */
+  /* ---------- flow：降载建议 ----------
+     顺延对象 = 当前权重最低的未完成项（与 adoptTired 同一选取逻辑），数值全部由 state 推导 */
+  function lowestWeightTask() {
+    var pick = null;
+    ZX.state.tasks.forEach(function (x) {
+      if (x.done || x.skipped) return;
+      if (!pick || U.num(x.weight, 0) < U.num(pick.weight, 0)) pick = x;
+    });
+    return pick;
+  }
+
   function tiredFlow() {
+    var S = ZX.state;
+    var pick = lowestWeightTask();
+    var est = pick ? U.num(pick.est, 0) : 0;
+    var before = S.plannedMin();
+    var after = before - est;
+    var keepN = S.tasks.filter(function (x) { return !x.done && !x.skipped && (!pick || x.id !== pick.id); }).length;
     say('<p>今天不追加任务。状态的波动是可预期的，系统不该用计划去对抗它。</p>' +
       '<div class="ecard">' +
         '<div class="ecard-h"><b>降载建议</b><span class="tag warn">保留弹性位</span></div>' +
         '<div class="ecard-b">' +
-          '<div class="erow"><span class="k">调整</span><span class="why">政治 45 min 移入本周六弹性位</span><span class="v">今日 −45m</span></div>' +
-          '<div class="erow"><span class="k">保留</span><span class="why">数学与 408 不受影响，权重最高</span><span class="v ac">3 项</span></div>' +
-          '<div class="erow"><span class="k">后果</span><span class="why">本周欠账 150 → 105 min，不触发重排</span><span class="v">可承受</span></div>' +
+          '<div class="erow"><span class="k">调整</span><span class="why">' + (pick ? U.esc(pick.s) + ' ' + U.hm(est) + ' 移入本周六弹性位' : '今天没有可顺延的未完成项') + '</span><span class="v">' + (est ? '今日 −' + U.hm(est) : '—') + '</span></div>' +
+          '<div class="erow"><span class="k">保留</span><span class="why">权重更高的项不受影响</span><span class="v ac">' + keepN + ' 项</span></div>' +
+          '<div class="erow"><span class="k">后果</span><span class="why">今日计划 ' + U.hm(before) + ' → ' + U.hm(after) + '，不触发重排</span><span class="v">可承受</span></div>' +
         '</div>' +
-        '<div class="ecard-f"><button class="btn" data-act="tired">采纳降载</button><span class="note">今天收在 3 小时内</span></div>' +
+        '<div class="ecard-f"><button class="btn" data-act="tired"' + (pick ? '' : ' disabled') + '>采纳降载</button><span class="note">不施压，只收窄今天</span></div>' +
       '</div>', 'insight · 归因 执行中断');
   }
 
@@ -483,16 +494,18 @@ window.ZX = window.ZX || {};
     var S = ZX.state;
     if (S.tiredAdopted) return;
     S.tiredAdopted = true;
-    var t = S.tasks.filter(function (x) { return x.id === 't4'; })[0];
-    if (t && !t.done) {
+    /* 与 tiredFlow 同一选取：顺延当前权重最低的未完成项（不写死任务 id） */
+    var t = lowestWeightTask();
+    if (t) {
       S.movedOut = { title: t.title, est: t.est };
-      S.tasks = S.tasks.filter(function (x) { return x.id !== 't4'; });
+      S.tasks = S.tasks.filter(function (x) { return x.id !== t.id; });
     }
+    var left = S.tasks.filter(function (x) { return !x.done && !x.skipped; }).length;
     ZX.render();
-    say('<p>已采纳。政治移到周六 15:00 的弹性位，今天 3 项收工。</p><p style="color:var(--txt3);font-size:11px">本次调整记入 replan_record，原因「状态不佳」；不计入断更，也不影响连续记录。</p>', 'replan · L1 顺延');
+    say('<p>已采纳。' + (t ? U.esc(t.s) + '（' + U.hm(t.est) + '）移到周六弹性位，今天剩 ' + left + ' 项收工。' : '今天没有需要顺延的项。') + '</p><p style="color:var(--txt3);font-size:11px">本次调整记入 replan_record，原因「状态不佳」；不计入断更，也不影响连续记录。</p>', 'replan · L1 顺延');
     ZX.api.queueOp({
-      entity: 'task', entityId: 't4', field: 'deferred',
-      value: { reason: '状态不佳', to: '周六 15:00 弹性位', est: S.movedOut ? S.movedOut.est : 45 }
+      entity: 'task', entityId: t ? t.id : '', field: 'deferred',
+      value: { reason: '状态不佳', to: '周六 15:00 弹性位', est: S.movedOut ? S.movedOut.est : 0 }
     });
   }
 

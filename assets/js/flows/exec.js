@@ -153,7 +153,7 @@ window.ZX = window.ZX || {};
       t.done = false;
       t.actual = U.num(t.actual, 0) + minutes;
       t.est = partialEst(beforeEst, completion);
-      t.time = retime(t.time, t.est);
+      t.time = U.retime(t.time, t.est);
       t.partial = completion;
       t.completion = completion;
     }
@@ -165,16 +165,7 @@ window.ZX = window.ZX || {};
     return sess;
   }
 
-  /* 部分完成后按剩余工时重算时段终点，避免「45m」与「10:30–12:00」矛盾 */
-  function retime(str, minutes) {
-    var m = String(str || '').match(/^(\d{1,2}):(\d{2})/);
-    if (!m) return str;
-    var start = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
-    var end = start + U.num(minutes, 0);
-    var p2 = function (n) { return (n < 10 ? '0' : '') + n; };
-    return p2(Math.floor(start / 60)) + ':' + p2(start % 60) + '–' +
-      p2(Math.floor(end / 60) % 24) + ':' + p2(end % 60);
-  }
+  /* 时段重算用 util.js 共用的 U.retime（部分完成后避免「45m」与「10:30–12:00」矛盾） */
 
   /* ---------- 计时口径（与 assistant.tickTimer 同源） ---------- */
   function elapsedMin() {
@@ -198,6 +189,17 @@ window.ZX = window.ZX || {};
   }
 
   /* ---------- 部分完成：记录弹层 ---------- */
+  /* 分段控件同步：pct 走数值比较 + aria-checked；feel 走字符串比较 + aria-pressed（两处弹层共用） */
+  function syncSeg(root, sel, val, checked) {
+    var seg = root.querySelector(sel);
+    if (!seg) return;
+    Array.prototype.forEach.call(seg.querySelectorAll('button'), function (x) {
+      var on = checked ? U.num(x.dataset.v, 0) === U.num(val, 0) : x.dataset.v === val;
+      x.classList.toggle('on', on);
+      x.setAttribute(checked ? 'aria-checked' : 'aria-pressed', String(on));
+    });
+  }
+
   function segPct(cur) {
     return '<div class="seg sc-seg" id="sc-pct" role="radiogroup" aria-label="完成度">' +
       PCTS.map(function (p) {
@@ -268,14 +270,7 @@ window.ZX = window.ZX || {};
 
       if (act === 'pct') {
         completion = U.num(b.dataset.v, 100);
-        var seg = ctl.$('#sc-pct');
-        if (seg) {
-          Array.prototype.forEach.call(seg.querySelectorAll('button'), function (x) {
-            var on = U.num(x.dataset.v, 0) === completion;
-            x.classList.toggle('on', on);
-            x.setAttribute('aria-checked', String(on));
-          });
-        }
+        syncSeg(ctl.root, '#sc-pct', completion, true);
         var note = ctl.$('#sc-rec-note');
         if (note) note.textContent = recordNote(t.est, completion);
         return;
@@ -283,14 +278,7 @@ window.ZX = window.ZX || {};
 
       if (act === 'feel') {
         feel = (feel === b.dataset.v) ? '' : b.dataset.v;
-        var fseg = ctl.$('#sc-feel');
-        if (fseg) {
-          Array.prototype.forEach.call(fseg.querySelectorAll('button'), function (x) {
-            var on = x.dataset.v === feel;
-            x.classList.toggle('on', on);
-            x.setAttribute('aria-pressed', String(on));
-          });
-        }
+        syncSeg(ctl.root, '#sc-feel', feel, false);
         return;
       }
 
@@ -421,6 +409,9 @@ window.ZX = window.ZX || {};
     t.skipReason = null;
     t.skippedAt = null;
     ZX.render();
+    /* 全量重绘会丢焦点：放回同项的「恢复」按钮（该按钮存在时） */
+    var btn = U.$('[data-sc="restore"][data-id="' + id + '"]');
+    if (btn) { try { btn.focus(); } catch (e) { /* 忽略 */ } }
     ZX.ui.toast('已恢复', 'ok');
   }
 
@@ -428,6 +419,8 @@ window.ZX = window.ZX || {};
     var S = ZX.state;
     S.skippedOpen = !S.skippedOpen;
     ZX.render();
+    var btn = U.$('[data-sc="skipped-toggle"]');
+    if (btn) { try { btn.focus(); } catch (e) { /* 忽略 */ } }
   }
 
   /* ---------- 补录 ---------- */
@@ -475,14 +468,7 @@ window.ZX = window.ZX || {};
 
       if (b.dataset.sc === 'pct') {
         completion = U.num(b.dataset.v, 100);
-        var seg = ctl.$('#sc-pct');
-        if (seg) {
-          Array.prototype.forEach.call(seg.querySelectorAll('button'), function (x) {
-            var on = U.num(x.dataset.v, 0) === completion;
-            x.classList.toggle('on', on);
-            x.setAttribute('aria-checked', String(on));
-          });
-        }
+        syncSeg(ctl.root, '#sc-pct', completion, true);
         return;
       }
 

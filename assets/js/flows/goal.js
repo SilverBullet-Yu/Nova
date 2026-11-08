@@ -54,29 +54,11 @@ window.ZX = window.ZX || {};
   var dragId = null;
   var overEl = null;
 
-  /* ---------- 日期与数值 ---------- */
+  /* ---------- 日期与数值（parseDay / isoDay / addDays 用 util.js 共用实现） ---------- */
   function today0() {
     var d = new Date();
     d.setHours(0, 0, 0, 0);
     return d;
-  }
-
-  function parseDay(str) {
-    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(str || ''));
-    if (!m) return null;
-    var d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-    d.setHours(0, 0, 0, 0);
-    return isNaN(d.getTime()) ? null : d;
-  }
-
-  function isoDay(d) {
-    return d.getFullYear() + '-' + U.pad2(d.getMonth() + 1) + '-' + U.pad2(d.getDate());
-  }
-
-  function addDays(d, n) {
-    var x = new Date(d.getTime());
-    x.setDate(x.getDate() + n);
-    return x;
   }
 
   /* 从今天到截止日期的整周数，至少 1 周 */
@@ -98,7 +80,7 @@ window.ZX = window.ZX || {};
   /* ---------- 草稿 ---------- */
   function defaultDraft() {
     var deadline = '2027-12-25';
-    var day = parseDay(deadline);
+    var day = U.parseDay(deadline);
     return {
       type: '考研',
       name: '2027 考研 · 计算机',
@@ -151,23 +133,11 @@ window.ZX = window.ZX || {};
     return 520;
   }
 
-  /* ---------- 渲染骨架 ---------- */
-  function setHead(eyebrow, title, sub) {
-    if (!api) return;
-    var h = api.root.querySelector('.sheet-h');
-    if (!h) return;
-    var e = h.querySelector('.sheet-eyebrow');
-    if (e) e.textContent = eyebrow;
-    var t = h.querySelector('h2');
-    if (t) t.textContent = title;
-    var p = h.querySelector('p');
-    if (p) p.textContent = sub;
-  }
-
+  /* ---------- 渲染骨架（setHead / 焦点记忆用 ui.js 共用实现） ---------- */
   function render() {
     if (!api) return;
     if (step === 3) captureAdd();   /* 重绘前留住「添加计划项」里已输入的内容 */
-    var keep = recallFocus();
+    var keep = ZX.ui.recallFocus(api, 'sa');
     var head, body, footer;
     if (step === 1) {
       head = ['GOAL / 新建', '设定你的目标', '先设目标，再判断可行性；不可行就先校准，不直接砍计划。'];
@@ -184,35 +154,10 @@ window.ZX = window.ZX || {};
     }
     api.setBody(body);
     api.setFooter(footer);
-    setHead(head[0], head[1], head[2]);
+    ZX.ui.setHead(api, head[0], head[1], head[2]);
     var sheetEl = api.root.querySelector('.sheet');
     if (sheetEl) sheetEl.classList.toggle('wide', step === 3);
-    restoreFocus(keep);
-  }
-
-  /* 重绘会把聚焦的元素一起换掉：先记住它的 data-sa / data-id，重绘后放回原处，
-     键盘用户连续点 +/- 时焦点不会掉到弹层外面 */
-  function recallFocus() {
-    var el = document.activeElement;
-    if (!el || !api || !api.root.contains(el) || !el.dataset) return null;
-    if (!el.dataset.sa) return null;
-    return { act: el.dataset.sa, id: el.dataset.id || '' };
-  }
-
-  function restoreFocus(keep) {
-    if (!api) return;
-    var root = api.root;
-    if (keep) {
-      var sel = '[data-sa="' + keep.act + '"]' + (keep.id ? '[data-id="' + keep.id + '"]' : '');
-      var back = root.querySelector(sel);
-      if (back && !back.disabled) { try { back.focus(); return; } catch (e) { /* 忽略 */ } }
-    }
-    if (root.contains(document.activeElement)) return;
-    var body = root.querySelectorAll('.sheet-b button:not([disabled]),.sheet-b input:not([disabled])');
-    var el = body[0] ||
-      root.querySelector('.sheet-f .btn.pri:not([disabled])') ||
-      root.querySelector('.sheet-f button:not([disabled])');
-    if (el) { try { el.focus(); } catch (e2) { /* 忽略 */ } }
+    ZX.ui.restoreFocus(api, 'sa', keep);
   }
 
   /* ---------- 第 1 步：表单 ---------- */
@@ -272,7 +217,7 @@ window.ZX = window.ZX || {};
     if (dl) d.deadline = String(dl.value || '');
     if (wk && String(wk.value).trim() !== '') d.weeklyH = U.num(wk.value, d.weeklyH);
     d.demand = demandOf(d.type, d.base);
-    var day = parseDay(d.deadline);
+    var day = U.parseDay(d.deadline);
     if (day) d.weeks = weeksUntil(day);
   }
 
@@ -280,7 +225,7 @@ window.ZX = window.ZX || {};
     var d = draft();
     var errs = {};
     if (!String(d.name || '').trim()) errs.name = '请填写目标名称，例如「2027 考研 · 计算机」。';
-    var day = parseDay(d.deadline);
+    var day = U.parseDay(d.deadline);
     if (!day) errs.deadline = '请选择截止日期。';
     else if (day.getTime() <= today0().getTime()) errs.deadline = '截止日期需要晚于今天。';
     var w = U.num(d.weeklyH, 0);
@@ -366,7 +311,7 @@ window.ZX = window.ZX || {};
       var needK = solveWeeks(d, TARGET_R);
       var rk = feasOf({ weeklyH: d.weeklyH, weeks: needK, demand: d.demand });
       var cappedK = rk.R < TARGET_R;
-      var newDay = isoDay(addDays(today0(), needK * 7));
+      var newDay = U.isoDay(U.addDays(today0(), needK * 7));
       rows.push(pathRow('延长周期',
         'R ' + f.R.toFixed(2) + ' → ' + rk.R.toFixed(2),
         d.weeks + ' → ' + needK + ' 周' +
@@ -479,6 +424,10 @@ window.ZX = window.ZX || {};
           '<span class="sa-t">' + U.esc(it.title) + '<i class="sa-w">w ' + it.weight.toFixed(2) + '</i></span>' +
           '<span class="sa-m">' + U.hm(it.est) + '</span>' +
           '<span class="sa-ops">' +
+            '<button type="button" class="sa-mini" data-sa="up" data-id="' + U.esc(it.id) + '" aria-label="上移「' + U.esc(it.title) + '」"' +
+              (it === list[0] ? ' disabled' : '') + '>▲</button>' +
+            '<button type="button" class="sa-mini" data-sa="down" data-id="' + U.esc(it.id) + '" aria-label="下移「' + U.esc(it.title) + '」"' +
+              (it === list[list.length - 1] ? ' disabled' : '') + '>▼</button>' +
             '<button type="button" class="sa-mini" data-sa="minus" data-id="' + U.esc(it.id) + '" aria-label="减少 15 分钟">−</button>' +
             '<button type="button" class="sa-mini" data-sa="plus" data-id="' + U.esc(it.id) + '" aria-label="增加 15 分钟">+</button>' +
             '<button type="button" class="sa-mini del" data-sa="del" data-id="' + U.esc(it.id) + '" aria-label="删除「' + U.esc(it.title) + '」">×</button>' +
@@ -652,7 +601,7 @@ window.ZX = window.ZX || {};
     if (act === 'fix-weeks') {
       var needK = solveWeeks(draft(), TARGET_R);
       draft().weeks = needK;
-      draft().deadline = isoDay(addDays(today0(), needK * 7));
+      draft().deadline = U.isoDay(U.addDays(today0(), needK * 7));
       render();
       return;
     }
@@ -660,6 +609,24 @@ window.ZX = window.ZX || {};
     if (act === 'fix-demand') {
       draft().demand = Math.round(draft().demand * 0.85);
       render();
+      return;
+    }
+
+    if (act === 'up' || act === 'down') {
+      /* 键盘排序：与指针拖拽共用同一份 planDraft 顺序（拖拽的键盘替代路径） */
+      var list = plan();
+      var i = -1;
+      for (var k = 0; k < list.length; k++) if (list[k].id === t.dataset.id) i = k;
+      var j = act === 'up' ? i - 1 : i + 1;
+      if (i < 0 || j < 0 || j >= list.length) return;
+      var tmp = list[i]; list[i] = list[j]; list[j] = tmp;
+      list.forEach(function (x, idx) { x.order = idx; });
+      render();
+      /* 移动后原按钮可能因到边而禁用（如升到首行）：聚焦该行仍可用的方向按钮，
+         键盘连续移动不丢焦点 */
+      var nextAct = j === 0 ? 'down' : 'up';
+      var back = api.root.querySelector('[data-sa="' + nextAct + '"][data-id="' + t.dataset.id + '"]');
+      if (back && !back.disabled) { try { back.focus(); } catch (e) { /* 忽略 */ } }
       return;
     }
 

@@ -38,6 +38,45 @@ window.ZX = window.ZX || {};
     var w1 = new Date(d.getFullYear(), 0, 4);
     return 1 + Math.round(((d - w1) / 86400000 - 3 + ((w1.getDay() + 6) % 7)) / 7);
   }
+
+  /* ---------- 日期与时段（goal / rescue / exec flows 共用） ---------- */
+  /* 'YYYY-MM-DD' → 当日 0 点 Date；非法输入返回 null */
+  function parseDay(str) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(str || ''));
+    if (!m) return null;
+    var d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    d.setHours(0, 0, 0, 0);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  /* Date → 'YYYY-MM-DD' */
+  function isoDay(d) {
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+  }
+
+  /* 日期 ±n 天（不改原对象） */
+  function addDays(d, n) {
+    var x = new Date(d.getTime());
+    x.setDate(x.getDate() + n);
+    return x;
+  }
+
+  /* 按新工时重算 'HH:MM–HH:MM' 时段终点；起始小时兼容 9:00 与 09:00，输出统一补零 */
+  function retime(str, minutes) {
+    var m = String(str || '').match(/^(\d{1,2}):(\d{2})/);
+    if (!m) return str;
+    var start = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+    var end = start + num(minutes, 0);
+    return pad2(Math.floor(start / 60)) + ':' + pad2(start % 60) + '–' +
+      pad2(Math.floor(end / 60) % 24) + ':' + pad2(end % 60);
+  }
+
+  /* 0.23 → '23%'（负载增幅等展示） */
+  function pct(v) {
+    if (typeof v !== 'number' || !isFinite(v)) return '0%';
+    return (Math.round(v * 1000) / 10) + '%';
+  }
+
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   function clone(v) { return v === undefined ? v : JSON.parse(JSON.stringify(v)); }
   function num(v, dft) { var n = Number(v); return isFinite(n) ? n : dft; }
@@ -91,7 +130,9 @@ window.ZX = window.ZX || {};
 
   ZX.util = {
     $: $, $$: $$, esc: esc, pad2: pad2, hm: hm,
-    nowStr: nowStr, tsHM: tsHM, isoWeek: isoWeek, sleep: sleep, clone: clone, num: num,
+    nowStr: nowStr, tsHM: tsHM, isoWeek: isoWeek,
+    parseDay: parseDay, isoDay: isoDay, addDays: addDays, retime: retime, pct: pct,
+    sleep: sleep, clone: clone, num: num,
     prefs: prefs, applyPrefs: applyPrefs, togglePref: togglePref, setPref: setPref
   };
   ZX.$ = $;
