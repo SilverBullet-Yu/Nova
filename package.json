@@ -1,5 +1,5 @@
 {
-  "name": "zhixue-jielv",
+  "name": "nova",
   "version": "1.0.0",
   "private": true,
   "description": "诺瓦 Nova · 智能学习日程助理 Demo（确定性引擎 + REST API，零第三方依赖）",
