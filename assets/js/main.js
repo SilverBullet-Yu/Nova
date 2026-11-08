@@ -82,8 +82,6 @@ window.ZX = window.ZX || {};
   /* 移动端对话覆盖层：打开锁滚动，关闭恢复；桌面端不生效（CSS 只在 ≤860 启用） */
   function openCopilot() {
     document.documentElement.classList.add('sd-cp-open');
-    var fab = U.$('#sdFab');
-    if (fab) fab.setAttribute('aria-expanded', 'true');
     var body = U.$('#chat');
     if (body) body.scrollTop = body.scrollHeight;
     var input = U.$('#input');
@@ -93,8 +91,8 @@ window.ZX = window.ZX || {};
   function closeCopilot() {
     if (!document.documentElement.classList.contains('sd-cp-open')) return;
     document.documentElement.classList.remove('sd-cp-open');
-    var fab = U.$('#sdFab');
-    if (fab) { fab.setAttribute('aria-expanded', 'false'); try { fab.focus(); } catch (e) { /* 忽略 */ } }
+    var opener = U.$('.cp-open');
+    if (opener) { try { opener.focus(); } catch (e) { /* 忽略 */ } }
   }
 
   ZX.render = function () {
