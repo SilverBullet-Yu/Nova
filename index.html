@@ -2,15 +2,15 @@
 <html lang="zh-CN" data-tab="chat" data-grid="on" data-glow="on" data-motion="on">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<meta name="theme-color" content="#18151B" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#F5F6F8" />
 <meta name="description" content="诺瓦 Nova：面向大学生的私人日常助理。以课表为硬骨架，把作业 DDL 与考试节点排进空档；自然语言排程、四级重排与中断挽救，全部由确定性引擎计算，可解释、可复现、零惩罚。" />
 <meta property="og:title" content="诺瓦 Nova · 大学生日常助理" />
 <meta property="og:description" content="以课表为硬骨架，说一句话就能排程、重排、复盘。确定性引擎驱动，同一输入必得同一输出。" />
 <meta property="og:type" content="website" />
-<meta name="color-scheme" content="dark" />
+<meta name="color-scheme" content="light" />
 <title>诺瓦 Nova · 大学生日常助理</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2318151B'/%3E%3Cg fill='%23F2C879'%3E%3Crect x='3.2' y='3.2' width='2.2' height='2.2'/%3E%3Crect x='6.9' y='6.9' width='2.2' height='2.2'/%3E%3Crect x='10.6' y='10.6' width='2.2' height='2.2'/%3E%3C/g%3E%3C/svg%3E" />
+<link rel="icon" href="assets/img/favicon-v4.svg" type="image/svg+xml" />
 <script>
   /* 首帧前应用本地视觉偏好，避免主题闪烁（与 assets/js/util.js 共用同一存储键） */
   (function () {
@@ -31,7 +31,7 @@
 <div class="app">
   <header class="topbar">
     <div class="brand">
-      <div class="glyph" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="seal" aria-hidden="true"><img src="assets/img/avatar-v4.svg" width="26" height="26" alt="" /></div>
       <div>
         <div class="brand-cn">诺瓦 Nova</div>
         <div class="brand-en">大学生日常助理</div>
@@ -39,10 +39,10 @@
     </div>
     <nav class="tnav" id="rail" aria-label="主导航"></nav>
     <div class="spacer"></div>
-    <button class="cp-open" data-act="cp-open" type="button" aria-label="打开小序">序</button>
+    <button class="cp-open" data-act="cp-open" type="button" aria-label="打开诺瓦"><img src="assets/img/avatar-v4.svg" width="22" height="22" alt="" /></button>
     <div class="sync" id="syncMain"><span class="dot" id="syncDot"></span><span id="syncText">本地优先 · 已同步</span></div>
     <div class="sync" id="syncPlanner" style="margin-left:6px"><span class="dot ac" id="plannerDot"></span><span id="plannerText">日程引擎 在线</span></div>
-    <span class="kbd">/</span>
+    <span class="kbd" title="按 / 聚焦输入框" aria-label="按斜杠键聚焦输入框">/</span>
   </header>
 
   <!-- 主导航条：所有屏幕尺寸都位于顶端（桌面在顶栏内，移动端为顶栏下方的横向导航条） -->
@@ -50,27 +50,19 @@
 
   <div class="shell">
     <section class="copilot">
-      <div class="cp-head">
-        <div class="avatar" aria-hidden="true">序</div>
-        <div>
-          <div class="cp-title">小序</div>
-          <div class="cp-sub">Student assistant</div>
-        </div>
-        <div class="spacer"></div>
-        <div class="cp-live"><span class="dot ac"></span>在线</div>
-      </div>
-      <div class="cp-body" id="chat" role="log" aria-live="polite" aria-relevant="additions" aria-label="与小序的对话记录"></div>
+      <!-- 对话页头部（诺瓦标题 / 副题 / 在线徽章）已撤除：与顶栏品牌区、同步状态重复；
+           形象由欢迎语主立绘承担，状态由顶栏同步指示承担 -->
+      <div class="cp-body" id="chat" role="log" aria-live="polite" aria-relevant="additions" aria-label="与诺瓦的对话记录"></div>
       <div class="cp-foot">
-        <div class="cp-acts-h"><span>一站式指令</span><span>Quick actions</span></div>
+        <div class="cp-acts-h"><span>一站式指令</span><span>关键词匹配 · 确定性计算</span></div>
         <div class="chips" id="chips"></div>
         <form class="composer" id="form">
           <span class="caret">&gt;</span>
-          <input id="input" autocomplete="off" aria-label="给小序发消息" placeholder="说点什么，比如「这周太乱，帮我重排」" />
+          <input id="input" autocomplete="off" aria-label="给诺瓦发消息" placeholder="说点什么，比如「这周太乱，帮我重排」" />
           <button class="send" type="submit" aria-label="发送">
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8h11M9 4l4 4-4 4"/></svg>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8h11M9 4l4 4-4 4"/></svg>
           </button>
         </form>
-        <div class="cp-note">一站式 · 对话即操作　｜　关键词匹配 · 确定性计算</div>
       </div>
     </section>
 
@@ -92,12 +84,9 @@
   <!-- 移动端（≤860px）：导航条已上移至顶栏下方；桌面隐藏 -->
 </div>
 
-<!-- 共享双模模块（后端执行者维护，前端只读引用；缺失时自动降级到内置兜底） -->
+<!-- 共享双模数据与引擎产物（引擎唯一实现在 shared/engine/，此文件由 npm run build:engine 生成） -->
 <script src="shared/data/seed.js"></script>
-<script src="shared/engine/feasibility.js"></script>
-<script src="shared/engine/schedule.js"></script>
-<script src="shared/engine/replan.js"></script>
-<script src="shared/engine/attribute.js"></script>
+<script src="assets/js/rhythm.build.js"></script>
 
 <!-- 前端脚本（经典 script，非 ESM：保证 file:// 双击直接打开） -->
 <script src="assets/js/util.js"></script>

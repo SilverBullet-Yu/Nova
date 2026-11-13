@@ -232,13 +232,11 @@ window.ZX = window.ZX || {};
   };
   state.replanInput = function () {
     return {
-      tasks: state.tasks.map(function (t) {
-        return {
-          id: t.id, subject: t.s, title: t.title, est: t.est,
-          time: t.time, weight: t.weight, done: t.done, actual: t.actual
-        };
-      }),
+      /* 原样带上 domain / freq / substituted / abandoned 等语义字段，避免重排丢上下文 */
+      tasks: state.tasks.map(function (t) { return U.clone(t); }),
       week: state.weekInput(),
+      /* 锁定是硬约束：作为入参进入引擎，而不是在结果上事后过滤 */
+      locks: U.clone(state.locks || {}),
       params: {
         loadGrowthCap: 0.20, compressFloor: 0.60, compressedShareCap: 0.30,
         consecutiveNoImproveCap: 3, bufferRatio: 0.15

@@ -15,10 +15,20 @@
  *   buffer = 该日弹性池（默认 round(capacity × bufferRatio)，或 week 里的 buf）。
  *   弹性池在容量之外，重排只占用 capacity 以内的空闲分钟，绝不侵占弹性池。
  * · compressedShareCap 解释为「被压缩掉的分钟数 / 输入全部任务的总分钟数」的上限。
+ * · L1 顺延：按权重从高到低把未完成项填入未来 7 天 capacity 以内的空闲分钟。
+ *   不按 task.date 改变装载顺序，也不占用 buffer——弹性池是保留余量，任何级别都不得侵占。
+ *   语义与文案一致表述为「顺延到未来 7 天容量内的空闲时段」。
+ * · L2 压缩：仅当待排分钟超出未来 7 天剩余容量（overflow > 0）时触发，
+ *   目标 saved ≥ overflow；负载增幅上限只作为压缩后的事后守卫，不再参与触发判定。
  * · L3 替代要求任务带 domain / freq 字段（同知识域内，低频低权重 → 高频高权重）。
- * · L4 放弃：标记 abandoned 并在 detail 中注明「需用户确认」。
+ *   被替代的原任务标记 substituted 并退出待办集合，下一次重排不会重复替换。
+ * · L4 放弃：只给出建议，返回 needsConfirmation=true 且 accepted=false；
+ *   调用方必须用 confirmReplan(result) 确认后才可落库。
+ * · locks（{ taskId: true }）：硬约束——锁定任务不参与顺延装载，也不会被压缩、替代或放弃；
+ *   diff 中不会出现锁定任务（不是事后过滤）。
  * · snapshot.timestamp 由调用方通过 input.timestamp 注入，本模块绝不读时钟。
- * · 契约未定义「重排后的状态」，本模块额外返回 nextTasks / nextWeek（附加字段，不影响契约字段）。
+ * · 契约未定义「重排后的状态」，本模块额外返回 nextTasks / nextWeek / needsConfirmation
+ *   （附加字段，不影响契约字段）。
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -108,8 +118,25 @@
     return true;
   }
 
+  /* 待办集合：未完成、未放弃、未被替代
+     —— substituted 必须排除，否则下一次重排会再次替换同一项 */
   function isPending(t) {
-    return !!t && t.done !== true && t.abandoned !== true;
+    return !!t && t.done !== true && t.abandoned !== true && t.substituted !== true;
+  }
+
+  function isLocked(t, locks) {
+    return !!(locks && t && locks[String(t.id)] === true);
+  }
+
+  /* locks 归一：只认显式 true 的键，其余一律视为未锁定 */
+  function normalizeLocks(locks) {
+    var out = {};
+    if (locks && typeof locks === 'object' && !Array.isArray(locks)) {
+      Object.keys(locks).forEach(function (k) {
+        if (locks[k] === true) out[String(k)] = true;
+      });
+    }
+    return out;
   }
 
   function byWeightAsc(a, b) {
@@ -124,8 +151,9 @@
     return String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0;
   }
 
-  /* 把 pending 项按顺序塞进未来 7 天的空闲分钟（不侵占弹性池） */
-  function placePending(pending, days, P) {
+  /* 把 pending 项按权重从高到低塞进未来 7 天的空闲分钟（不侵占弹性池）
+     · 锁定任务视为保持当前落点：不装载、不出现在 diff 中，其负载已包含在 week.minutes 内 */
+  function placePending(pending, days, P, locks) {
     var loads = {};
     days.forEach(function (d) { loads[d.date] = d.minutes; });
     var placements = [];
@@ -133,6 +161,10 @@
     var order = pending.slice().sort(byWeightDesc);
 
     order.forEach(function (task) {
+      if (isLocked(task, locks)) {
+        placements.push({ task: task, segs: [], minutes: 0, locked: true });
+        return;
+      }
       var need = taskMinutes(task);
       if (need <= 0) {
         placements.push({ task: task, segs: [], minutes: 0 });
@@ -189,8 +221,8 @@
   }
 
   /* ── L1 顺延 ── */
-  function attemptDefer(pending, days, P, baseTotal) {
-    var res = placePending(pending, days, P);
+  function attemptDefer(pending, days, P, baseTotal, locks) {
+    var res = placePending(pending, days, P, locks);
     var growth = growthOf(baseTotal, res.total);
     var loadGrowthOk = baseTotal <= 0 ? res.total === 0 : growth <= P.loadGrowthCap + EPS;
     var bufferPreserved = checkBuffer(res.loads, days);
@@ -198,13 +230,13 @@
     var ok = loadGrowthOk && bufferPreserved && res.unplaced.length === 0;
     var reason;
     if (ok) {
-      reason = '顺延 ' + placedCount + ' 项至空闲时段，负载增幅 ' + pct(growth) + ' ≤ ' + pct(P.loadGrowthCap);
+      reason = '顺延 ' + placedCount + ' 项至未来 7 天容量内的空闲时段，负载增幅 ' + pct(growth) + ' ≤ ' + pct(P.loadGrowthCap);
     } else if (!loadGrowthOk) {
       reason = '顺延后未来 7 天负载增幅 ' + pct(growth) + ' 超过单次上限 ' + pct(P.loadGrowthCap) + '，回退';
     } else if (!bufferPreserved) {
-      reason = '顺延将侵占弹性位，违反「弹性位不得清空」，回退';
+      reason = '输入负载已超出某日容量，顺延无法恢复到弹性位保留状态，回退';
     } else {
-      reason = '未来 7 天无足够空闲时段容纳 ' + res.unplaced.length + ' 项，回退';
+      reason = '未来 7 天容量内无足够空闲时段容纳 ' + res.unplaced.length + ' 项，回退';
     }
     return {
       ok: ok, reason: reason, diff: deferDiffs(res.placements),
@@ -214,13 +246,29 @@
     };
   }
 
-  /* ── L2 压缩（按权重从低到高，下限 = 原工时 × compressFloor，标记 degraded） ── */
-  function attemptCompress(pending, days, P, baseTotal, totalWorkload) {
-    var work = pending.map(clone);
+  /* ── L2 压缩（仅容量溢出时触发，目标 saved ≥ overflow；按权重从低到高，下限 = 原工时 × compressFloor） ── */
+  function attemptCompress(pending, days, P, baseTotal, totalWorkload, locks) {
+    /* 锁定任务不参与压缩，也不计入可压缩的溢出量 */
+    var movable = pending.filter(function (t) { return !isLocked(t, locks); });
     var pendingTotal = 0;
-    work.forEach(function (t) { pendingTotal += taskMinutes(t); });
-    var target = baseTotal * (1 + P.loadGrowthCap);
-    var need = (baseTotal + pendingTotal) - target;
+    movable.forEach(function (t) { pendingTotal += taskMinutes(t); });
+
+    var totalCapacity = 0;
+    days.forEach(function (d) { totalCapacity += d.capacity; });
+    var freeMin = Math.max(0, totalCapacity - baseTotal);
+    var overflow = Math.max(0, pendingTotal - freeMin);
+    var guards = { loadGrowthOk: false, bufferPreserved: true, compressedShareOk: true };
+
+    if (overflow <= EPS) {
+      return {
+        ok: false,
+        reason: '未来 7 天容量未溢出（可用 ' + freeMin + ' min ≥ 待排 ' + pendingTotal + ' min），压缩不适用',
+        diff: [], loads: null, total: null, growth: 0, tasks: pending, guards: guards
+      };
+    }
+
+    var work = movable.map(clone);
+    var need = overflow;
     var compressed = [];
 
     var order = work.slice().sort(byWeightAsc);
@@ -230,7 +278,7 @@
       var floorMin = Math.max(0, Math.floor(est * P.compressFloor));
       var maxSave = est - floorMin;
       if (maxSave <= 0) continue;
-      /* 向上取整到整分钟，保证压缩后仍是整数分钟且恰好达标 */
+      /* 向上取整到整分钟，保证压缩后仍是整数分钟且恰好补齐溢出 */
       var save = Math.min(maxSave, Math.max(1, Math.ceil(need - EPS)));
       setMinutes(t, est - save);
       t.compressed = true;
@@ -243,11 +291,13 @@
     var share = totalWorkload > 0 ? saved / totalWorkload : 0;
     var compressedShareOk = share <= P.compressedShareCap + EPS;
 
-    var res = placePending(work, days, P);
+    var res = placePending(work, days, P, locks);
     var growth = growthOf(baseTotal, res.total);
     var loadGrowthOk = baseTotal <= 0 ? res.total === 0 : growth <= P.loadGrowthCap + EPS;
     var bufferPreserved = checkBuffer(res.loads, days);
-    var ok = loadGrowthOk && bufferPreserved && compressedShareOk && res.unplaced.length === 0 && compressed.length > 0;
+    /* 事后校验：必须真正补上容量溢出，且全部待排项都能装下 */
+    var enough = saved + EPS >= overflow && res.unplaced.length === 0;
+    var ok = enough && loadGrowthOk && bufferPreserved && compressedShareOk && compressed.length > 0;
 
     var diff = [];
     compressed.forEach(function (c) {
@@ -264,13 +314,16 @@
 
     var reason;
     if (ok) {
-      reason = '按权重从低到高压缩 ' + compressed.length + ' 项（-' + saved + ' min），复核通过，负载增幅 ' + pct(growth);
+      reason = '按权重从低到高压缩 ' + compressed.length + ' 项（-' + saved + ' min），补齐容量溢出 ' + overflow +
+        ' min，复核通过，负载增幅 ' + pct(growth);
     } else if (!compressed.length) {
       reason = '无可压缩项（均已达下限或无余量），回退';
+    } else if (!enough) {
+      reason = '压缩到下限仍差 ' + Math.max(0, overflow - saved) + ' min 无法排入（溢出 ' + overflow + ' min），回退';
     } else if (!compressedShareOk) {
       reason = '压缩项占比 ' + pct(share) + ' 超过上限 ' + pct(P.compressedShareCap) + '，回退';
     } else if (!loadGrowthOk) {
-      reason = '压缩后未来 7 天负载增幅 ' + pct(growth) + ' 仍超过上限 ' + pct(P.loadGrowthCap) + '，回退';
+      reason = '压缩后未来 7 天负载增幅 ' + pct(growth) + ' 仍超过上限 ' + pct(P.loadGrowthCap) + '（事后守卫），回退';
     } else if (!bufferPreserved) {
       reason = '压缩后仍将侵占弹性位，回退';
     } else {
@@ -285,14 +338,16 @@
     };
   }
 
-  /* ── L3 替代（同知识域内，低频低权重 → 高频高权重） ── */
-  function attemptSubstitute(pending, days, P, baseTotal, allTasks) {
+  /* ── L3 替代（同知识域内，低频低权重 → 高频高权重）
+     · 原任务 A 标记 substituted 并退出待办集合（下次不再重复替换），B 记录 replaces
+     · 锁定任务既不能作为被替换方，也不能作为替换方 */
+  function attemptSubstitute(pending, days, P, baseTotal, allTasks, locks) {
     var pendSorted = pending.slice().sort(byWeightAsc);
     for (var i = 0; i < pendSorted.length; i++) {
       var A = pendSorted[i];
-      if (!A.domain) continue;
+      if (!A.domain || isLocked(A, locks)) continue;
       var cands = allTasks.filter(function (B) {
-        return B && B.id !== A.id && B.domain === A.domain && B.done !== true
+        return B && B.id !== A.id && B.domain === A.domain && isPending(B) && !isLocked(B, locks)
           && num(B.freq, 0) > num(A.freq, 0)
           && taskWeight(B) > taskWeight(A);
       }).sort(byWeightDesc);
@@ -301,7 +356,7 @@
         var next = pending.filter(function (t) { return t.id !== A.id; });
         var bIsPending = next.some(function (t) { return t.id === B.id; });
         if (!bIsPending) next.push(clone(B));
-        var res = placePending(next, days, P);
+        var res = placePending(next, days, P, locks);
         var growth = growthOf(baseTotal, res.total);
         var loadGrowthOk = baseTotal <= 0 ? res.total === 0 : growth <= P.loadGrowthCap + EPS;
         var bufferPreserved = checkBuffer(res.loads, days);
@@ -313,6 +368,7 @@
             c.substituted = true;
             c.substitutedBy = String(B.id);
           }
+          if (t.id === B.id) c.replaces = String(A.id);
           return c;
         });
         if (!bIsPending) {
@@ -344,15 +400,23 @@
     };
   }
 
-  /* ── L4 放弃（标记 abandoned，需用户确认） ── */
-  function attemptAbandon(pending, days, P, baseTotal) {
-    var rest = pending.slice();
+  /* ── L4 放弃（只出建议：needsConfirmation，确认后才生效） ── */
+  function attemptAbandon(pending, days, P, baseTotal, locks) {
+    /* 锁定任务是硬约束，永远不进入放弃候选 */
+    var rest = pending.filter(function (t) { return !isLocked(t, locks); });
+    if (!rest.length) {
+      return {
+        ok: false, reason: '全部未完成项均已锁定，没有可放弃的候选',
+        diff: [], loads: null, total: null, growth: 0, tasks: pending,
+        guards: { loadGrowthOk: false, bufferPreserved: false, compressedShareOk: true }
+      };
+    }
     var abandoned = [];
     var guard = 0;
     while (rest.length && guard++ <= pending.length + 1) {
       var victim = rest.slice().sort(byWeightAsc)[0];
       var trial = rest.filter(function (t) { return t.id !== victim.id; });
-      var res = placePending(trial, days, P);
+      var res = placePending(trial, days, P, locks);
       var growth = growthOf(baseTotal, res.total);
       var loadGrowthOk = baseTotal <= 0 ? res.total === 0 : growth <= P.loadGrowthCap + EPS;
       var bufferPreserved = checkBuffer(res.loads, days);
@@ -400,6 +464,8 @@
     var tasks = clone(src.tasks || []);
     var weekRaw = clone(src.week || []);
     var days = normalizeDays(weekRaw, P);
+    /* 锁定集合：硬约束，直接参与各等级判定，不做事后过滤 */
+    var locks = normalizeLocks(src.locks);
 
     var baseTotal = 0;
     days.forEach(function (d) { baseTotal += d.minutes; });
@@ -451,6 +517,7 @@
         diff: [],
         loadDelta: 0,
         accepted: false,
+        needsConfirmation: false,
         verdict: 'blocked',
         snapshot: snapshot,
         guards: guards,
@@ -460,25 +527,25 @@
     }
 
     var attempts = [];
-    var l1 = attemptDefer(pending, days, P, baseTotal);
+    var l1 = attemptDefer(pending, days, P, baseTotal, locks);
     attempts.push(l1);
     if (l1.ok) {
       return finish(attempts, 1, l1);
     }
 
-    var l2 = attemptCompress(pending, days, P, baseTotal, totalWorkload);
+    var l2 = attemptCompress(pending, days, P, baseTotal, totalWorkload, locks);
     attempts.push(l2);
     if (l2.ok) {
       return finish(attempts, 2, l2);
     }
 
-    var l3 = attemptSubstitute(pending, days, P, baseTotal, tasks);
+    var l3 = attemptSubstitute(pending, days, P, baseTotal, tasks, locks);
     attempts.push(l3);
     if (l3.ok) {
       return finish(attempts, 3, l3);
     }
 
-    var l4 = attemptAbandon(pending, days, P, baseTotal);
+    var l4 = attemptAbandon(pending, days, P, baseTotal, locks);
     attempts.push(l4);
     if (l4.ok) {
       return finish(attempts, 4, l4);
@@ -492,6 +559,7 @@
       diff: [],
       loadDelta: 0,
       accepted: false,
+      needsConfirmation: false,
       verdict: 'blocked',
       snapshot: snapshot,
       guards: guards,
@@ -520,18 +588,36 @@
       guards.bufferPreserved = attempt.guards.bufferPreserved;
       guards.compressedShareOk = attempt.guards.compressedShareOk;
 
+      /* L4 只出建议：未确认前不得视为已接受，也不得落库 */
+      var needsConfirmation = level === 4;
       return {
         strategies: pack(attempts2, level),
         diff: diff,
         loadDelta: round(attempt.growth, 4),
-        accepted: true,
-        verdict: 'ok',
+        accepted: !needsConfirmation,
+        needsConfirmation: needsConfirmation,
+        verdict: needsConfirmation ? 'needsConfirmation' : 'ok',
         snapshot: snapshot,
         guards: guards,
         nextTasks: merged,
         nextWeek: weekFrom(days, attempt.loads)
       };
     }
+  }
+
+  /* 确认落库：仅接受 needsConfirmation=true 的结果，返回新的已确认对象（不修改入参） */
+  function confirmReplan(result) {
+    if (!result || typeof result !== 'object') {
+      throw new TypeError('confirmReplan: 需要重排结果对象');
+    }
+    if (result.needsConfirmation !== true) {
+      throw new TypeError('confirmReplan: 该结果无需确认，不能重复确认');
+    }
+    var out = clone(result);
+    out.accepted = true;
+    out.needsConfirmation = false;
+    out.verdict = 'ok';
+    return out;
   }
 
   /* 撤销：反向应用快照，不重算 */
@@ -545,5 +631,5 @@
     };
   }
 
-  return { replan: replan, undoReplan: undoReplan };
+  return { replan: replan, confirmReplan: confirmReplan, undoReplan: undoReplan };
 }));

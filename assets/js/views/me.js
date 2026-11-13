@@ -24,7 +24,7 @@ window.ZX = window.ZX || {};
 
     return '<div class="wrap">' +
       '<div class="vhead"><div>' +
-        '<div class="eyebrow">ABOUT · ' + U.esc(S.user.name) + '</div>' +
+        '<div class="eyebrow">关于 · ' + U.esc(S.user.name) + '</div>' +
         '<h1>我的<span class="sub">可用时段与通知策略</span></h1>' +
       '</div><div class="vstats">' +
         '<div class="vs"><span>周可用</span><b>' + S.user.weeklyH + ' h</b></div>' +
@@ -93,12 +93,12 @@ window.ZX = window.ZX || {};
 
       ZX.ui.fold('me:display', {
         title: '显示与动效',
-        meta: '底纹 · 暖光 · 字号',
+        meta: '底纹 · 纸纹 · 动效 · 字号',
         body:
           fontRow() +
           prefRow('日程底纹', '背景方格纸 · 可关闭', 'grid') +
-          prefRow('暖光氛围', '环境暖光 · 高亮辉光', 'glow') +
-          prefRow('界面动效', '入场级联 · 图表绘制 · 进度增长', 'motion') +
+          prefRow('纸面纹理', '纤维质感 · 静纸模式', 'glow') +
+          prefRow('界面动效', '弹层过渡 · 打字指示 · 计时刷新', 'motion') +
           '<p class="pref-note">偏好写入浏览器本地（localStorage），仅影响本机视觉；系统开启「减少动态效果」时动效始终关闭。</p>'
       }) +
     '</div>';

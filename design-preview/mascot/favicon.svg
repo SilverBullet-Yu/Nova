@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" role="img" aria-label="小序 favicon">
+  <!-- 小序 v2 · favicon 16px：暖墨底 + 双耳与双眼，最小可辨识形 -->
+  <rect width="16" height="16" rx="3" fill="#241E16"/>
+  <path d="M4.6 5.6C3.9 3.9 3.2 2.5 2.7 1.7Q2.5 1 3.2 1Q3.7 1.1 4 2C4.6 3.3 5.1 4.5 5.4 5.4Z" fill="#D9A44A"/>
+  <path d="M11.4 5.6C12.1 3.9 12.8 2.5 13.3 1.7Q13.5 1 12.8 1Q12.3 1.1 12 2C11.4 3.3 10.9 4.5 10.6 5.4Z" fill="#D9A44A"/>
+  <rect x="4.6" y="6.8" width="2.4" height="5" rx="1.2" fill="#D9A44A"/>
+  <rect x="9" y="6.8" width="2.4" height="5" rx="1.2" fill="#D9A44A"/>
+</svg>

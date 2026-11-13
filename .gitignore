@@ -21,6 +21,9 @@ tmp/
 .playwright-cli/
 .hallmark/
 
+# 构建产物（CloudBase 云函数部署包）
+.deploy/
+
 # 编辑器与系统
 .vscode/
 .idea/

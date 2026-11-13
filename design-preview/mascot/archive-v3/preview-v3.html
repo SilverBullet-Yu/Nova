@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>诺瓦 v3 · IP 形象预览 · 诺瓦 Nova</title>
+<style>
+  /* 独立预览页，视觉对齐 assets/css/app.css */
+  :root{
+    --bg:#F7F2E7; --bg2:#F1EBDD; --panel:#FCF9F1;
+    --line:rgba(36,30,22,.16); --line2:rgba(36,30,22,.34);
+    --txt:#241E16; --txt2:#5F5647; --txt3:#6E6455;
+    --ac:#8A5716; --acbg:rgba(138,87,22,.08);
+    --cinnabar:#9C3B2B;
+    --sans:"Inter","Segoe UI","PingFang SC","HarmonyOS Sans SC","MiSans","Noto Sans SC","Microsoft YaHei",sans-serif;
+    --display:"Source Han Serif SC","Noto Serif SC","Songti SC","STSong","SimSun",serif;
+    --mono:"Cascadia Mono","JetBrains Mono",Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:15px;line-height:1.62;
+       background-image:linear-gradient(rgba(36,30,22,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(36,30,22,.035) 1px,transparent 1px);
+       background-size:24px 24px}
+  .wrap{max-width:1080px;margin:0 auto;padding:32px 28px 64px}
+  header.top{display:flex;align-items:baseline;gap:14px;border-bottom:1px solid var(--line2);padding-bottom:14px}
+  header.top h1{font-family:var(--display);font-size:26px;margin:0;font-weight:700}
+  header.top .en{color:var(--txt3);font-size:12.5px;letter-spacing:.08em}
+  header.top .ref{margin-left:auto;color:var(--txt2);font-size:12.5px}
+  header.top .ref b{color:var(--cinnabar);font-weight:600}
+  section{margin-top:34px}
+  h2{font-family:var(--display);font-size:19px;margin:0 0 4px}
+  h2 .no{color:var(--ac);font-family:var(--mono);font-size:14px;margin-right:10px}
+  .sub{color:var(--txt3);font-size:12.5px;margin:0 0 14px}
+  .panel{background:var(--panel);border:1px solid var(--line);padding:22px}
+  .row{display:flex;gap:22px;flex-wrap:wrap}
+  .stage{flex:1.1;min-width:300px;display:flex;align-items:flex-end;justify-content:center;gap:34px;
+         background:var(--bg2);border:1px solid var(--line);padding:26px 20px 18px;
+         background-image:linear-gradient(rgba(36,30,22,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(36,30,22,.04) 1px,transparent 1px);
+         background-size:24px 24px}
+  .stage img{width:210px;height:auto}
+  .stage img.small{width:132px;opacity:.92}
+  .kv{flex:1;min-width:280px}
+  .kv h3{font-size:14px;margin:0 0 8px;color:var(--ac)}
+  .kv p{margin:0 0 10px;font-size:13.5px;color:var(--txt2)}
+  .kv p b{color:var(--txt);font-weight:600}
+  .quote{border-left:3px solid var(--ac);background:var(--acbg);padding:10px 14px;font-family:var(--display);font-size:15px;margin:12px 0}
+  .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:20px}
+  .cell{background:var(--panel);border:1px solid var(--line);padding:16px;text-align:center}
+  .cell img{max-width:100%;height:auto}
+  .cell .t{font-size:12px;color:var(--txt3);margin-top:10px}
+  .cell .t b{display:block;color:var(--txt);font-size:13px;margin-bottom:3px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:var(--bg2);font-weight:600;color:var(--txt2);font-size:12px;white-space:nowrap}
+  .swatches{display:flex;gap:12px;flex-wrap:wrap}
+  .sw{width:132px;border:1px solid var(--line)}
+  .sw .chip{height:56px;border-bottom:1px solid var(--line)}
+  .sw .meta{padding:8px 10px;font-size:11.5px;line-height:1.5}
+  .sw .meta .hex{font-family:var(--mono);color:var(--txt2)}
+  .apps{display:flex;gap:26px;align-items:flex-end;flex-wrap:wrap}
+  .app{display:flex;flex-direction:column;align-items:center;gap:8px;font-size:11.5px;color:var(--txt3)}
+  .mockchat{display:flex;align-items:center;gap:10px;border:1px solid var(--line);background:var(--panel);padding:10px 14px}
+  .mockchat img{width:34px;height:34px;border-radius:7px}
+  .mockchat .t b{font-size:14px;display:block}
+  .mockchat .t span{font-size:11.5px;color:var(--txt3)}
+  .mockseal{width:34px;height:34px;display:flex;align-items:center;justify-content:center;background:var(--panel);border:1px solid var(--line)}
+  .mockseal img{width:26px;height:26px;border-radius:6px}
+  .files{font-family:var(--mono);font-size:12px;color:var(--txt3)}
+  footer{margin-top:44px;border-top:1px solid var(--line);padding-top:14px;color:var(--txt3);font-size:12px}
+  footer a{color:var(--ac)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>诺瓦 v3</h1>
+    <span class="en">IP 形象 · 贴原设造型语言的重绘</span>
+    <span class="ref">设定来源：<b>docs/IP-DESIGN.md</b> · 素材：<b>assets/img/</b></span>
+  </header>
+
+  <section>
+    <h2><span class="no">01</span>主立绘</h2>
+    <p class="sub">琥珀涂装（产品内使用）与原味涂装（周边 / 表情包，不进产品界面）同几何换肤。</p>
+    <div class="row">
+      <div class="stage">
+        <img src="../../assets/img/mascot-v3.svg" alt="诺瓦 v3 琥珀版" />
+        <img src="../../assets/img/mascot-v3-classic.svg" alt="诺瓦 v3 原味版" />
+      </div>
+      <div class="kv">
+        <h3>造型转译</h3>
+        <p><b>斜向长耳</b>：椭圆壳 + 琥珀内透镜，长宽比 ≈ 3.4:1，倾角 ∓26°。</p>
+        <p><b>球形机身</b>：rx:ry = 78:72，机内极淡方格底纹，右下暗面 + 左上高光。</p>
+        <p><b>深色大面罩</b>：128×94、圆角 42，琥珀描边转译原设的发光屏。</p>
+        <p><b>竖胶囊眼</b>：14×36；右上有一块反光斜片。</p>
+        <p><b>水滴推进器 ×2</b> 与 <b>右后三层拖尾</b>：保留原设的悬浮推进语汇。</p>
+        <p><b>胸口银环 + 朱砂「诺」印</b>：原设胸口部件的位置，换成本产品的身份锚点。</p>
+        <div class="quote">轮廓类别致敬，细节全部原创——非原设描摹。</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="no">02</span>状态</h2>
+    <p class="sub">9 态体系对应 9 个真实产品场景；已落地 ①待机 / ②聆听 / ④专注。</p>
+    <div class="grid3">
+      <div class="cell"><img src="../../assets/img/mascot-v3.svg" alt="" /><div class="t"><b>① 待机 idle</b>标准眼 + 呼吸</div></div>
+      <div class="cell"><img src="../../assets/img/mascot-v3-listen.svg" alt="" /><div class="t"><b>② 聆听 listening</b>眼拉高 + 两侧声弧</div></div>
+      <div class="cell"><img src="../../assets/img/mascot-v3-focus.svg" alt="" /><div class="t"><b>④ 专注 focusing</b>双耳转朱砂 + 胸口进度环</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="no">03</span>小形</h2>
+    <p class="sub">章式头像（墨底方章 + 斜耳 + 双眼 + 朱砂印）与 16px 最小形。</p>
+    <div class="grid3">
+      <div class="cell"><img src="../../assets/img/avatar-v3.svg" alt="" style="width:96px" /><div class="t"><b>avatar-v3.svg</b>96×96 · 顶栏品牌标记 / 对话头像</div></div>
+      <div class="cell"><img src="../../assets/img/avatar-v3-listen.svg" alt="" style="width:96px" /><div class="t"><b>avatar-v3-listen.svg</b>96×96 · 输入聚焦时切换</div></div>
+      <div class="cell"><img src="../../assets/img/favicon-v3.svg" alt="" style="width:96px;image-rendering:pixelated" /><div class="t"><b>favicon-v3.svg</b>16×16 · 最小可辨识形</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="no">04</span>产品接入</h2>
+    <p class="sub">以「替换既有字块」的方式最小侵入，不改布局与网格。</p>
+    <div class="panel">
+      <div class="apps">
+        <div class="app"><div class="mockseal"><img src="../../assets/img/avatar-v3.svg" alt="" /></div><span>顶栏品牌标记 .seal · 26px</span></div>
+        <div class="app"><div class="mockchat"><img src="../../assets/img/avatar-v3.svg" alt="" /><div class="t"><b>诺瓦</b><span>Student assistant</span></div></div><span>对话栏头像 .avatar · 34px</span></div>
+        <div class="app"><div class="mockchat"><img src="../../assets/img/avatar-v3-listen.svg" alt="" /><div class="t"><b>诺瓦</b><span>聆听态 · 输入聚焦</span></div></div><span>② 聆听态切换</span></div>
+        <div class="app"><img src="../../assets/img/mascot-v3.svg" alt="" style="width:118px" /><span>欢迎语主形象 · 132×165</span></div>
+        <div class="app"><img src="../../assets/img/mascot-v3-focus.svg" alt="" style="width:36px" /><span>④ 专注态 · 任务行 24×30</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="no">05</span>配色</h2>
+    <p class="sub">琥珀涂装全部色值取自 assets/css/app.css；朱砂只用于「正在进行」语义。</p>
+    <div class="panel">
+      <div class="swatches">
+        <div class="sw"><div class="chip" style="background:#FCF9F1"></div><div class="meta">机身纸白<br><span class="hex">#FCF9F1</span></div></div>
+        <div class="sw"><div class="chip" style="background:#2A2318"></div><div class="meta">屏幕暖墨<br><span class="hex">#2A2318</span></div></div>
+        <div class="sw"><div class="chip" style="background:#D9A44A"></div><div class="meta">琥珀亮（眼 / 耳 / 描边）<br><span class="hex">#D9A44A</span></div></div>
+        <div class="sw"><div class="chip" style="background:#F1C97F"></div><div class="meta">耳内透镜亮芯<br><span class="hex">#F1C97F</span></div></div>
+        <div class="sw"><div class="chip" style="background:#9C3B2B"></div><div class="meta">朱砂（仅「正在进行」）<br><span class="hex">#9C3B2B</span></div></div>
+        <div class="sw"><div class="chip" style="background:#1D2B52"></div><div class="meta">原味面罩藏青<br><span class="hex">#1D2B52</span></div></div>
+        <div class="sw"><div class="chip" style="background:#3FCBEA"></div><div class="meta">原味青蓝<br><span class="hex">#3FCBEA</span></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="no">06</span>素材与生成</h2>
+    <div class="panel">
+      <table>
+        <tr><th>文件</th><th>内容</th><th>用处</th></tr>
+        <tr><td class="mono">assets/img/mascot-v3.svg</td><td>主立绘 · 琥珀涂装 240×300</td><td>欢迎语主形象、对外展示</td></tr>
+        <tr><td class="mono">assets/img/mascot-v3-classic.svg</td><td>主立绘 · 原味涂装</td><td>表情包 / 周边，不进产品 UI</td></tr>
+        <tr><td class="mono">assets/img/mascot-v3-listen.svg</td><td>② 聆听态</td><td>形象状态素材</td></tr>
+        <tr><td class="mono">assets/img/mascot-v3-focus.svg</td><td>④ 专注态</td><td>计时进行中</td></tr>
+        <tr><td class="mono">assets/img/avatar-v3.svg</td><td>章式头像 96×96</td><td>.seal / .avatar</td></tr>
+        <tr><td class="mono">assets/img/avatar-v3-listen.svg</td><td>章式头像 · 聆听态</td><td>输入聚焦</td></tr>
+        <tr><td class="mono">assets/img/favicon-v3.svg</td><td>16px 最小形</td><td>标签页图标</td></tr>
+      </table>
+      <p class="files" style="margin:14px 0 0">生成：node scripts/build-mascot-v3.js　→　产物写入 assets/img/（零依赖，Node 22+）</p>
+    </div>
+  </section>
+
+  <footer>
+    设定唯一来源：<a href="../../docs/IP-DESIGN.md">docs/IP-DESIGN.md</a>　·　v1 方盒 / v2 球形方案归档于同目录　·　参考来源：《赛尔号》超能NoNo（淘米网络 IP），轮廓类别致敬、细节原创
+  </footer>
+</div>
+</body>
+</html>

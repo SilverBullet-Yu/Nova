@@ -3,6 +3,8 @@
 一个面向学生的、可运行、可解释、可复现的日程助理 Demo。左侧对话栏用自然语言驱动右侧工作台，后端提供确定性调度引擎与 REST API；**同一套引擎代码**既供后端在线计算，也供前端离线兜底。
 
 > 定位说明：本 Demo 的意图识别是关键词匹配，排程、重排与归因全部由纯函数计算，不调用大模型。相同输入必得相同输出，每个排程决策都附带一句人类可读的理由。
+>
+> 视觉主题：**纸白底 + 墨蓝主色**（单一活性色，全部衍生层由 `:root` 派生）；助理人格「诺瓦」的九态形象贯穿顶栏品牌标记、对话栏头像、favicon 与各场景提示，设定见 [`docs/IP-DESIGN.md`](docs/IP-DESIGN.md)。
 
 ---
 
@@ -64,12 +66,53 @@ PORT=8080 HOST=127.0.0.1 node server/main.js
 
 ---
 
+## 部署到腾讯云 CloudBase
+
+线上环境已部署，前后端同源，一个地址即可访问完整功能：
+
+**https://demo-d1gyqshti9179e9bb-1359241594.ap-shanghai.app.tcloudbase.com/**
+
+| 项目 | 值 |
+|---|---|
+| 环境 ID | `demo-d1gyqshti9179e9bb`（地域 ap-shanghai） |
+| 部署形态 | HTTP 云函数 `nova`（运行时常驻监听 `9000`，由 `scf_bootstrap` 拉起） |
+| 运行时 | `Nodejs20.19` |
+| 访问入口 | HTTP 网关默认域名，路由 `/` → `nova`（`WEB_SCF`，已开启路径透传） |
+| 函数包 | `.deploy/cloudbase-functions/nova`（约 381 KB / 29 个文件，零依赖） |
+
+### 为什么是云函数而不是云托管
+
+本服务是无状态 HTTP：只做「请求进来 → 纯函数计算 → 响应」，没有 WebSocket / SSE 长连接、不需要常驻后台进程、不访问 VPC 内数据库、无自定义系统依赖。按 CloudBase 的选型原则，这类服务用 HTTP 云函数即可，无需初始化云托管环境，部署更快、按请求计费且可缩容到 0。
+
+### 构建与更新
+
+```bash
+npm run build:cloudbase   # 产出 .deploy/cloudbase-functions/nova
+```
+
+构建脚本把 `index.html` / `assets/` / `shared/` / `server/` 复制到 `.deploy`，再落入口文件（`deploy/cloudbase/function/index.js`、`scf_bootstrap`）。源仓库结构不变，`npm start` 与 `file://` 双击打开都不受影响。
+
+更新线上代码：重新执行上面的构建，再用 CloudBase 的 `manageFunctions(action="updateFunctionCode", functionName="nova")` 上传即可。
+
+### 部署相关的两处适配
+
+1. **`server/main.js` 新增 `CORS_MODE=off`**：云函数经 HTTP 网关暴露时，网关会按环境安全域名自行回填 `Access-Control-Allow-Origin`，函数再写一次会得到 `<origin>,*` 这种非法多值头，浏览器直接判为 CORS 失败。`scf_bootstrap` 里默认关闭；本地 `npm start` 不受影响。
+2. **入口与引导脚本**：`deploy/cloudbase/function/index.js` 复用 `server/main.js` 导出的 `start()` 并绑定 `9000`；`scf_bootstrap` 使用 `/var/lang/node20/bin/node`，与 `Nodejs20.19` 运行时严格对应。
+
+### 已知的线上限制
+
+- **默认域名中间页**：CloudBase 默认测试域名（`*.app.tcloudbase.com`）对浏览器首次导航会展示一次「风险提醒 / 确定访问」中间页，点击一次后 Cookie 有效期内不再出现。这是平台合规策略，唯一移除方式是绑定已备案的自定义域名。程序化调用（fetch / curl）不受影响。
+- **数据为内存态**：`server/store/memory.js` 的数据随函数实例存活，实例回收后回到种子数据。目标、改期、锁定仍只写本机 op 队列，未接持久化——与本地运行时的边界一致。
+
+---
+
 ## 使用指引
 
 ### 界面结构
 
 - **顶栏**：品牌、主导航（**对话 / 今日 / 计划 / 数据 / 我的**）、同步状态与日程引擎状态。按 `/` 进入对话页。
-- **对话（主页面）**：默认页签。输入自然语言或点下方快捷语句，小序驱动其余工作台子页；消息历史跨页签保留。
+- **对话（主页面）**：默认页签。输入自然语言或点下方快捷语句，诺瓦驱动其余工作台子页；消息历史跨页签保留。
+- **形象**：助理人格「诺瓦」的 v4 形象贯穿顶栏品牌标记、对话栏头像、favicon 与欢迎语主形象；**九态系统全部落地并接入对应场景**——输入聚焦切「聆听」、等待响应显示「计算中」、计时中在任务行显示「专注」、任务完成显示「达成」、中断显示「挽救」、偏差归因与负载预警显示「提醒」、无后端时头像褪色为「离线」、关键词未命中显示「兜底」。设定与版权边界见 [`docs/IP-DESIGN.md`](docs/IP-DESIGN.md)。
 - **工作台子页**：今日 / 计划 / 数据 / 我的，随顶栏导航或对话指令切换；目标、阶段与 `R` 值显示在工作台头部。
 - **渐进披露**：每页只保留首要信息，次要内容默认收起——数据「趋势与归因」、我的「数据与隐私 / 显示与动效」。点击标题行展开或收起，展开态写入本机（zx.folds），刷新后保持。
 
@@ -119,9 +162,11 @@ PORT=8080 HOST=127.0.0.1 node server/main.js
 ├── index.html                # 前端入口，支持 file:// 双击打开
 ├── assets/
 │   ├── css/app.css           # 样式（单一来源，CSS 变量驱动）
+│   ├── img/                  # 诺瓦 v4 形象素材（由 scripts/build-mascot-v4.js 生成）
 │   └── js/
 │       ├── api.js            # 后端通信 + 超时降级 + op 队列
-│       ├── engine.js         # 引擎桥接（后端优先 → 本地引擎 → 内置兜底）
+│       ├── engine.js         # 引擎桥接（后端优先 → 本地引擎产物，无内置副本）
+│       ├── rhythm.build.js   # 自动生成：由 shared/engine/* 拼接的浏览器引擎产物
 │       ├── state.js          # 应用状态
 │       ├── assistant.js      # 对话意图路由与重排流程
 │       ├── ui.js             # 共享 UI 原语：弹层 / 确认 / 轻提示

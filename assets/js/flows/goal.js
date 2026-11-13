@@ -140,15 +140,15 @@ window.ZX = window.ZX || {};
     var keep = ZX.ui.recallFocus(api, 'sa');
     var head, body, footer;
     if (step === 1) {
-      head = ['GOAL / 新建', '设定你的目标', '先设目标，再判断可行性；不可行就先校准，不直接砍计划。'];
+      head = ['目标 / 新建', '设定你的目标', '先设目标，再判断可行性；不可行就先校准，不直接砍计划。'];
       body = formHtml();
       footer = formFooter();
     } else if (step === 2) {
-      head = ['GOAL / 可行性', '可行性判定', 'R = T / D。低于 0.70 时先校准，再决定怎么拆。'];
+      head = ['目标 / 可行性', '可行性判定', 'R = T / D。低于 0.70 时先校准，再决定怎么拆。'];
       body = feasHtml();
       footer = feasFooter();
     } else {
-      head = ['GOAL / 拆解', '拆解草案', '这一页只调计划项；确认后写入「计划」并生成今天的前 4 项。'];
+      head = ['目标 / 拆解', '拆解草案', '这一页只调计划项；确认后写入「计划」并生成今天的前 4 项。'];
       body = planHtml();
       footer = planFooter();
     }
@@ -729,7 +729,7 @@ window.ZX = window.ZX || {};
     addForm = { s: '数学', title: '', min: 45 };
 
     api = ZX.ui.sheet({
-      eyebrow: 'GOAL / 新建',
+      eyebrow: '目标 / 新建',
       title: '设定你的目标',
       sub: '先设目标，再判断可行性；不可行就先校准，不直接砍计划。',
       body: formHtml(),

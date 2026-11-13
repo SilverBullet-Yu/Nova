@@ -119,8 +119,9 @@ schedule({
 
 ```js
 replan({
-  tasks: [...],       // 未完成 + 已完成（用于计算负载）
-  week: [...],        // 未来 7 天负载 [{ date, minutes }]
+  tasks: [...],       // 未完成 + 已完成（用于计算负载）；substituted / abandoned 由引擎排除待办
+  week: [...],        // 未来 7 天负载 [{ date, minutes, capacity, buffer }]
+  locks: { taskId: true }, // 硬约束：锁定任务不参与顺延 / 压缩 / 替代 / 放弃
   params: {
     loadGrowthCap: 0.20,     // 单次重排后未来 7 天负载增幅上限
     compressFloor: 0.60,     // 压缩工时下限（占原工时比例）
@@ -136,8 +137,9 @@ replan({
     taskId, subject, from: string, to: string, detail: string
   }],
   loadDelta: number,     // 未来 7 天负载变化比例（0.05 = +5%）
-  accepted: boolean,
-  verdict: 'ok' | 'blocked',
+  accepted: boolean,     // L4 恒为 false，确认后才为 true
+  needsConfirmation: boolean, // L4 放弃建议为 true
+  verdict: 'ok' | 'needsConfirmation' | 'blocked',
   snapshot: { tasks, week, timestamp },   // 撤销用快照（不读时钟，时间戳由调用方注入）
   guards: {
     loadGrowthOk: boolean,
@@ -151,10 +153,10 @@ replan({
 四级语义：
 | 级 | 名称 | 行为 | 回退条件 |
 |---|---|---|---|
-| 1 | 顺延 | 未完成项顺延到弹性位或空闲时段 | 7 天负载增幅 > `loadGrowthCap` |
-| 2 | 压缩 | 按权重从低到高压缩，下限原工时 `compressFloor`，标记 degraded | 压缩项占比 > `compressedShareCap` |
-| 3 | 替代 | 同知识域内用高频高权重节点替换低频节点 | 无可替换节点 |
-| 4 | 放弃 | 标记 abandoned，需用户确认 | 用户拒绝 |
+| 1 | 顺延 | 按权重从高到低填入未来 7 天 capacity 内的空闲分钟；不占用弹性池，不按 task.date 改变顺序 | 7 天负载增幅 > `loadGrowthCap`，或容量装不下 |
+| 2 | 压缩 | **仅容量溢出时触发**：`overflow = max(0, 待排分钟 − 剩余容量)`，按权重从低到高压缩至 `saved ≥ overflow`，下限原工时 `compressFloor`，标记 degraded | 压缩到下限仍装不下 / 压缩占比超限 / 增幅事后守卫不过 |
+| 3 | 替代 | 同知识域内用高频高权重节点替换低频节点；原任务标记 `substituted` 退出待办，B 记录 `replaces` | 无可替换节点，或替换后复核不过 |
+| 4 | 放弃 | 标记 abandoned 并返回 `needsConfirmation: true`，**不自动接受** | 未确认 / 全部锁定 |
 
 **三条防雪崩断言（同时成立才算 accepted）**：
 1. 未来 7 天负载增幅 ≤ `loadGrowthCap`
@@ -164,6 +166,7 @@ replan({
 `replan` **不得自行读时钟**：`snapshot.timestamp` 由调用方注入。
 
 撤销由 `shared/engine/replan.js` 另导出 `undoReplan(snapshot)`，返回还原后的 `{ tasks, week }`，**不重算**。
+L4 确认由 `confirmReplan(result)` 完成：只接受 `needsConfirmation === true` 的结果，返回 `accepted === true` 的新对象（不改入参）；服务端在确认前不落库。
 
 ### 3.4 `shared/engine/attribute.js` → `attribute(input)`
 
@@ -258,7 +261,7 @@ ZX.api.health()        -> Promise<{ok, version}>
 
 **降级要求（架构文档 C1 / C4）**：
 1. 请求超时 **3000ms**，超时或网络失败 → 抛错
-2. 前端在捕获错误后**必须**降级到本地 `shared/engine` 计算（通过 `<script src="shared/engine/*.js">` 引入），保证离线双击打开时全部功能可用
+2. 前端在捕获错误后**必须**降级到本地引擎产物（`assets/js/rhythm.build.js`，由 `npm run build:engine` 从 `shared/engine/*` 生成），保证离线双击打开时全部功能可用
 3. 本地写操作先入 `localStorage` 的 op 队列（键 `zx.op_queue`），联网成功后清 pending 标记（对应 C4 写路径顺序）
 4. 顶栏同步指示器需反映三种状态：`已同步` / `离线 · 待上行 N` / `离线 · 本地计算`
 
@@ -266,7 +269,7 @@ ZX.api.health()        -> Promise<{ok, version}>
 
 ## 7. 兼容性硬要求（前端执行者必守）
 
-1. `index.html` 必须支持 **file:// 双击直接打开**（不依赖任何构建产物、不依赖 CDN）
+1. `index.html` 必须支持 **file:// 双击直接打开**（引擎产物随仓库提交，无需构建步骤；`npm run build:engine` 可重建，不依赖 CDN）
 2. 视觉沿用已确认的深色 HUD 体系：近黑底 + 电光绿为唯一活性色、1px 发丝线、等宽数字、直角框、字号层级；全部视觉参数集中在 `assets/css/app.css` 顶部 token 区，新增样式必须复用变量，不得另起一套配色
 3. 现有**全部交互**必须保留：4 个 Tab（今日/计划/数据/我的）、对话意图路由、重排流程、撤销、计时器、降载采纳、预置撤销、通知开关、导出
 4. 现有文案与数值（如 R 1.08、+11.2%、68%）不得擅自改动

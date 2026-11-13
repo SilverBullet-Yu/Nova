@@ -320,11 +320,12 @@ window.ZX = window.ZX || {};
         : '今天 ' + m.total + ' 项全部记录，累计 <b class="ac">' + U.hm(m.worked) + '</b>。弹性位留空 60 分钟。';
     }
 
-    say('<p>' + head + tail + '</p>' +
+    say((completion >= 100 ? '<img class="msg-state state-done" src="assets/img/mascot-v4-done.svg" width="32" height="28" alt="" />' : '') +
+      '<p>' + head + tail + '</p>' +
       (completion < 100
         ? '<p style="color:var(--txt3);font-size:11px">部分完成不追加补作，剩余工时只占用弹性位。</p>'
         : (left ? '' : '<p style="color:var(--txt3);font-size:11px">没有追加任务。按计划结束，比多学 20 分钟更重要。</p>')),
-      'execution · ' + (sess ? sess.completion : 100) + '%');
+      '执行 · 完成 ' + (sess ? sess.completion : 100) + '%');
   }
 
   /* ---------- 跳过 ---------- */
@@ -399,7 +400,7 @@ window.ZX = window.ZX || {};
     ZX.render();
     ZX.ui.toast('已跳过 · 不计入欠账');
     say('<p>已跳过：<b>' + U.esc(t.title) + '</b>（' + U.esc(reason) + '）。' +
-      '<b>不计入欠账</b>，也不占今日剩余；需要时在「已跳过」里恢复即可。</p>', 'execution · skip');
+      '<b>不计入欠账</b>，也不占今日剩余；需要时在「已跳过」里恢复即可。</p>', '执行 · 跳过');
   }
 
   function restoreTask(id) {
@@ -508,7 +509,7 @@ window.ZX = window.ZX || {};
     ZX.ui.toast('已补录 ' + U.hm(mins));
     say('<p>已补录：<b>' + (t ? U.esc(t.title) : U.esc(taskId)) + '</b>，' + U.hm(mins) +
       ' · 完成度 ' + completion + '%。' +
-      '<b>不计入达成率</b>，任务工时也保持不变。</p>', 'execution · backfill');
+      '<b>不计入达成率</b>，任务工时也保持不变。</p>', '执行 · 补录');
   }
 
   /* ---------- 今日页按钮委托（不改 main.js） ---------- */

@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="300" viewBox="0 0 240 300" role="img" aria-label="小序 v2：球形悬浮机器管家（原味涂装）">
+  <!-- 小序 v2 · 原味涂装：向超能NoNo配色气质致敬的原创演绎（银白球身 + 藏青面罩 + 青蓝发光耳眼）。
+       与琥珀版同几何；朱砂「序」印保留 = 是小序，不是 NoNo。
+       用途：表情包 / 周边 / 宣传图；不进产品 UI（产品内用琥珀版，守治学色彩纪律） -->
+  <defs>
+    <pattern id="gridp" width="12" height="12" patternUnits="userSpaceOnUse">
+      <path d="M12 0H0V12" fill="none" stroke="rgba(43,52,64,.06)" stroke-width="1"/>
+    </pattern>
+    <clipPath id="ballClip"><ellipse cx="120" cy="158" rx="80" ry="74"/></clipPath>
+  </defs>
+
+  <!-- 影（悬浮） -->
+  <ellipse cx="120" cy="274" rx="52" ry="8" fill="rgba(43,52,64,.15)"/>
+
+  <!-- 双耳天线 -->
+  <g stroke="#2B3440" stroke-width="2.5" stroke-linejoin="round" fill="#3FCBEA">
+    <path d="M96 102C89 74 78 44 70 26Q67 17 75 17Q81 18 85 30C92 52 101 76 107 98Z"/>
+    <path d="M144 102C151 74 162 44 170 26Q173 17 165 17Q159 18 155 30C148 52 139 76 133 98Z"/>
+  </g>
+  <g fill="none" stroke="#C9F4FC" stroke-width="3" stroke-linecap="round">
+    <path d="M89 88C83 66 76 46 72 32"/>
+    <path d="M151 88C157 66 164 46 168 32"/>
+  </g>
+
+  <!-- 侧盘 -->
+  <g stroke="#2B3440" stroke-width="2.5">
+    <circle cx="46" cy="150" r="13" fill="#E4EAEF"/>
+    <circle cx="194" cy="150" r="13" fill="#E4EAEF"/>
+  </g>
+  <circle cx="46" cy="150" r="4.5" fill="#3FCBEA"/>
+  <circle cx="194" cy="150" r="4.5" fill="#3FCBEA"/>
+
+  <!-- 球形机身 -->
+  <ellipse cx="120" cy="158" rx="80" ry="74" fill="#F2F6F8" stroke="#2B3440" stroke-width="2.5"/>
+  <ellipse cx="120" cy="158" rx="80" ry="74" fill="url(#gridp)" clip-path="url(#ballClip)"/>
+  <ellipse cx="152" cy="206" rx="44" ry="18" fill="rgba(43,52,64,.06)" clip-path="url(#ballClip)"/>
+  <ellipse cx="93" cy="110" rx="22" ry="10" fill="rgba(255,255,255,.6)" transform="rotate(-24 93 110)"/>
+
+  <!-- 耳根关节 -->
+  <g stroke="#2B3440" stroke-width="2.5" fill="#E4EAEF">
+    <circle cx="101" cy="90" r="6"/>
+    <circle cx="139" cy="90" r="6"/>
+  </g>
+
+  <!-- 大面罩脸（藏青） -->
+  <rect x="58" y="118" width="124" height="86" rx="42" fill="#1D2B52"/>
+  <rect x="63" y="123" width="114" height="76" rx="37" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="1"/>
+  <!-- 眼：青蓝竖胶囊 + 微光边 + 高光 -->
+  <rect x="91.5" y="136" width="17" height="32" rx="8.5" fill="none" stroke="rgba(92,230,247,.35)" stroke-width="4"/>
+  <rect x="131.5" y="136" width="17" height="32" rx="8.5" fill="none" stroke="rgba(92,230,247,.35)" stroke-width="4"/>
+  <rect x="91.5" y="136" width="17" height="32" rx="8.5" fill="#5CE6F7"/>
+  <rect x="131.5" y="136" width="17" height="32" rx="8.5" fill="#5CE6F7"/>
+  <rect x="94.5" y="140" width="5" height="11" rx="2.5" fill="rgba(255,255,255,.7)"/>
+  <rect x="134.5" y="140" width="5" height="11" rx="2.5" fill="rgba(255,255,255,.7)"/>
+  <!-- 嘴 -->
+  <rect x="113" y="180" width="14" height="4" rx="2" fill="rgba(92,230,247,.75)"/>
+
+  <!-- 胸口朱砂印「序」（身份锚点：是小序，不是 NoNo） -->
+  <rect x="109" y="206" width="22" height="22" rx="2" fill="#9C3B2B"/>
+  <text x="120" y="223" text-anchor="middle" font-family="'Songti SC','Noto Serif SC','SimSun',serif" font-size="13.5" font-weight="700" fill="#FFF5EF">序</text>
+</svg>

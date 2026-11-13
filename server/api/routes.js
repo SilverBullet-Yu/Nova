@@ -7,7 +7,7 @@
 
 const { feasibility } = require('../../shared/engine/feasibility.js');
 const { schedule } = require('../../shared/engine/schedule.js');
-const { replan, undoReplan } = require('../../shared/engine/replan.js');
+const { replan, confirmReplan, undoReplan } = require('../../shared/engine/replan.js');
 const { attribute } = require('../../shared/engine/attribute.js');
 
 const VERSION = '1.0.0';
@@ -19,6 +19,9 @@ const VERSION = '1.0.0';
  * E3002 资源已存在             → 409
  * E4001 幂等键重复（视为成功）  → 200
  * E4002 请求体过大 / 批量超限  → 400
+ * E4010 未提供或凭证无效       → 401
+ * E4030 越权访问（身份不一致）  → 403
+ * E4290 请求过于频繁           → 429
  * E5001 服务内部错误           → 500
  * E9001 未分类异常             → 500
  */
@@ -29,6 +32,9 @@ const ERRORS = {
   E3002: { status: 409, message: '资源已存在' },
   E4001: { status: 200, message: '幂等键重复，已返回首次结果' },
   E4002: { status: 400, message: '请求体过大或单批操作超过上限 200' },
+  E4010: { status: 401, message: '未提供有效凭证' },
+  E4030: { status: 403, message: '无权访问该用户数据' },
+  E4290: { status: 429, message: '请求过于频繁' },
   E5001: { status: 500, message: '服务内部错误' },
   E9001: { status: 500, message: '未分类异常' }
 };
@@ -76,7 +82,7 @@ function checkNumericFields(obj, fields) {
   });
 }
 
-function createRouter(store) {
+function createRouter(store, auth) {
   /* ── GET /api/health ── */
   function health() {
     return {
@@ -86,9 +92,15 @@ function createRouter(store) {
     };
   }
 
+  /* ── POST /api/auth/session ── */
+  /* 唯一无需凭证的业务入口：服务端生成随机 userId 并签发凭证，不接受任何客户端身份字段 */
+  function authSessionRoute() {
+    return auth.issueSession();
+  }
+
   /* ── GET /api/state ── */
-  function state() {
-    return store.getState();
+  function state(userId) {
+    return store.getState(userId);
   }
 
   /* ── POST /api/feasibility ── */
@@ -120,7 +132,7 @@ function createRouter(store) {
   }
 
   /* ── POST /api/replan ── */
-  function replanRoute(body) {
+  function replanRoute(body, userId) {
     const b = needObject(body);
     if (b.tasks === undefined) throw new ApiError('E1001', '缺少字段 tasks');
     if (b.week === undefined) throw new ApiError('E1001', '缺少字段 week');
@@ -137,10 +149,27 @@ function createRouter(store) {
       week: b.week,
       params: b.params || {},
       history: b.history || {},
+      locks: b.locks,
       timestamp: b.timestamp === undefined ? null : b.timestamp
     });
-    store.recordReplan(result);
+    /* L4 放弃需用户确认：needsConfirmation 的结果不落库 */
+    if (result.accepted === true) store.recordReplan(userId, result);
     return result;
+  }
+
+  /* ── POST /api/replan/confirm ──
+     用途：用户确认 L4 放弃建议后落库。只接受 needsConfirmation=true 的结果。 */
+  function replanConfirmRoute(body, userId) {
+    const b = needObject(body);
+    if (!isPlainObject(b.result)) throw new ApiError('E1001', '缺少字段 result');
+    let confirmed;
+    try {
+      confirmed = confirmReplan(b.result);
+    } catch (err) {
+      throw new ApiError('E1001', err.message);
+    }
+    store.recordReplan(userId, confirmed);
+    return confirmed;
   }
 
   /* ── POST /api/replan/undo ── */
@@ -169,17 +198,17 @@ function createRouter(store) {
   }
 
   /* ── POST /api/sessions ── */
-  function sessionsRoute(body) {
+  function sessionsRoute(body, userId) {
     const b = needObject(body);
     needString(b.opId, 'opId');
     needString(b.taskId, 'taskId');
     needNumber(b.durationMin, 'durationMin', { min: 0 });
     needNumber(b.completion, 'completion', { min: 0, max: 1 });
-    return store.recordSession(b);
+    return store.recordSession(userId, b);
   }
 
   /* ── POST /api/sync/ops ── */
-  function syncOpsRoute(body) {
+  function syncOpsRoute(body, userId) {
     const b = needObject(body);
     if (b.ops === undefined) throw new ApiError('E1001', '缺少字段 ops');
     const ops = needArray(b.ops, 'ops');
@@ -195,12 +224,16 @@ function createRouter(store) {
         throw new ApiError('E1001', 'ops[' + i + '].entityId 缺失');
       }
       if (op.clientTs !== undefined && op.clientTs !== null) needNumber(op.clientTs, 'ops[' + i + '].clientTs');
+      /* 身份只来自凭证：请求体携带的 userId 若与凭证不一致，直接拒绝，避免越权写入他人分区 */
+      if (op.userId !== undefined && op.userId !== null && String(op.userId) !== userId) {
+        throw new ApiError('E4030', 'ops[' + i + '].userId 与凭证身份不一致');
+      }
     });
-    return store.applyOps(ops);
+    return store.applyOps(userId, ops);
   }
 
   /* ── GET /api/sync?since=N ── */
-  function syncRoute(query) {
+  function syncRoute(query, userId) {
     const raw = query.get('since');
     let since = 0;
     if (raw !== null && raw !== undefined && raw !== '') {
@@ -214,12 +247,12 @@ function createRouter(store) {
       if (!/^\d+$/.test(String(limitRaw))) throw new ApiError('E1001', 'limit 必须是非负整数');
       limit = Math.min(parseInt(String(limitRaw), 10), store.MAX_SYNC_PAGE);
     }
-    return store.getOpsSince(since, limit);
+    return store.getOpsSince(userId, since, limit);
   }
 
   /* ── GET /api/reports/weekly ── */
-  function weeklyReport() {
-    const s = store.getModel();
+  function weeklyReport(userId) {
+    const s = store.getModel(userId);
     const ws = s.weekStats || {};
     const kpis = ws.kpis || {};
     return {
@@ -240,16 +273,18 @@ function createRouter(store) {
 
   const routes = {
     'GET /api/health': function () { return health(); },
-    'GET /api/state': function () { return state(); },
-    'GET /api/sync': function (ctx) { return syncRoute(ctx.query); },
-    'GET /api/reports/weekly': function () { return weeklyReport(); },
+    'POST /api/auth/session': function () { return authSessionRoute(); },
+    'GET /api/state': function (ctx) { return state(ctx.userId); },
+    'GET /api/sync': function (ctx) { return syncRoute(ctx.query, ctx.userId); },
+    'GET /api/reports/weekly': function (ctx) { return weeklyReport(ctx.userId); },
     'POST /api/feasibility': function (ctx) { return feasibilityRoute(ctx.body); },
     'POST /api/schedule': function (ctx) { return scheduleRoute(ctx.body); },
-    'POST /api/replan': function (ctx) { return replanRoute(ctx.body); },
+    'POST /api/replan': function (ctx) { return replanRoute(ctx.body, ctx.userId); },
+    'POST /api/replan/confirm': function (ctx) { return replanConfirmRoute(ctx.body, ctx.userId); },
     'POST /api/replan/undo': function (ctx) { return undoRoute(ctx.body); },
     'POST /api/attribute': function (ctx) { return attributeRoute(ctx.body); },
-    'POST /api/sessions': function (ctx) { return sessionsRoute(ctx.body); },
-    'POST /api/sync/ops': function (ctx) { return syncOpsRoute(ctx.body); }
+    'POST /api/sessions': function (ctx) { return sessionsRoute(ctx.body, ctx.userId); },
+    'POST /api/sync/ops': function (ctx) { return syncOpsRoute(ctx.body, ctx.userId); }
   };
 
   /**

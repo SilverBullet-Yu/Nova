@@ -9,7 +9,7 @@ const assert = require('node:assert/strict');
 
 const { feasibility } = require('../shared/engine/feasibility.js');
 const { schedule } = require('../shared/engine/schedule.js');
-const { replan, undoReplan } = require('../shared/engine/replan.js');
+const { replan, confirmReplan, undoReplan } = require('../shared/engine/replan.js');
 const { attribute } = require('../shared/engine/attribute.js');
 const { seed } = require('../shared/data/seed.js');
 
@@ -223,7 +223,7 @@ test('replan：确定性（同输入两次全等）', () => {
   assert.deepEqual(replan(input), replan(input));
 });
 
-test('replan：种子数据上 L1 顺延 +23% 超限 → 回退到 L2 压缩生效', () => {
+test('replan：种子数据 L1 超涨幅且无容量溢出 → L2 不触发，L4 只给建议', () => {
   const res = replan({
     tasks: seed.tasks,
     week: weekOf(seed.week.map((d) => ({ date: d.d, minutes: d.total, buffer: d.buf }))),
@@ -232,46 +232,58 @@ test('replan：种子数据上 L1 顺延 +23% 超限 → 回退到 L2 压缩生�
     timestamp: '2026-11-08T11:04:00+08:00'
   });
   assert.equal(res.strategies.length, 4);
-  assert.equal(res.strategies[0].level, 1);
-  assert.equal(res.strategies[0].name, '顺延');
   assert.equal(res.strategies[0].applied, false);
   assert.match(res.strategies[0].reason, /超过单次上限/);
-  assert.equal(res.strategies[1].level, 2);
-  assert.equal(res.strategies[1].name, '压缩');
-  assert.equal(res.strategies[1].applied, true);
+  /* 种子周容量 300×7，待排 210 min，没有容量溢出 → 压缩不适用 */
+  assert.equal(res.strategies[1].applied, false);
+  assert.match(res.strategies[1].reason, /容量未溢出/);
   assert.equal(res.strategies[2].applied, false);
-  assert.equal(res.strategies[3].applied, false);
-  assert.match(res.strategies[3].reason, /无需进入/);
-  assert.equal(res.accepted, true);
-  assert.equal(res.verdict, 'ok');
-  assert.ok(res.loadDelta <= REPLAN_PARAMS.loadGrowthCap + 1e-9);
-  assert.ok(res.diff.some((d) => d.op === 'compress'));
-  assert.ok(res.diff.some((d) => d.op === 'defer'));
-  /* 压缩后的任务被标记 degraded */
-  const compressedTask = res.nextTasks.find((t) => t.id === 't4');
-  assert.equal(compressedTask.degraded, true);
-  assert.ok(compressedTask.est < 45);
-  assert.ok(compressedTask.est >= Math.floor(45 * REPLAN_PARAMS.compressFloor));
+  assert.equal(res.strategies[3].applied, true);
+  /* L4 不再自动接受 */
+  assert.equal(res.accepted, false);
+  assert.equal(res.needsConfirmation, true);
+  assert.equal(res.verdict, 'needsConfirmation');
+  assert.equal(res.diff.some((d) => d.op === 'compress'), false);
+  const ab = res.diff.filter((d) => d.op === 'abandon');
+  assert.ok(ab.length >= 1);
+  ab.forEach((d) => {
+    const t = res.nextTasks.find((x) => x.id === d.taskId);
+    assert.equal(t.abandoned, true);
+    assert.equal(t.needsConfirmation, true);
+  });
 });
 
-test('replan：负载增幅 > 20% 的输入触发 L1 → L2 回退', () => {
+test('replan：满载周按容量溢出触发 L2（saved ≥ overflow，增幅只做事后守卫）', () => {
+  /* 容量 115×7 = 805；原负载 700；待排 140 → 溢出 35 min */
+  const week = [];
+  for (let i = 0; i < 7; i++) {
+    week.push({ date: 'D' + (i + 1), minutes: 100, capacity: 115, buffer: 60 });
+  }
   const res = replan({
     tasks: [
       { id: 'done1', subject: '数学', estMin: 300, weight: 0.9, done: true },
-      { id: 'p1', subject: '数学', estMin: 100, weight: 0.7 },
-      { id: 'p2', subject: '英语', estMin: 100, weight: 0.5 }
+      { id: 'p1', subject: '数学', estMin: 100, weight: 0.9 },
+      { id: 'p2', subject: '英语', estMin: 40, weight: 0.2 }
     ],
-    week: baseWeek(100),
+    week: week,
     params: REPLAN_PARAMS,
     history: { consecutiveNoImprove: 0 },
     timestamp: 1000
   });
   assert.equal(res.strategies[0].applied, false);
-  assert.match(res.strategies[0].reason, /超过单次上限/);
+  assert.match(res.strategies[0].reason, /无足够空闲时段/);
   assert.equal(res.strategies[1].applied, true);
+  assert.match(res.strategies[1].reason, /补齐容量溢出 35 min/);
   assert.equal(res.accepted, true);
-  assert.equal(res.guards.loadGrowthOk, true);
-  assert.ok(res.loadDelta <= 0.2 + 1e-9);
+  assert.equal(res.needsConfirmation, false);
+  assert.ok(res.loadDelta <= REPLAN_PARAMS.loadGrowthCap + 1e-9);
+  const saved = res.diff.filter((d) => d.op === 'compress')
+    .reduce((a, d) => a + (Number(d.from) - Number(d.to)), 0);
+  assert.ok(saved >= 35, '压缩节省量必须覆盖容量溢出：' + saved);
+  assert.ok(res.nextWeek.reduce((a, d) => a + d.minutes, 0) <= 805);
+  /* 低权重的 p2 先压到下限 24，再由 p1 补足溢出 */
+  assert.equal(res.nextTasks.find((t) => t.id === 'p2').estMin, 24);
+  assert.equal(res.nextTasks.find((t) => t.id === 'p1').estMin, 81);
 });
 
 test('replan：L1 通过时不再进入后续级别（不追求排满）', () => {
@@ -390,7 +402,7 @@ test('replan：L3 替代只在同知识域内做高频高权重替换', () => {
   assert.equal(a.substitutedBy, 'b');
 });
 
-test('replan：L4 放弃标记 abandoned 并要求用户确认', () => {
+test('replan：L4 放弃需确认，confirmReplan 之后才接受', () => {
   const res = replan({
     tasks: [
       { id: 'p1', subject: '政治', estMin: 100, weight: 0.2 },
@@ -403,13 +415,74 @@ test('replan：L4 放弃标记 abandoned 并要求用户确认', () => {
     timestamp: 1000
   });
   assert.equal(res.strategies[3].applied, true);
-  assert.equal(res.accepted, true);
+  assert.equal(res.accepted, false);
+  assert.equal(res.needsConfirmation, true);
+  assert.equal(res.verdict, 'needsConfirmation');
   const ab = res.diff.filter((d) => d.op === 'abandon');
   assert.ok(ab.length >= 1);
   assert.match(ab[0].detail, /需用户确认/);
   const abandoned = res.nextTasks.filter((t) => t.abandoned === true);
   assert.equal(abandoned.length, ab.length);
   assert.equal(abandoned[0].needsConfirmation, true);
+
+  const confirmed = confirmReplan(res);
+  assert.equal(confirmed.accepted, true);
+  assert.equal(confirmed.needsConfirmation, false);
+  assert.equal(confirmed.verdict, 'ok');
+  assert.equal(confirmed.nextTasks.filter((t) => t.abandoned === true).length, ab.length);
+  /* 纯函数：不修改入参 */
+  assert.equal(res.accepted, false);
+  assert.throws(() => confirmReplan({ accepted: true }), /无需确认/);
+});
+
+test('replan：替代后原任务退出待办，第二次重排不会重复替换', () => {
+  const tasks = [
+    { id: 'a', subject: '数学', estMin: 100, weight: 0.3, domain: '高数', freq: 0.2 },
+    { id: 'b', subject: '数学', estMin: 40, weight: 0.9, domain: '高数', freq: 0.8 },
+    { id: 'c', subject: '线代', estMin: 90, weight: 0.5, domain: '线代', freq: 0.5 }
+  ];
+  const params = REPLAN_PARAMS;
+  const res1 = replan({
+    tasks: tasks, week: baseWeek(100), params: params,
+    history: { consecutiveNoImprove: 0 }, timestamp: 1000
+  });
+  assert.equal(res1.strategies[2].applied, true);
+  const a1 = res1.nextTasks.find((t) => t.id === 'a');
+  assert.equal(a1.substituted, true);
+  assert.equal(res1.nextTasks.find((t) => t.id === 'b').replaces, 'a');
+
+  /* 用第一次的 nextTasks / nextWeek 再跑一次：a 已退出待办，不得再次被替换 */
+  const res2 = replan({
+    tasks: res1.nextTasks, week: res1.nextWeek, params: params,
+    history: { consecutiveNoImprove: 0 }, timestamp: 2000
+  });
+  assert.equal(res2.diff.some((d) => d.op === 'substitute'), false);
+  assert.equal(res2.strategies[2].applied, false);
+  assert.equal(res2.nextTasks.find((t) => t.id === 'a').substituted, true);
+});
+
+test('replan：锁定任务是硬约束（不压缩 / 不放弃，且不进入 diff）', () => {
+  const week = [];
+  for (let i = 0; i < 7; i++) {
+    week.push({ date: 'D' + (i + 1), minutes: 100, capacity: 115, buffer: 60 });
+  }
+  const res = replan({
+    tasks: [
+      { id: 'p1', subject: '数学', estMin: 140, weight: 0.9 },
+      { id: 'p2', subject: '政治', estMin: 40, weight: 0.1 }
+    ],
+    week: week,
+    locks: { p2: true },
+    params: REPLAN_PARAMS,
+    history: { consecutiveNoImprove: 0 },
+    timestamp: 1000
+  });
+  /* 溢出 35 min 全部由未锁定的 p1 承担 */
+  assert.equal(res.strategies[1].applied, true);
+  assert.equal(res.diff.some((d) => d.taskId === 'p2'), false);
+  assert.equal(res.nextTasks.find((t) => t.id === 'p2').estMin, 40);
+  assert.equal(res.nextTasks.find((t) => t.id === 'p2').abandoned, undefined);
+  assert.equal(res.nextTasks.find((t) => t.id === 'p1').estMin, 105);
 });
 
 test('replan：结构完整（strategies / diff / guards / snapshot）', () => {

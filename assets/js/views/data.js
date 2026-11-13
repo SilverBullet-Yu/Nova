@@ -47,7 +47,7 @@ window.ZX = window.ZX || {};
     var delta = U.num(k.achievementDeltaPt, 0);
     return '<div class="wrap">' +
       '<div class="vhead"><div>' +
-        '<div class="eyebrow">WEEK ' + U.isoWeek() + ' · ' + weekRange() + '</div>' +
+        '<div class="eyebrow">第 ' + U.isoWeek() + ' 周 · ' + weekRange() + '</div>' +
         '<h1>数据<span class="sub">周报与归因</span></h1>' +
       '</div></div>' +
 
@@ -132,7 +132,9 @@ window.ZX = window.ZX || {};
   function attribution() {
     var attr = stats().attribution || {};
     var keys = Object.keys(attr);
-    return '<div class="panel"><div class="panel-h">偏差归因<span>顺序即优先级</span></div><div class="panel-b">' +
+    return '<div class="panel"><div class="panel-h">偏差归因' +
+      '<img class="warn-flag" src="assets/img/mascot-v4-warn.svg" width="22" height="19" alt="偏差提醒" />' +
+      '<span>顺序即优先级</span></div><div class="panel-b">' +
       (keys.length
         ? '<div class="attr">' + keys.map(function (n) {
             var meta = ATTR_META[n] || ['var(--txt3)', '待定'];

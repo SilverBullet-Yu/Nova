@@ -19,6 +19,7 @@ const { URL } = require('node:url');
 
 const { createRouter, ApiError } = require('./api/routes.js');
 const store = require('./store/memory.js');
+const auth = require('./auth.js');
 
 const ROOT = path.resolve(__dirname, '..');
 /* 绑定地址：部署环境要求 0.0.0.0 才能被反向代理访问；本地开发可用 HOST=127.0.0.1 收紧。 */
@@ -49,8 +50,13 @@ const MIME = {
  * 1. 本机来源（127.0.0.1 / localhost / file:// 的 null origin）——支持 file:// 双击打开的前端连后端；
  * 2. 同源来源（Origin 的 host 与请求 Host 一致）——支持云端部署后前端与 API 同源互调。
  * 其余外部站点一律拒绝。
+ *
+ * 关闭开关：CORS_MODE=off。云函数经 HTTP 网关暴露时，网关已按环境安全域名回填
+ * Access-Control-Allow-Origin；函数再写一次会得到 "<origin>,*" 这种非法多值，
+ * 浏览器直接判为 CORS 失败。部署到网关后请通过环境变量设为 off。
  */
 function corsHeaders(req) {
+  if (process.env.CORS_MODE === 'off') return {};
   const origin = req.headers.origin;
   if (!origin) return {};
   const local = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin) || origin === 'null';
@@ -65,7 +71,8 @@ function corsHeaders(req) {
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    /* Authorization 必须放行：前端业务请求统一携带 Bearer 凭证 */
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Max-Age': '600',
     'Vary': 'Origin'
   };
@@ -82,9 +89,9 @@ function sendJson(res, status, obj, extraHeaders) {
   res.end(payload);
 }
 
-function sendError(res, code, message, status) {
+function sendError(res, code, message, status, extraHeaders) {
   const st = status || 500;
-  sendJson(res, st, { error: { code: code, message: message } });
+  sendJson(res, st, { error: { code: code, message: message } }, extraHeaders);
 }
 
 function readBody(req) {
@@ -162,8 +169,11 @@ function serveStatic(res, pathname) {
   });
 }
 
+/** 无需凭证即可访问的路由：健康检查与凭证签发本身 */
+const PUBLIC_ROUTES = new Set(['GET /api/health', 'POST /api/auth/session']);
+
 function createServer() {
-  const router = createRouter(store);
+  const router = createRouter(store, auth);
 
   return http.createServer((req, res) => {
     let parsed;
@@ -191,16 +201,52 @@ function createServer() {
       return;
     }
 
+    /* ── 鉴权：身份只从 Bearer 凭证解析，请求体不参与身份判定 ── */
+    const routeKey = req.method + ' ' + pathname;
+    let userId = null;
+    if (!PUBLIC_ROUTES.has(routeKey)) {
+      const identity = auth.verifyToken(auth.readBearer(req));
+      if (!identity) {
+        sendError(res, 'E4010', '未提供有效凭证，请先调用 POST /api/auth/session', 401,
+          Object.assign({ 'WWW-Authenticate': 'Bearer' }, cors));
+        return;
+      }
+      userId = identity.userId;
+    }
+
+    /* ── 写接口限流：已认证按 userId 隔离，签发凭证按来源 IP 隔离 ── */
+    const rule = auth.WRITE_LIMITS[routeKey];
+    if (rule) {
+      const who = userId
+        ? 'user:' + userId
+        : 'ip:' + ((req.socket && req.socket.remoteAddress) || 'unknown');
+      const limit = auth.hitLimit(who + ' ' + routeKey, rule);
+      if (!limit.allowed) {
+        sendError(res, 'E4290',
+          '请求过于频繁：' + routeKey + ' 上限 ' + rule.limit + ' 次 / ' +
+          Math.round(rule.windowMs / 1000) + ' 秒，请稍后再试',
+          429, Object.assign({ 'Retry-After': String(limit.retryAfterSec) }, cors));
+        return;
+      }
+    }
+
     readBody(req).then((body) => {
-      const ctx = { method: req.method, pathname: pathname, query: parsed.searchParams, body: body, req: req };
+      const ctx = {
+        method: req.method,
+        pathname: pathname,
+        query: parsed.searchParams,
+        body: body,
+        req: req,
+        userId: userId
+      };
       const out = router.handle(ctx);
       sendJson(res, out.status, out.body, cors);
     }).catch((err) => {
       if (err instanceof ApiError) {
-        sendError(res, err.code, err.message, err.status);
+        sendError(res, err.code, err.message, err.status, cors);
         return;
       }
-      sendError(res, 'E9001', err && err.message ? err.message : '未分类异常', 500);
+      sendError(res, 'E9001', err && err.message ? err.message : '未分类异常', 500, cors);
     });
   });
 }
@@ -236,11 +282,13 @@ if (require.main === module) {
   start(envPort, resolveHost()).then((h) => {
     process.stdout.write('诺瓦 Nova · 服务已启动 http://' + h.host + ':' + h.port + '\n');
     process.stdout.write('  GET  /api/health        健康检查\n');
+    process.stdout.write('  POST /api/auth/session  签发身份凭证\n');
     process.stdout.write('  GET  /api/state         初始全量状态\n');
     process.stdout.write('  POST /api/feasibility   可行性评估\n');
     process.stdout.write('  POST /api/schedule      排程\n');
     process.stdout.write('  POST /api/replan        四级重排（含快照）\n');
     process.stdout.write('  POST /api/replan/undo   撤销重排\n');
+    process.stdout.write('  POST /api/replan/confirm 确认放弃并落库\n');
     process.stdout.write('  POST /api/attribute     偏差归因\n');
     process.stdout.write('  POST /api/sessions      打卡上报（幂等）\n');
     process.stdout.write('  GET  /api/sync?since=N  增量拉取\n');

@@ -16,7 +16,7 @@ window.ZX = window.ZX || {};
     var vc = f.verdict === '充裕' || f.verdict === '合理' ? '' : 'warn';
     return '<div class="wrap">' +
       '<div class="vhead"><div>' +
-        '<div class="eyebrow">GOAL · ' + U.esc(S.goal.deadline) + '</div>' +
+        '<div class="eyebrow">目标 · ' + U.esc(S.goal.deadline) + '</div>' +
         '<h1>' + U.esc(S.goal.name) + '<span class="sub">目标 ' + U.esc(S.goal.target) + '</span></h1>' +
         '<div class="sa-goal-act"><button type="button" class="btn sa-goal-new" data-goal-new>新建目标</button>' +
           '<button type="button" class="btn sc2-replan" data-replan-run>重新安排</button>' +
@@ -25,6 +25,8 @@ window.ZX = window.ZX || {};
         '<div class="vs"><span>剩余</span><b>' + S.goal.weeks + ' 周</b></div>' +
         '<div class="vs"><span>阶段</span><b>基础期</b></div>' +
       '</div></div>' +
+
+      rhythmBand() +
 
       '<div class="sec-h"><span class="n">01</span><span class="t">可行性 R</span><span class="rule"></span>' +
         '<span class="r">T / D · 折扣系数 ' + S.feas.discount + '</span></div>' +
@@ -47,10 +49,51 @@ window.ZX = window.ZX || {};
       '</div>' +
 
       boardHtml() +
-      '<div class="sec-h"><span class="n">02</span><span class="t">未来 7 天负载</span><span class="rule"></span>' +
+      '<div class="sec-h"><span class="n">02</span><span class="t">未来 7 天负载</span>' +
+        (loadWarnFlag() ? '<img class="warn-flag" src="assets/img/mascot-v4-warn.svg" width="22" height="19" alt="负载预警：增幅已达防雪崩阈值" />' : '') +
+        '<span class="rule"></span>' +
         '<span class="r">' + replanLabel() + '</span></div>' +
       weekChart() +
     '</div>';
+  }
+
+  /* ---------- 学期节律带：把「周期按阶段律动」画出来 ----------
+     阶段配比 45 / 35 / 20 取自 PRD §8.2 原文值（demo 考研语境），
+     周数 = goal.weeks（剩余）按配比折算，四舍五入后不改动 vstats 的「剩余」事实；
+     当前阶段沿用本视图既有的「基础期」口径，不新增数据来源。 */
+  var STAGES = [
+    { n: '基础期', r: 45 },
+    { n: '强化期', r: 35 },
+    { n: '冲刺期', r: 20 }
+  ];
+
+  function rhythmBand() {
+    var S = ZX.state;
+    var weeks = U.num(S.goal.weeks, 0);
+    if (!weeks) return '';
+    var segs = STAGES.map(function (st, i) {
+      var w = Math.round(weeks * st.r / 100);
+      var on = i === 0;   /* 当前阶段：与头部「阶段 基础期」同口径 */
+      return '<div class="rhythm-seg' + (on ? ' on' : '') + '" style="width:' + st.r + '%">' +
+        '<b>' + st.n + '</b><i>约 ' + w + ' 周 · ' + st.r + '%</i>' +
+        (on ? '<span class="cur">当前</span>' : '') +
+      '</div>';
+    }).join('');
+    return '<div class="rhythm">' +
+      '<div class="rhythm-cap"><span class="t">学期节律</span>' +
+        '<span class="d">剩余 ' + weeks + ' 周按阶段配比推进 · 节奏可查，不催促</span>' +
+        '<span class="r">45 / 35 / 20</span></div>' +
+      '<div class="rhythm-band">' + segs + '</div>' +
+      '<p class="rhythm-note">带上的周数为按配比折算的预估视图，不构成排程依据；阶段边界随可行性 R 与偏差归因校准。</p>' +
+    '</div>';
+  }
+
+  /* 负载预警：重排后未来 7 天负载增幅 ≥ 20%（与防雪崩断言同阈值）→ 显示提醒态 */
+  function loadWarnFlag() {
+    var S = ZX.state;
+    if (!S.replanned || !S.replanRecord) return false;
+    var d = S.replanRecord.loadDelta;
+    return typeof d === 'number' && d >= 0.2;
   }
 
   /* 重排标签：增幅取自引擎结果（state.replanRecord.loadDelta），不硬编码 */

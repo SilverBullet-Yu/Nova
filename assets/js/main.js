@@ -8,6 +8,7 @@ window.ZX = window.ZX || {};
 
   var U = ZX.util;
 
+  /* 图标 + 文字页签：图标承载各栏的快速区分（用户反馈：纯文字 + 章号区分不足） */
   var TABS = [
     { id: 'chat',  label: '对话', icon: '<path d="M2.6 3.4h10.8a1 1 0 0 1 1 1v5.6a1 1 0 0 1-1 1H7.6L4.8 13.4v-2.4H3.6a1 1 0 0 1-1-1V4.4a1 1 0 0 1 1-1z"/><path d="M5.4 7.4h5.2"/><path d="M5.4 5.4h3.4"/>' },
     { id: 'today', label: '今日', icon: '<path d="M1.9 12.4h12.2"/><path d="M4.1 12.4a3.9 3.9 0 0 1 7.8 0"/><path d="M8 2.3v2.1"/><path d="M3.3 4.9l1.5 1.5"/><path d="M12.7 4.9l-1.5 1.5"/>' },
@@ -17,7 +18,7 @@ window.ZX = window.ZX || {};
   ];
 
   var BT_META = {
-    chat: '与小序对话 · 自然语言驱动',
+    chat: '与诺瓦对话 · 自然语言驱动',
     today: '本机优先 · 本地计算',
     plan: '日程已排定 · 本地计算',
     data: '本周回顾 · 本机计算',
@@ -34,6 +35,7 @@ window.ZX = window.ZX || {};
   /* ---------- 顶栏同步指示器：三态 ---------- */
   function updateSync() {
     var online = ZX.api.isOnline();
+    /* ⑧ 离线：状态由顶栏同步指示承担（对话页头部与头像已撤除） */
     var pending = ZX.api.pendingCount();
     var dot = U.$('#syncDot'), text = U.$('#syncText');
     if (dot && text) {
@@ -69,7 +71,7 @@ window.ZX = window.ZX || {};
     renderMnav();
   };
 
-  /* 移动端底部导航：复用 TABS 图标与 data-act="tab" */
+  /* 移动端导航：与桌面同体系（图标上、单字下） */
   function renderMnav() {
     var el = U.$('#sdMnav');
     if (!el) return;
@@ -81,7 +83,7 @@ window.ZX = window.ZX || {};
     }).join('');
   }
 
-  /* 对话是主页面签：顶栏「序」入口与底部导航都只是切到该页，无覆盖层状态。
+  /* 对话是主页面签：顶栏「诺瓦」入口与底部导航都只是切到该页，无覆盖层状态。
      聊天 DOM 持久（消息历史在 #chat 内），不参与 #view 重绘。 */
   ZX.render = function () {
     var S = ZX.state;
@@ -168,13 +170,15 @@ window.ZX = window.ZX || {};
     e.preventDefault();
     var v = U.$('#input').value.trim();
     if (!v) return;
-    U.$('#input').value = '';
     ZX.assistant.me(v);
     var t = ZX.assistant.typing();
     await U.sleep(340);
     t.remove();
     ZX.assistant.route(v);
   });
+
+  /* 输入聚焦反馈：focus-visible 描边与 caret 已足够（聆听态头像随对话页头部一并撤除） */
+  var inputEl = U.$('#input');
 
   document.addEventListener('keydown', function (e) {
     /* 「/」进入对话页并聚焦输入框：仅在未处于任何输入态、且无弹层时生效 */
@@ -243,7 +247,8 @@ window.ZX = window.ZX || {};
       ? U.esc(heavy.s) + '是今天权重最高的一项（' + U.num(heavy.weight, 0).toFixed(2) + '）' +
         (heavy.time ? '，' + U.esc(heavy.time.split('–')[0]) + ' 开始' : '') + '。'
       : '';
-    return '<p>' + p1 + '</p><p>' + p2 + '要先开始，还是先说这周的情况？</p>';
+    return '<img class="msg-mascot" src="assets/img/mascot-v4.svg" width="132" height="116" alt="诺瓦" />' +
+      '<p>' + p1 + '</p><p>' + p2 + '要先开始，还是先说这周的情况？</p>';
   }
 
   function boot() {
@@ -251,6 +256,7 @@ window.ZX = window.ZX || {};
     ZX.state.folds = ZX.ui.loadFolds();
     if (ZX.flows && ZX.flows.settings) ZX.flows.settings.init();
     ZX.api.onStatus(updateSync);
+    updateSync();   /* 初始同步态：离线时头像即为褪色态 */
 
     U.$('#chips').innerHTML = CHIPS.map(function (c) {
       return '<button class="chip" data-act="say" data-say="' + c + '">' + c + '</button>';
@@ -262,7 +268,7 @@ window.ZX = window.ZX || {};
     ZX.assistant.say(greetingHtml(), '日程 · 本地');
 
     setTimeout(function () {
-      ZX.assistant.say('<p style="color:var(--txt3);font-size:11px">提示：说一句话，小序会驱动顶栏的「今日 / 计划 / 数据」工作台。点下方快捷语句，或直接输入「重排」「周报」「撤销」「数学多给两小时」。</p>', '');
+      ZX.assistant.say('<p style="color:var(--txt3);font-size:11px">提示：说一句话，诺瓦会驱动顶栏的「今日 / 计划 / 数据」工作台。点下方快捷语句，或直接输入「重排」「周报」「撤销」「数学多给两小时」。</p>', '');
     }, 520);
 
     setInterval(function () { if (ZX.state.running) ZX.assistant.tickTimer(); }, 1000);

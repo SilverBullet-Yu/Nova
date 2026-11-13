@@ -176,6 +176,7 @@ window.ZX = window.ZX || {};
 
     if (S.interrupted === true) {
       return '<div class="banner sb-banner">' +
+        '<img class="sb-mascot" src="assets/img/mascot-v4-rescue.svg" width="32" height="28" alt="" />' +
         '<div class="sb-b-main">' +
           '<div class="bt">这周还剩 ' + m.days + ' 天，落下的 ' + hmCn(m.gap) + '可以重排</div>' +
           '<div class="bs">连续 ' + U.num(S.consecutiveZeroDays, 0) + ' 天没有记录。计划还在，选一种方式把它接回来。</div>' +
@@ -188,6 +189,7 @@ window.ZX = window.ZX || {};
     if (S.interrupted === false && S.rescueRecord && !resumeBannerSeen) {
       var r = S.rescueRecord;
       return '<div class="banner sb-banner sb-banner-ok">' +
+        '<img class="sb-mascot" src="assets/img/mascot-v4-done.svg" width="32" height="28" alt="" />' +
         '<div class="sb-b-main">' +
           '<div class="bt">计划已接回。连续记录从今天重新开始，之前的不计为欠账。</div>' +
           '<div class="bs">方式 ' + U.esc(strategyLabel(r.strategy)) +
@@ -472,7 +474,7 @@ window.ZX = window.ZX || {};
     lines.push('<p style="color:var(--txt3);font-size:11px">连续记录从今天重新开始，之前的 ' +
       zeroDays + ' 天不计为欠账。</p>');
 
-    ZX.assistant.say(lines.join(''), 'rescue · ' + o.key);
+    ZX.assistant.say(lines.join(''), '挽救 · ' + o.key);
   }
 
   /* ---------- 事件 ---------- */

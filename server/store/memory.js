@@ -1,9 +1,11 @@
 'use strict';
-/* 诺瓦 Nova · 内存存储（单例，无数据库）
+/* 诺瓦 Nova · 内存存储（按用户分区，无数据库）
  *
  * 契约：docs/HANDOFF.md §5（同步协议 / 幂等 / 字段级合并）
- * 职责：seed 副本 + sync_op 序列表 + replan_record 快照
+ * 职责：每个用户一份 seed 副本 + sync_op 序列表 + replan_record 快照
  *
+ * 身份：userId 只由 server/auth.js 从凭证解析后传入；本模块不读取请求体里的 userId。
+ * 分区：所有读写都落在 partitions.get(userId) 上，用户之间不共享 state / ops / seq。
  * 纯度约束：服务端不读时钟做业务判断。时间一律用单调计数器（serverSeq）。
  */
 
@@ -53,29 +55,45 @@ function isDeleteValue(v) {
     (typeof v === 'string' && v.toLowerCase() === 'true');
 }
 
-/* ── 单例状态 ─────────────────────────────────────────────────────────── */
-const store = {
-  baseSeq: BASE_SEQ,
-  seq: BASE_SEQ,
-  seed: clone(seed),
-  state: clone(seed),
-  entities: {},       // entity → entityId → field → { value, tombstone, clientTs, seq }
-  ops: [],            // sync_op 序列表（serverSeq 升序）
-  opIndex: new Map(), // `${userId}:${opId}` → serverSeq（(user_id, op_id) 唯一约束）
-  sessions: new Map(),// opId → { ok, serverSeq }
-  replanRecords: [],
-  replanSeq: 0
-};
+/* ── 用户分区 ─────────────────────────────────────────────────────────── */
+/** userId → 分区；分区之间完全隔离 */
+const partitions = new Map();
 
-function ensureBucket(entity, entityId) {
-  if (!store.entities[entity]) store.entities[entity] = {};
-  const byId = store.entities[entity];
+function createPartition(userId) {
+  return {
+    userId: userId,
+    seq: BASE_SEQ,
+    state: clone(seed),
+    entities: {},       // entity → entityId → field → { value, tombstone, clientTs, seq }
+    ops: [],            // sync_op 序列表（serverSeq 升序）
+    opIndex: new Map(), // opId → serverSeq（分区内 op_id 唯一）
+    sessions: new Map(),// opId → { ok, serverSeq }
+    replanRecords: [],
+    replanSeq: 0
+  };
+}
+
+/** 取用户分区；首次访问时以 seed 初始化。缺少身份属于调用方缺陷，直接拒绝。 */
+function partitionOf(userId) {
+  const id = String(userId === undefined || userId === null ? '' : userId);
+  if (!id) throw new Error('缺少用户身份，无法定位分区');
+  let p = partitions.get(id);
+  if (!p) {
+    p = createPartition(id);
+    partitions.set(id, p);
+  }
+  return p;
+}
+
+function ensureBucket(p, entity, entityId) {
+  if (!p.entities[entity]) p.entities[entity] = {};
+  const byId = p.entities[entity];
   if (!byId[entityId]) byId[entityId] = {};
   return byId[entityId];
 }
 
-function applyToState(entity, entityId, field, value) {
-  const s = store.state;
+function applyToState(p, entity, entityId, field, value) {
+  const s = p.state;
   switch (entity) {
     case 'task': {
       const t = (s.tasks || []).find((x) => String(x.id) === entityId);
@@ -126,27 +144,27 @@ function applyToState(entity, entityId, field, value) {
 }
 
 /** 字段级合并：返回是否实际改写了状态 */
-function mergeField(record) {
+function mergeField(p, record) {
   const entity = record.entity;
   const entityId = String(record.entityId === undefined ? '' : record.entityId);
   const field = record.field;
   const policy = policyOf(field);
-  const bucket = ensureBucket(entity, entityId);
+  const bucket = ensureBucket(p, entity, entityId);
   const prev = bucket[field];
   const clientTs = num(record.clientTs, 0);
-  const seq = num(record.serverSeq, store.seq);
+  const seq = num(record.serverSeq, p.seq);
   const value = record.value;
 
   if (policy === 'tombstone') {
     if (prev && prev.tombstone) return false;          // 墓碑优先，不可翻转
     if (isDeleteValue(value)) {
       bucket[field] = { value: true, tombstone: true, clientTs: clientTs, seq: seq };
-      applyToState(entity, entityId, field, true);
+      applyToState(p, entity, entityId, field, true);
       return true;
     }
     if (!prev || clientTs >= prev.clientTs) {
       bucket[field] = { value: value, tombstone: false, clientTs: clientTs, seq: seq };
-      applyToState(entity, entityId, field, value);
+      applyToState(p, entity, entityId, field, value);
       return true;
     }
     return false;
@@ -156,7 +174,7 @@ function mergeField(record) {
     const base = prev ? num(prev.value, 0) : 0;
     const next = base + num(value, 0);
     bucket[field] = { value: next, tombstone: false, clientTs: clientTs, seq: seq };
-    applyToState(entity, entityId, field, next);
+    applyToState(p, entity, entityId, field, next);
     return true;
   }
 
@@ -165,7 +183,7 @@ function mergeField(record) {
     const next = Math.max(base, num(value, 0));
     if (next !== base || !prev) {
       bucket[field] = { value: next, tombstone: false, clientTs: clientTs, seq: seq };
-      applyToState(entity, entityId, field, next);
+      applyToState(p, entity, entityId, field, next);
     }
     return true;
   }
@@ -173,7 +191,7 @@ function mergeField(record) {
   /* lastWrite：状态类最后写入优先 */
   if (!prev || clientTs > prev.clientTs || (clientTs === prev.clientTs && seq >= prev.seq)) {
     bucket[field] = { value: value, tombstone: false, clientTs: clientTs, seq: seq };
-    applyToState(entity, entityId, field, value);
+    applyToState(p, entity, entityId, field, value);
     return true;
   }
   return false;
@@ -181,24 +199,18 @@ function mergeField(record) {
 
 /* ── 对外接口 ─────────────────────────────────────────────────────────── */
 
+/** 清空全部用户分区（测试与本地重置用） */
 function reset() {
-  store.seq = BASE_SEQ;
-  store.state = clone(seed);
-  store.entities = {};
-  store.ops = [];
-  store.opIndex = new Map();
-  store.sessions = new Map();
-  store.replanRecords = [];
-  store.replanSeq = 0;
-  return store;
+  partitions.clear();
 }
 
+/** 静态种子：所有用户共享同一份初始数据，但分区内各自持有副本 */
 function getSeed() {
-  return clone(store.seed);
+  return clone(seed);
 }
 
-function getNotifications() {
-  const n = store.state.notif || {};
+function getNotifications(userId) {
+  const n = partitionOf(userId).state.notif || {};
   return [
     { id: 'n_daily', kind: 'daily', enabled: n.daily !== false, title: '每日提醒', body: '19:00 · 今日 3 项' },
     { id: 'n_weekly', kind: 'weekly', enabled: n.weekly !== false, title: '周报', body: '周日 20:00 · 最少打扰' },
@@ -207,19 +219,21 @@ function getNotifications() {
   ];
 }
 
-function getLatestReplan() {
-  return store.replanRecords.length ? clone(store.replanRecords[store.replanRecords.length - 1]) : null;
+function getLatestReplan(userId) {
+  const p = partitionOf(userId);
+  return p.replanRecords.length ? clone(p.replanRecords[p.replanRecords.length - 1]) : null;
 }
 
-function getReplanRecords() {
-  return clone(store.replanRecords);
+function getReplanRecords(userId) {
+  return clone(partitionOf(userId).replanRecords);
 }
 
-function recordReplan(result) {
-  store.replanSeq += 1;
+function recordReplan(userId, result) {
+  const p = partitionOf(userId);
+  p.replanSeq += 1;
   const rec = {
-    id: 'rr_' + store.replanSeq,
-    seq: store.replanSeq,
+    id: 'rr_' + p.replanSeq,
+    seq: p.replanSeq,
     strategies: clone(result.strategies || []),
     diff: clone(result.diff || []),
     loadDelta: num(result.loadDelta, 0),
@@ -230,28 +244,29 @@ function recordReplan(result) {
     nextTasks: clone(result.nextTasks || []),
     nextWeek: clone(result.nextWeek || [])
   };
-  store.replanRecords.push(rec);
+  p.replanRecords.push(rec);
   return clone(rec);
 }
 
 /** 打卡上报：opId 幂等，重复提交返回首次 serverSeq */
-function recordSession(payload) {
+function recordSession(userId, payload) {
+  const p = partitionOf(userId);
   const opId = String(payload.opId);
-  if (store.sessions.has(opId)) {
-    return { ok: true, serverSeq: store.sessions.get(opId).serverSeq, duplicate: true };
+  if (p.sessions.has(opId)) {
+    return { ok: true, serverSeq: p.sessions.get(opId).serverSeq, duplicate: true };
   }
-  store.seq += 1;
-  const seq = store.seq;
-  store.sessions.set(opId, { ok: true, serverSeq: seq });
+  p.seq += 1;
+  const seq = p.seq;
+  p.sessions.set(opId, { ok: true, serverSeq: seq });
 
   const taskId = String(payload.taskId);
   const durationMin = num(payload.durationMin, 0);
   const completion = num(payload.completion, 0);
   const clientTs = num(payload.clientTs, 0);
 
-  store.ops.push({
+  p.ops.push({
     serverSeq: seq,
-    userId: 'u_demo',
+    userId: p.userId,
     opId: opId,
     entity: 'session',
     entityId: taskId,
@@ -261,35 +276,34 @@ function recordSession(payload) {
     baseSeq: num(payload.baseSeq, 0)
   });
 
-  mergeField({ entity: 'task', entityId: taskId, field: 'actual', value: durationMin, clientTs: clientTs, serverSeq: seq });
-  mergeField({ entity: 'task', entityId: taskId, field: 'completion', value: completion, clientTs: clientTs, serverSeq: seq });
-  mergeField({ entity: 'task', entityId: taskId, field: 'done', value: completion >= 0.99, clientTs: clientTs, serverSeq: seq });
-  mergeField({ entity: 'task', entityId: taskId, field: 'sessionCount', value: 1, clientTs: clientTs, serverSeq: seq });
+  mergeField(p, { entity: 'task', entityId: taskId, field: 'actual', value: durationMin, clientTs: clientTs, serverSeq: seq });
+  mergeField(p, { entity: 'task', entityId: taskId, field: 'completion', value: completion, clientTs: clientTs, serverSeq: seq });
+  mergeField(p, { entity: 'task', entityId: taskId, field: 'done', value: completion >= 0.99, clientTs: clientTs, serverSeq: seq });
+  mergeField(p, { entity: 'task', entityId: taskId, field: 'sessionCount', value: 1, clientTs: clientTs, serverSeq: seq });
 
   return { ok: true, serverSeq: seq };
 }
 
-/** 批量上行：opId 幂等（(user_id, op_id) 唯一约束） */
-function applyOps(ops) {
+/** 批量上行：opId 幂等（分区内 (user_id, op_id) 唯一），身份只取入参 userId */
+function applyOps(userId, ops) {
+  const p = partitionOf(userId);
   const accepted = [];
-  let serverSeq = store.seq;
+  let serverSeq = p.seq;
   ops.forEach((op) => {
     const opId = String(op.opId);
-    const userId = String(op.userId || 'u_demo');
-    const key = userId + ':' + opId;
 
-    if (store.opIndex.has(key)) {
+    if (p.opIndex.has(opId)) {
       accepted.push(opId);
-      serverSeq = store.opIndex.get(key);     // 幂等：返回首次 serverSeq
+      serverSeq = p.opIndex.get(opId);     // 幂等：返回首次 serverSeq
       return;
     }
 
-    store.seq += 1;
-    const seq = store.seq;
-    store.opIndex.set(key, seq);
+    p.seq += 1;
+    const seq = p.seq;
+    p.opIndex.set(opId, seq);
     const record = {
       serverSeq: seq,
-      userId: userId,
+      userId: p.userId,
       opId: opId,
       entity: String(op.entity || 'unknown'),
       entityId: String(op.entityId === undefined ? '' : op.entityId),
@@ -298,46 +312,46 @@ function applyOps(ops) {
       clientTs: num(op.clientTs, 0),
       baseSeq: num(op.baseSeq, 0)
     };
-    store.ops.push(record);
-    mergeField(record);
+    p.ops.push(record);
+    mergeField(p, record);
     accepted.push(opId);
     serverSeq = seq;
   });
   return { accepted: accepted, serverSeq: serverSeq };
 }
 
-/** 增量拉取：seq 升序 */
-function getOpsSince(since, limit) {
+/** 增量拉取：seq 升序（只在本用户分区内检索） */
+function getOpsSince(userId, since, limit) {
+  const p = partitionOf(userId);
   const from = num(since, 0);
   const max = num(limit, MAX_SYNC_PAGE);
   const out = [];
-  for (let i = 0; i < store.ops.length; i++) {
-    if (store.ops[i].serverSeq > from) {
-      out.push(clone(store.ops[i]));
+  for (let i = 0; i < p.ops.length; i++) {
+    if (p.ops[i].serverSeq > from) {
+      out.push(clone(p.ops[i]));
       if (out.length >= max) break;
     }
   }
   const last = out.length ? out[out.length - 1].serverSeq : from;
-  const hasMore = store.ops.some((o) => o.serverSeq > last);
+  const hasMore = p.ops.some((o) => o.serverSeq > last);
   return { ops: out, serverSeq: last, hasMore: hasMore };
 }
 
 module.exports = {
-  store: store,
   reset: reset,
   getSeed: getSeed,
-  /** 可变状态副本（seed + 已合并的 op 结果） */
-  getModel: function () {
-    return store.state;
+  /** 该用户分区合并后的状态（契约字段名为 seed，内容是本分区的当前快照） */
+  getModel: function (userId) {
+    return partitionOf(userId).state;
   },
-  getSeq: function () {
-    return store.seq;
+  getSeq: function (userId) {
+    return partitionOf(userId).seq;
   },
-  getState: function () {
+  getState: function (userId) {
     return {
-      seed: getSeed(),
-      replan: getLatestReplan(),
-      notifications: getNotifications()
+      seed: clone(partitionOf(userId).state),
+      replan: getLatestReplan(userId),
+      notifications: getNotifications(userId)
     };
   },
   getNotifications: getNotifications,
