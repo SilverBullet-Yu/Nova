@@ -723,7 +723,7 @@ html.no-scroll{overflow:hidden}
 .ovl{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:24px}
 .ovl-bg{
   position:absolute;inset:0;background:color-mix(in srgb,var(--txt) 52%,transparent);
-  animation:ovlIn .18s var(--ease) both;
+  /* 分格硬切：遮罩瞬暗不淡入，压住面板落格的两拍读感 */
 }
 .sheet{
   position:relative;width:min(560px,100%);max-height:min(86vh,780px);
@@ -731,7 +731,9 @@ html.no-scroll{overflow:hidden}
   background:var(--panel);
   border:2px solid var(--txt);border-radius:var(--r);
   box-shadow:var(--shadow-pop);
-  animation:sheetIn .22s var(--ease) both;
+  /* 分格硬切（漫画有限动画 2 コマ）：第 1 格面板悬起、第 2 格落定，全程不透明；
+     steps(2) 出两拍离散步，替代通用缓动滑入；出场仍走短淡出（close() 170ms 定时器移除节点） */
+  animation:sheetIn .14s steps(2, jump-none) both;
 }
 .sheet.wide{width:min(840px,100%)}
 .sheet::after{content:none}
@@ -750,9 +752,8 @@ html.no-scroll{overflow:hidden}
 .sheet-f{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:12px 20px;border-top:1px solid var(--line);background:transparent}
 .sheet-f .spacer{flex:1}
 
-@keyframes ovlIn{from{opacity:0}to{opacity:1}}
 @keyframes ovlOut{to{opacity:0}}
-@keyframes sheetIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes sheetIn{from{transform:translateY(12px)}to{transform:none}}
 @keyframes sheetOut{to{opacity:0;transform:translateY(8px)}}
 .ovl.out .sheet{animation:sheetOut .16s var(--ease) both}
 .ovl.out .ovl-bg{animation:ovlOut .16s both}
