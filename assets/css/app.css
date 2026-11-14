@@ -1786,3 +1786,19 @@ h1{font-size:34px;letter-spacing:0}
   .wrap{max-width:720px}
   .cp-foot{padding:8px 12px calc(12px + env(safe-area-inset-bottom))}
 }
+
+/* =========================================================
+   诺瓦灵动（IP 形象优化 · 线B）
+   原则：素材本身保持静态——SVG 经 <img> 引用，读不到页面上的
+   data-motion 开关，SVG 内不做动画；动效只加在产品侧 img 元素上。
+   两道既有总闸自动覆盖本区块：
+   · html[data-motion="off"] *{animation:none!important}
+   · @media (prefers-reduced-motion:reduce) *{animation:none!important}
+   动效档位：漂浮（欢迎立绘 / 计算中）与呼吸（计时专注），均为
+   位移/缩放的整图变换，无发光、无渐变，情绪上限仍是「平静—关切—欣喜」。
+   ========================================================= */
+@keyframes novaFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+@keyframes novaBreathe{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+.cp-body .msg:first-child .msg-mascot{animation:novaFloat 3.6s ease-in-out infinite}
+.msg-state.state-calc{animation:novaFloat 2.6s ease-in-out infinite}
+.tk-mascot{animation:novaBreathe 2.4s ease-in-out infinite}

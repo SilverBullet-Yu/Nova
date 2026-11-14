@@ -1,7 +1,7 @@
 /* =========================================================
    诺瓦 v4 素材生成器（零依赖）
    node scripts/build-mascot-v4.js  →  输出到 assets/img/
-     mascot-v4.svg          ① 待机 idle（琥珀涂装，主形象）
+     mascot-v4.svg          ① 待机 idle（墨蓝涂装，主形象）
      mascot-v4-classic.svg  ① 主立绘 · 原味涂装（周边/表情包，不进产品 UI）
      mascot-v4-listen.svg   ② 聆听态（输入聚焦）
      mascot-v4-focus.svg    ④ 专注态（计时进行中）
@@ -11,7 +11,7 @@
      mascot-v4-warn.svg     ⑦ 提醒（偏差归因 / 负载预警）
      mascot-v4-offline.svg  ⑧ 离线（本地兜底）
      mascot-v4-unknown.svg  ⑨ 兜底（关键词未命中）
-     avatar-v4.svg / avatar-v4-listen.svg / avatar-v4-offline.svg   章式头像
+     avatar-v4.svg / avatar-v4-listen.svg / avatar-v4-offline.svg   脸形头像
      favicon-v4.svg         16px 最小形
    造型语言取自《赛尔号》超能NoNo 的轮廓类别（斜向细长光柱耳 / 白球机身 /
    椭圆大面罩 + 活性色描边 / 发光竖条眼 / 外挂小圆点 / 悬浮飞溅），
@@ -29,7 +29,8 @@ const BLUE = {
   visor: '#1A2230', rim: '#4C7FD0',
   eye: '#4C7FD0', eyeCore: '#A9C4E8', eyeHi: 'rgba(255,255,255,.55)',
   glare: 'rgba(255,255,255,.42)',
-  shaft: 'rgba(76,127,208,.42)', shaft2: 'rgba(76,127,208,.20)',
+  /* 耳杆三段透明度阶梯放缓（.94/.55/.28）：根段→中段不再出现「断成两截」的读感 */
+  shaft: 'rgba(76,127,208,.55)', shaft2: 'rgba(76,127,208,.28)',
   lens: 'rgba(76,127,208,.94)', lensCore: 'rgba(169,196,232,.88)',
   joint: '#E7ECF3', seal: '#A03B2C', sealInk: '#FFFFFF',
   splash: 'rgba(76,127,208,.16)', splash2: 'rgba(76,127,208,.11)',
@@ -42,7 +43,7 @@ const CLASSIC = {
   glare: 'rgba(255,255,255,.5)',
   shaft: 'rgba(161,234,236,.6)', shaft2: 'rgba(161,234,236,.28)',
   lens: 'rgba(120,226,232,.94)', lensCore: 'rgba(201,244,252,.9)',
-  joint: '#FFFFFF', seal: '#9C3B2B', sealInk: '#FFF5EF',
+  joint: '#FFFFFF', seal: '#A03B2C', sealInk: '#FFFFFF',
   splash: 'rgba(47,227,242,.2)', splash2: 'rgba(47,227,242,.13)',
   shadow: 'rgba(43,52,64,.12)', paper: '#FFFFFF', paperLine: '#2B3440'
 };
@@ -58,10 +59,10 @@ const OFFLINE = {
   splash: 'rgba(18,26,40,.08)', splash2: 'rgba(18,26,40,.05)',
   shadow: 'rgba(18,26,40,.08)', paper: '#F4F6F9', paperLine: '#3A424E'
 };
-/* ⑦ 提醒：耳变深赭 */
+/* ⑦ 提醒：耳变深墨蓝（现行天空蓝的深化档 #274B94，与旧主题墨蓝脱钩） */
 const WARN = Object.assign({}, BLUE, {
-  shaft: 'rgba(44,90,158,.44)', shaft2: 'rgba(44,90,158,.22)',
-  lens: 'rgba(44,90,158,.96)', lensCore: 'rgba(126,164,214,.9)'
+  shaft: 'rgba(39,75,148,.58)', shaft2: 'rgba(39,75,148,.30)',
+  lens: 'rgba(39,75,148,.96)', lensCore: 'rgba(112,146,205,.9)'
 });
 
 const SERIF = "'Songti SC','Noto Serif SC','SimSun',serif";
@@ -102,12 +103,12 @@ function faceIdle(c, o) {
     '<rect x="152.4" y="' + (ry + 4).toFixed(1) + '" width="2.1" height="' + (rh * 0.4).toFixed(1) + '" rx="1.05" fill="' + c.eyeHi + '"/>';
 }
 
-/* ③ 计算中：六点矩阵 */
+/* ③ 计算中：六点矩阵（右列抬高 2px，与待机态「右眼略高」的脸部语言一致） */
 function faceCalc(c) {
   var pts = '';
   [131, 141, 151].forEach(function (y) {
     pts += '<circle cx="123" cy="' + y + '" r="2.7" fill="' + c.eye + '"/>';
-    pts += '<circle cx="154" cy="' + y + '" r="2.7" fill="' + c.eye + '"/>';
+    pts += '<circle cx="154" cy="' + (y - 2) + '" r="2.7" fill="' + c.eye + '"/>';
   });
   return '<rect x="140" y="104" width="31" height="23" rx="8" fill="' + c.glare + '"/>' + pts;
 }
@@ -130,11 +131,11 @@ function faceRescue(c) {
     '<path d="M132 156 L144 156" stroke="' + c.eye + '" stroke-width="2.4" stroke-linecap="round"/>';
 }
 
-/* ⑦ 提醒：紧张眼「><」 */
+/* ⑦ 提醒：紧张眼「><」（右眼抬高 2px，与待机态一致） */
 function faceWarn(c) {
   return '<rect x="140" y="104" width="31" height="23" rx="8" fill="' + c.glare + '"/>' +
     '<path d="M118 135 L124 141 L118 147" fill="none" stroke="' + c.eye + '" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>' +
-    '<path d="M158 135 L152 141 L158 147" fill="none" stroke="' + c.eye + '" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>' +
+    '<path d="M158 133 L152 139 L158 145" fill="none" stroke="' + c.eye + '" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>' +
     '<path d="M133 157 L143 157" stroke="' + c.eye + '" stroke-width="2.4" stroke-linecap="round"/>';
 }
 
@@ -173,39 +174,40 @@ function body(c, o) {
   var tilt = o.tilt || 0;
 
   var ring = o.ring
-    ? '<circle cx="85" cy="171" r="14" fill="none" stroke="rgba(157,59,43,.22)" stroke-width="2"/>' +
-      '<circle cx="85" cy="171" r="14" fill="none" stroke="#9C3B2B" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="38 50" transform="rotate(-90 85 171)"/>'
+    ? '<circle cx="85" cy="171" r="14" fill="none" stroke="rgba(160,59,44,.22)" stroke-width="2"/>' +
+      '<circle cx="85" cy="171" r="14" fill="none" stroke="#A03B2C" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="38 50" transform="rotate(-90 85 171)"/>'
     : '';
 
   var inner =
-    /* 悬浮飞溅 */
+    /* 悬浮飞溅（角度按漂离方向分组统一：左下组 ≈ -22°、右侧组 ≈ +26°，读作悬浮气流而非污点） */
     '<g fill="' + c.splash + '">' +
-      '<ellipse cx="42" cy="196" rx="16" ry="4.5" transform="rotate(-18 42 196)"/>' +
-      '<ellipse cx="60" cy="203" rx="10" ry="3" transform="rotate(-8 60 203)"/>' +
-      '<ellipse cx="30" cy="174" rx="9" ry="3" transform="rotate(-32 30 174)"/>' +
-      '<ellipse cx="202" cy="128" rx="14" ry="4" transform="rotate(28 202 128)"/>' +
-      '<ellipse cx="26" cy="203" rx="7" ry="2.6" transform="rotate(-24 26 203)"/>' +
-      '<ellipse cx="214" cy="146" rx="9" ry="3.4" transform="rotate(44 214 146)"/>' +
+      '<ellipse cx="42" cy="196" rx="16" ry="4.5" transform="rotate(-22 42 196)"/>' +
+      '<ellipse cx="60" cy="203" rx="10" ry="3" transform="rotate(-18 60 203)"/>' +
+      '<ellipse cx="30" cy="174" rx="9" ry="3" transform="rotate(-24 30 174)"/>' +
+      '<ellipse cx="202" cy="128" rx="14" ry="4" transform="rotate(24 202 128)"/>' +
+      '<ellipse cx="26" cy="203" rx="7" ry="2.6" transform="rotate(-26 26 203)"/>' +
+      '<ellipse cx="214" cy="146" rx="9" ry="3.4" transform="rotate(26 214 146)"/>' +
     '</g>' +
     '<g fill="' + c.splash2 + '">' +
-      '<ellipse cx="214" cy="148" rx="8" ry="3" transform="rotate(40 214 148)"/>' +
-      '<ellipse cx="26" cy="210" rx="6" ry="2.4" transform="rotate(-12 26 210)"/>' +
+      '<ellipse cx="214" cy="148" rx="8" ry="3" transform="rotate(28 214 148)"/>' +
+      '<ellipse cx="26" cy="210" rx="6" ry="2.4" transform="rotate(-20 26 210)"/>' +
     '</g>' +
-    /* 双耳光柱 */
-    taperShaft([88, 92], [28, 30], 11.5, 2.2, [lens, shaft, shaft2]) +
-    taperShaft([126, 92], [152, 16], 9.5, 1.8, [lens, shaft, shaft2]) +
-    /* 耳根透镜 */
-    '<ellipse cx="76" cy="82" rx="12" ry="7" transform="rotate(-45 76 82)" fill="' + lens + '"/>' +
-    '<ellipse cx="76" cy="82" rx="7" ry="4" transform="rotate(-45 76 82)" fill="' + lensCore + '"/>' +
-    '<ellipse cx="134" cy="90" rx="10" ry="6" transform="rotate(-18 134 90)" fill="' + lens + '"/>' +
-    '<ellipse cx="134" cy="90" rx="5.5" ry="3.2" transform="rotate(-18 134 90)" fill="' + lensCore + '"/>' +
+    /* 双耳光柱：耳根扎进球体轮廓内（左根 (98,108)、右根 (128,100)），光柱从球面后探出，
+       消除旧版「耳根悬空、透镜漂离球面」的断裂读感；倾角左约 48°、右约 16°（自竖直） */
+    taperShaft([98, 108], [28, 30], 11.5, 2.2, [lens, shaft, shaft2]) +
+    taperShaft([128, 100], [152, 16], 9.5, 1.8, [lens, shaft, shaft2]) +
+    /* 耳根透镜：中心落在各自杆轴上（沿杆方向的窄椭圆），不再横在杆身之外 */
+    '<ellipse cx="91" cy="100.2" rx="10.5" ry="5" transform="rotate(48 91 100.2)" fill="' + lens + '"/>' +
+    '<ellipse cx="91" cy="100.2" rx="5.5" ry="2.8" transform="rotate(48 91 100.2)" fill="' + lensCore + '"/>' +
+    '<ellipse cx="131.4" cy="88.2" rx="8" ry="4.5" transform="rotate(-74 131.4 88.2)" fill="' + lens + '"/>' +
+    '<ellipse cx="131.4" cy="88.2" rx="4.2" ry="2.4" transform="rotate(-74 131.4 88.2)" fill="' + lensCore + '"/>' +
     /* 机身 */
     '<ellipse cx="130" cy="142" rx="55" ry="47" fill="' + c.body + '" stroke="rgba(18,26,40,.10)" stroke-width="1"/>' +
     '<ellipse cx="148" cy="170" rx="34" ry="16" fill="' + c.bodySh + '" clip-path="url(#ballClip)"/>' +
     '<ellipse cx="108" cy="119" rx="18" ry="9" fill="' + c.bodyHi + '" transform="rotate(-22 108 119)"/>' +
-    /* 耳根关节 */
-    '<circle cx="89" cy="95" r="6.5" fill="' + c.joint + '"/>' +
-    '<circle cx="126" cy="95" r="6" fill="' + c.joint + '"/>' +
+    /* 耳根关节：白盘落在光柱穿出球面的交点上（左 (95.5,105.5)、右 (129.5,95.5)，均贴球面） */
+    '<circle cx="95.5" cy="105.5" r="5.5" fill="' + c.joint + '"/>' +
+    '<circle cx="129.5" cy="95.5" r="5" fill="' + c.joint + '"/>' +
     /* 面罩 */
     '<g transform="rotate(20 138 141)">' +
       '<ellipse cx="138" cy="141" rx="34" ry="35" fill="' + c.visor + '"/>' +
@@ -259,12 +261,13 @@ function avatar(kind) {
     ears + '<ellipse cx="48" cy="55" rx="24" ry="21" fill="' + visor + '"/>' + eyes + extra);
 }
 
-/* 应用图标（favicon）：产品「脸」的最小形 —— 暖纸底 + 深色面罩 + 琥珀竖眼 + 双耳尖。
+/* 应用图标（favicon）：产品「脸」的最小形 —— 奶油纸底 + 深色面罩 + 墨蓝竖眼 + 双耳尖。
    不沿用章式头像的墨底方章：章式头像用墨底是产品内的「印章」语言，
-   而标签页与手机桌面图标在产品之外，墨底会变成一块认不出的小黑砖。 */
+   而标签页与手机桌面图标在产品之外，墨底会变成一块认不出的小黑砖。
+   底色与页面 theme-color（--bg #FBF7EF）同源，随日漫化换肤同步。 */
 function favicon() {
-  return svg(16, 16, '诺瓦 v4 应用图标：诺瓦的脸（纸白底 + 深色面罩 + 墨蓝竖眼 + 双耳尖）',
-    '<rect x="0.45" y="0.45" width="15.1" height="15.1" rx="3" fill="#F5F6F8" stroke="#141922" stroke-width="0.9"/>' +
+  return svg(16, 16, '诺瓦 v4 应用图标：诺瓦的脸（奶油纸底 + 深色面罩 + 墨蓝竖眼 + 双耳尖）',
+    '<rect x="0.45" y="0.45" width="15.1" height="15.1" rx="3" fill="#FBF7EF" stroke="#141922" stroke-width="0.9"/>' +
     '<path d="M4.7 6.4L3.2 1.9L5.2 2.35L6.2 5.7Z" fill="#4C7FD0"/>' +
     '<path d="M11.3 6.4L12.8 1.9L10.8 2.35L9.8 5.7Z" fill="#4C7FD0"/>' +
     '<ellipse cx="8" cy="9.3" rx="4.7" ry="4" fill="#1A2230"/>' +
@@ -288,19 +291,19 @@ function decorRescue(c) {
     '<path d="M62 170 L62 190 M66 169.4 L66 189.4" stroke="' + c.paperLine + '" stroke-width=".8" opacity=".45"/>' +
     '</g>';
 }
-/* ⑦ 提醒：耳尖闪线 */
+/* ⑦ 提醒：耳尖闪线（警示金 #B98A3C，与主题 --warn #8A5A1E 同族的亮阶，替换旧暖琥珀残留） */
 function decorWarn(c) {
-  return '<g stroke="#F1C97F" stroke-width="1.4" stroke-linecap="round" opacity=".9">' +
+  return '<g stroke="#B98A3C" stroke-width="1.4" stroke-linecap="round" opacity=".9">' +
     '<path d="M34 28 L39 36"/><path d="M149 20 L146 27"/>' +
     '</g>';
 }
 
 const files = {
-  'mascot-v4.svg': svg(240, 210, '诺瓦 v4：球形悬浮机器管家（琥珀涂装）', body(BLUE, {})),
+  'mascot-v4.svg': svg(240, 210, '诺瓦 v4：球形悬浮机器管家（墨蓝涂装）', body(BLUE, {})),
   'mascot-v4-classic.svg': svg(240, 210, '诺瓦 v4：球形悬浮机器管家（原味涂装）', body(CLASSIC, {})),
   'mascot-v4-listen.svg': svg(240, 210, '诺瓦 v4：聆听态', body(BLUE, { eyeH: 1.28, earsArcs: true })),
   'mascot-v4-focus.svg': svg(240, 210, '诺瓦 v4：专注态（计时进行中）',
-    body(BLUE, { earLens: 'rgba(157,59,43,.92)', earCore: 'rgba(201,112,95,.85)', rim: '#9C3B2B', ring: true })),
+    body(BLUE, { earLens: 'rgba(160,59,44,.92)', earCore: 'rgba(203,116,99,.85)', rim: '#A03B2C', ring: true })),
   'mascot-v4-calc.svg': svg(240, 210, '诺瓦 v4：计算中', body(BLUE, { face: faceCalc })),
   'mascot-v4-done.svg': svg(240, 210, '诺瓦 v4：达成', body(BLUE, { face: faceDone, decor: decorDone })),
   'mascot-v4-rescue.svg': svg(240, 210, '诺瓦 v4：挽救', body(BLUE, { face: faceRescue, decor: decorRescue, tilt: -7 })),
