@@ -248,9 +248,12 @@ window.ZX = window.ZX || {};
     var undoCount = deferred.length;
     var cmpCount = compressed.length;
     var abnCount = abandoned.length;
+    /* 步骤文案口径与今日页 KPI 同源（exec.metrics 过滤跳过项），flows 未加载时退回原派生函数 */
+    var m0 = (ZX.flows.exec && ZX.flows.exec.metrics) ? ZX.flows.exec.metrics()
+      : { total: S.tasks.filter(function (t) { return !t.done; }).length, remain: S.remainMin() };
 
     (async function () {
-      await U.sleep(300); step(0, S.tasks.filter(function (t) { return !t.done; }).length + ' 项 · ' + U.hm(S.remainMin()));
+      await U.sleep(300); step(0, m0.total + ' 项 · ' + U.hm(m0.remain));
       await U.sleep(320); step(1, '计划过载 40%');
       await U.sleep(340);
       step(2, undoCount + ' 项 → 未来 7 天空闲时段');
@@ -483,7 +486,9 @@ window.ZX = window.ZX || {};
     var S = ZX.state;
     var pick = lowestWeightTask();
     var est = pick ? U.num(pick.est, 0) : 0;
-    var before = S.plannedMin();
+    /* 计划口径与今日页 KPI 同源（exec.metrics 过滤跳过项），flows 未加载时退回原派生函数 */
+    var mT = (ZX.flows.exec && ZX.flows.exec.metrics) ? ZX.flows.exec.metrics() : { planned: S.plannedMin() };
+    var before = mT.planned;
     var after = before - est;
     var keepN = S.tasks.filter(function (x) { return !x.done && !x.skipped && (!pick || x.id !== pick.id); }).length;
     say('<p>今天不追加任务。状态的波动是可预期的，系统不该用计划去对抗它。</p>' +
@@ -501,11 +506,13 @@ window.ZX = window.ZX || {};
   /* ---------- flow：今日安排 ---------- */
   function todayFlow() {
     var S = ZX.state;
-    var todo = S.tasks.filter(function (t) { return !t.done; });
+    var todo = S.tasks.filter(function (t) { return !t.done && !t.skipped; });
+    /* 剩余量口径与今日页 KPI 同源（exec.metrics 过滤跳过项），flows 未加载时退回原派生函数 */
+    var mD = (ZX.flows.exec && ZX.flows.exec.metrics) ? ZX.flows.exec.metrics() : { remain: S.remainMin() };
     var rows = todo.map(function (t) {
       return '<div class="erow"><span class="k">' + t.time.split('–')[0] + '</span><span class="why" style="flex:1;color:var(--txt2)">' + t.s + ' · ' + U.esc(t.title) + '</span><span class="v">' + U.hm(t.est) + '</span></div>';
     }).join('');
-    say('<p>今天还剩 <b>' + todo.length + '</b> 项，共 <b>' + U.hm(S.remainMin()) + '</b>。顺序不是按科目排的，是按「截止紧迫度 ↓ + 权重 ↓」排的。</p>' +
+    say('<p>今天还剩 <b>' + todo.length + '</b> 项，共 <b>' + U.hm(mD.remain) + '</b>。顺序不是按科目排的，是按「截止紧迫度 ↓ + 权重 ↓」排的。</p>' +
       '<div class="ecard"><div class="ecard-h"><b>接下来</b><span class="tag">弹性位 20:30</span></div><div class="ecard-b">' + rows +
         '<div class="erow"><span class="k">20:30</span><span class="why" style="flex:1;color:var(--txt3)">弹性位 · 刻意留空</span><span class="v">60m</span></div>' +
       '</div></div>' +

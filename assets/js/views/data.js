@@ -157,9 +157,10 @@ window.ZX = window.ZX || {};
     var attrTxt = Object.keys(attr).map(function (n) { return n + ' ' + U.num(attr[n], 0) + '%'; }).join('、');
     return '<div class="report">' +
       '<div class="report-h"><b>第 ' + U.isoWeek() + ' 周 · 周报</b><span>' + genStamp() + ' 生成</span></div>' +
-      '<div class="rp-row"><div class="k">结论</div><div class="v">本周达成率 <b>' + U.num(k.achievementRate, 0) + '%</b>，较上周' +
-        (delta >= 0 ? '上升' : '下降') + ' ' + Math.abs(delta) + ' 个百分点；有效学习 <b>' + U.num(k.effectiveHours, 0) + ' 小时</b>（目标 ' + U.num(k.targetHours, 0) + ' 小时）' +
-        (gap > 0 ? '。计划仍然存活，缺口 ' + gap + ' 小时。' : '。') + '</div></div>' +
+      /* 荧光笔静态用法（清晰线遗留项）：结论行的关键数字「划重点」，仅装饰、不承载语义 */
+      '<div class="rp-row"><div class="k">结论</div><div class="v">本周达成率 <b class="hl">' + U.num(k.achievementRate, 0) + '%</b>，较上周' +
+        (delta >= 0 ? '上升' : '下降') + ' ' + Math.abs(delta) + ' 个百分点；有效学习 <b class="hl">' + U.num(k.effectiveHours, 0) + ' 小时</b>（目标 ' + U.num(k.targetHours, 0) + ' 小时）' +
+        (gap > 0 ? '。计划仍然存活，缺口 <b class="hl">' + gap + ' 小时</b>。' : '。') + '</div></div>' +
       '<div class="rp-row"><div class="k">依据</div><div class="v">' +
         (mixTxt ? '科目分布 ' + U.esc(mixTxt) + '；' : '') +
         (attrTxt ? '归因 ' + U.esc(attrTxt) + '。' : '') + '</div></div>' +

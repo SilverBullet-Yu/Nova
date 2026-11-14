@@ -456,7 +456,7 @@ npm test
 | ⑦ 提醒 | `mascot-v4-warn.svg` | 数据页「偏差归因」面板（22×19）；计划页负载预警旗标 | `views/data.js`、`views/plan.js` `loadWarnFlag()` |
 | ⑧ 离线 | `avatar-v4-offline.svg` | 无后端时对话头像褪色 | `main.js` `updateSync()` 切 `.is-offline` |
 | ⑨ 兜底 | `mascot-v4-unknown.svg` | 关键词未命中的兜底回复（32×28） | `assistant.js` `fallback()` |
-| 应用图标 | `favicon-v4.svg` | 16×16 · 暖纸底「脸」形（标签页 / 手机桌面） | `index.html` `link rel=icon`；`theme-color` 同为 `#F7F2E7` |
+| 应用图标 | `favicon-v4.svg` | 16×16 · 奶油纸底「脸」形（标签页 / 手机桌面） | `index.html` `link rel=icon`；`theme-color` 同为 `#FBF7EF`（随日漫化换肤同步） |
 
 实现口径：
 
@@ -651,3 +651,45 @@ npm test
 **验证**：`npm test` 57/57；`npm run audit` 0 error 0 warn；桌面 1280 对话/今日/计划/我的 + 390×844 移动对话页截图核验（云朵尾巴、药丸开关、圆点标记、集中线均确认），移动端 `scrollWidth−clientWidth` 为 0。
 
 **遗留**：日漫粉目前仅一处（用户说话人圆点），如需扩展（收藏、亲切提示底色）须先定义语义边界；圆尾巴依赖负 z-index 与 stacking context 的绘制顺序，已在当前 DOM 层级（`.copilot` isolation）下验证，后续若重排对话 DOM 需复查。
+
+### IP 形象优化：协调 / 自然 / 灵动（2026-11-14 · 第三轮）
+
+只改 `scripts/build-mascot-v4.js` + 重新生成 `assets/img/*` + `app.css` 末尾「诺瓦灵动」区块 + `docs/IP-DESIGN.md` 同步。不改造型语言（轮廓类别、面罩、朱砂印、双涂装纪律全部保留），不触碰 HTML / JS / 引擎。
+
+**协调（几何与色板统一）**
+
+| # | 问题 | 修正 |
+|---|---|---|
+| 1 | 耳根簇（根段 + 透镜 + 关节盘）悬空在球体轮廓外上方，左耳根 (88,92) 距球面边缘约 15px，读感「耳朵漂浮脱节」 | 耳根扎入球体轮廓内：左根 (88,92)→(98,108)、右根 (126,92)→(128,100)，光柱自球面探出；倾角左约 48° / 右约 16°（自竖直） |
+| 2 | 左耳透镜长轴垂直于杆轴（rotate −45°，杆向 48°），读感像横在杆上的「结」；右耳透镜偏离杆轴 6.9px | 透镜中心放到各自杆轴上、长轴沿杆方向：左 (91,100.2) rotate 48°、右 (131.4,88.2) rotate −74° |
+| 3 | 关节盘位置与球面脱接（左盘 (89,95) 悬空 15px） | 关节盘落在光柱穿出球面的交点：左 (95.5,105.5) r5.5、右 (129.5,95.5) r5，均贴球面 |
+| 4 | 旧主题色残留：classic 印 `#9C3B2B`、专注态耳/环 `#9C3B2B` 系、提醒态耳旧主题墨蓝 `rgba(44,90,158)`（= 旧 `#2C5A9E`）、闪线旧暖琥珀 `#F1C97F`、favicon 底旧冷白 `#F5F6F8` | 全部统一进现行色板：朱砂 `#A03B2C`、提醒耳现行深墨蓝 `#274B94` 系、闪线警示金 `#B98A3C`（`--warn` 同族亮阶）、favicon 底奶油纸 `#FBF7EF`（与 theme-color 同源） |
+| 5 | warn / calc 双眼等高，与待机态「右眼略高」的脸部语言不一致 | 两态右眼 / 右列抬高 2px |
+
+**自然（造型细节）**
+
+| # | 问题 | 修正 |
+|---|---|---|
+| 6 | 耳杆三段透明度 .94/.40/.18 落差过大，根段→中段明度跳变读作「断成两截」 | 阶梯放缓为 .94/.55/.28（warn 态同步 .58/.30/.96），由实到淡的读感保留 |
+| 7 | 飞溅碎片倾角随机（−8°~−44° 散布），小尺寸读作污点 | 按漂离方向分组统一：左下组 −18°~−26°、右侧组 +24°~+28°，读作悬浮气流 |
+
+**灵动（产品侧动效，全部受既有总闸约束）**
+
+- 新增 keyframes `novaFloat`（translateY 0→−3px）/ `novaBreathe`（scale 1→1.06），只作用于 img 元素：欢迎立绘 `.msg-mascot`（3.6s 漂浮）、计算中 `.msg-state.state-calc`（2.6s 漂浮）、计时专注 `.tk-mascot`（2.4s 呼吸）。
+- 素材保持静态：SVG 经 `<img>` 引用读不到 `data-motion`，SVG 内不做动画；`html[data-motion="off"]` 与 `prefers-reduced-motion:reduce` 的既有 `animation:none!important` 总闸自动覆盖本区块，动效可关。
+- 无发光、无渐变，情绪上限仍为「平静—关切—欣喜」。
+
+**验证**：`node --check` 生成器通过；素材重新生成后与磁盘同步（`git status` 干净基线）；特写对比（240px 与 520px 渲染）确认耳根贴球、透镜沿杆、三段过渡平滑；`npm test` 57/57；`npm run audit` 0 error 0 warn。**遗留**：荧光笔 / 圆尾巴等既有遗留项不变；预览页 `preview-v4.html` 随素材自动更新，未单独改版。
+
+### 查漏补缺（线A · 2026-11-14 同日）
+
+清理契约遗留与视觉盘点发现的缺口；改动 `assets/js/main.js`、`assets/js/assistant.js`、`assets/js/views/data.js`、`app.css` 末尾「查漏补缺」区块、三份文档。
+
+| # | 类别 | 问题 | 修正 |
+|---|---|---|---|
+| 1 | 荧光笔静态用法（清晰线遗留） | `--hlbg` 只出现在 hover 与 banner 底，无「划重点」静态用法 | 周报结论行三个关键数字（达成率 / 有效学习 / 缺口小时）加 `.hl` 荧光笔底；CSS 新增 `.hl`（平涂 + `box-decoration-break:clone`），仅装饰、不承载语义 |
+| 2 | 跳过任务口径（C-1 遗留收尾） | 今日页 KPI 已过滤 skipped，但对话流四处文案仍用未过滤的 `remainMin()/plannedMin()`：开场问候「还剩 X 项 Y」、重排步骤 0、降载建议「今日计划 X→Y」、今日安排「还剩 X 项共 Y」——跳过越多数字越矛盾，违反零惩罚 | 四处统一改走 `ZX.flows.exec.metrics()`（与今日页 KPI 同源，过滤 skipped），flows 未加载时退回原派生函数；`todayFlow` 行列表同步排除 skipped；`state.js` 派生函数语义不动（沿用执行者「视图层过滤」的决策） |
+| 3 | 744–860 横屏对话行长（精修六遗留） | 对话消息列随 `.cp-body` 全宽拉满，CJK 行长超读 | ≤860 时 `.cp-body .msg` 收拢为 720px 居中，与内容页 `.wrap` 同列宽 |
+| 4 | 文档漂移 | `IP-DESIGN.md` 仍记载已删除的 `--bg2` token 与「输入聚焦头像」等已撤除接入；`FRONTEND-CONTRACT.md` IP 接入表 favicon 行 `theme-color` 停在三代前的 `#F7F2E7`；`HANDOFF.md` §7.2 视觉条款仍写「深色 HUD + 电光绿」 | 三处全部对齐现行状态（日漫清晰线 + 诺瓦 v4 九态现行接入面），HANDOFF 视觉条款改为引用 `app.css` 头注释与 `IP-DESIGN.md` |
+
+**验证**：`node --check` 三个 JS 通过；`npm test` 57/57；`npm run audit` 0 error 0 warn；五页签 ×（1280/390）截图无溢出、console 干净。**遗留**：`status` 一字段两用、新目标 / 补录不持久化（属后端范围）、861–1080 平板档等既有遗留项不变。

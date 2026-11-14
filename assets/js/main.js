@@ -235,11 +235,13 @@ window.ZX = window.ZX || {};
     var greet = h < 11 ? '上午好' : h < 18 ? '下午好' : '晚上好';
     var done = S.tasks.filter(function (t) { return t.done; });
     var todo = S.tasks.filter(function (t) { return !t.done && !t.skipped; });
+    /* 剩余量口径与今日页 KPI 同源（exec.metrics 过滤跳过项）；flows 未加载时退回原派生函数 */
+    var m = (ZX.flows.exec && ZX.flows.exec.metrics) ? ZX.flows.exec.metrics() : null;
     var p1 = greet + '，' + U.esc(S.user.name) + '。';
     if (done.length) {
       p1 += U.esc(done[0].s) + '「' + U.esc(done[0].title) + '」已记录 <b>' + U.hm(done[0].actual || done[0].est) + '</b>。';
     }
-    p1 += '今天还剩 <b>' + todo.length + '</b> 项、<b>' + U.hm(S.remainMin()) + '</b>' +
+    p1 += '今天还剩 <b>' + todo.length + '</b> 项、<b>' + U.hm(m ? m.remain : S.remainMin()) + '</b>' +
       (S.buffer && S.buffer.time ? '，' + U.esc(S.buffer.time) + ' 留了一个弹性位' : '') + '。';
     var heavy = null;
     todo.forEach(function (t) { if (!heavy || U.num(t.weight, 0) > U.num(heavy.weight, 0)) heavy = t; });

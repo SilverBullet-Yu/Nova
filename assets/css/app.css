@@ -1802,3 +1802,23 @@ h1{font-size:34px;letter-spacing:0}
 .cp-body .msg:first-child .msg-mascot{animation:novaFloat 3.6s ease-in-out infinite}
 .msg-state.state-calc{animation:novaFloat 2.6s ease-in-out infinite}
 .tk-mascot{animation:novaBreathe 2.4s ease-in-out infinite}
+
+/* =========================================================
+   查漏补缺（线A · 2026-11-14）
+   1) 荧光笔静态用法：周报结论行关键数字「划重点」——此前 --hlbg
+      只出现在 hover 与 banner 底，无静态用法（清晰线遗留项）；
+      仅装饰、不承载语义，朱砂纪律不变
+   2) 744–860 横屏：对话消息列此前随 .cp-body 全宽拉满、行长超读；
+      收拢为 720px 居中，与内容页 .wrap 同一列宽
+   ========================================================= */
+.hl{
+  background:var(--hlbg);
+  color:inherit;
+  padding:.05em .28em;
+  border-radius:4px;
+  -webkit-box-decoration-break:clone;
+  box-decoration-break:clone;
+}
+@media (max-width:860px){
+  .cp-body .msg{max-width:720px;margin-left:auto;margin-right:auto}
+}
