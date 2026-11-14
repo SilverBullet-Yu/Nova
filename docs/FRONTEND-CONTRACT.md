@@ -693,3 +693,17 @@ npm test
 | 4 | 文档漂移 | `IP-DESIGN.md` 仍记载已删除的 `--bg2` token 与「输入聚焦头像」等已撤除接入；`FRONTEND-CONTRACT.md` IP 接入表 favicon 行 `theme-color` 停在三代前的 `#F7F2E7`；`HANDOFF.md` §7.2 视觉条款仍写「深色 HUD + 电光绿」 | 三处全部对齐现行状态（日漫清晰线 + 诺瓦 v4 九态现行接入面），HANDOFF 视觉条款改为引用 `app.css` 头注释与 `IP-DESIGN.md` |
 
 **验证**：`node --check` 三个 JS 通过；`npm test` 57/57；`npm run audit` 0 error 0 warn；五页签 ×（1280/390）截图无溢出、console 干净。**遗留**：`status` 一字段两用、新目标 / 补录不持久化（属后端范围）、861–1080 平板档等既有遗留项不变。
+
+### 界面精修（七）· 消息组件与提示层（2026-11-14 第三轮 · 用户反馈驱动）
+
+用户反馈「组件层级显示有问题」（气泡月牙尾巴顶进 meta 行）引发的组件家族排查与修复：
+
+| # | 问题 | 修正 |
+|---|---|---|
+| 1 | 气泡圆月牙尾巴露出 11px > meta 下边距 8px，顶进「诺瓦/你 + 时间」字幕栏文字区；负 z 又画在文字层之下，观感为层级压线 | 黑圆/内圆 18/12→16/10px，露出收到 6px（环宽 3px 不变），月牙完整落在 meta 与气泡之间的空白带；两侧镜像同步 |
+| 2 | 用户气泡从未真正右对齐：`.msg.u` 是整行 block（width auto），其 `margin-left:auto` 不生效，`.txt` fit-content 又贴左 | `.msg.u .txt` 补 `margin-left:auto`，气泡与尾巴一起贴右，meta 行为不变 |
+| 3 | toast 落在对话页输入台内部（bottom:32px 处于 cp-foot 高度带内），白底相融读感像被盖住 | `ui.js toast()` 在 cp-foot 可见时把 bottom 抬到输入台上沿（offsetHeight+24），其余页签维持 32px 原位 |
+
+**排查过的其余组件（未见问题）**：今日骨架时间轴与「现在」标记、日程块 board（含锁定钮）、可行性 R 刻度条 marker、周报 `.hl`、可用时段格、新建目标弹层、confirm 遮罩、挽救 banner（mascot + 集中线 + 荧光笔底）、移动端 board/timeline。
+
+**验证**：`node --check` ui.js；五页签×(1280/390) 溢出 0、console 干净；`npm run audit` 0 error；toast 两页签落点实测（chat 182px / today 默认 32px）；尾巴 3x 放大截图核验。

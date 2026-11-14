@@ -231,6 +231,10 @@ window.ZX = window.ZX || {};
     var prev = document.querySelectorAll('.toast:not(.out)').length;
     var t = node('<div class="toast ' + (kind || '') + '" role="status">' + U.esc(text) + '</div>');
     if (prev) t.style.marginBottom = (prev * 46) + 'px';
+    /* 对话页底部有输入台（cp-foot ≈ 150px），固定 bottom:32px 会让 toast
+       落进输入台内部、白底相融像被盖住；可见时抬高到输入台上沿，其余页签维持原位 */
+    var foot = document.querySelector('.cp-foot');
+    if (foot && foot.offsetHeight > 0) t.style.bottom = (foot.offsetHeight + 24) + 'px';
     document.body.appendChild(t);
     setTimeout(function () { t.classList.add('out'); }, 2200);
     setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 2600);
