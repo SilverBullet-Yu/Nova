@@ -208,6 +208,24 @@ test('POST /api/sessions 幂等：同 opId 重复提交返回首次 serverSeq', 
   assert.equal(b.body.serverSeq, a.body.serverSeq);
 });
 
+test('GET /api/state 回读 session：sync 上行的记录以完整会话对象返回', async () => {
+  const sess = { id: 's_readback_1', taskId: 't2', startAt: 1000, endAt: 2000, minutes: 30, completion: 100, status: 'backfill', feel: null, isBackfill: true };
+  const up = await call('POST', '/api/sync/ops', {
+    ops: [{ opId: 'op-session-readback', entity: 'session', entityId: 't2', field: 'recorded', value: sess, clientTs: 300 }]
+  }, userA.token);
+  assert.equal(up.status, 200);
+  assert.deepEqual(up.body.accepted, ['op-session-readback']);
+
+  const r = await call('GET', '/api/state', undefined, userA.token);
+  assert.equal(r.status, 200);
+  const sessions = (r.body.seed && Array.isArray(r.body.seed.sessions)) ? r.body.seed.sessions : [];
+  const hit = sessions.find((x) => x && x.id === 's_readback_1');
+  assert.ok(hit, 'seed.sessions 应包含完整会话对象');
+  assert.equal(hit.status, 'backfill');
+  assert.equal(hit.minutes, 30);
+  assert.equal(hit.feel, null);
+});
+
 test('POST /api/sync/ops 幂等：同 opId 重复提交不产生新 seq', async () => {
   const ops = [{ opId: 'op-sync-1', entity: 'task', entityId: 't3', field: 'status', value: 'scheduled', clientTs: 100 }];
   const a = await call('POST', '/api/sync/ops', { ops: ops }, userA.token);

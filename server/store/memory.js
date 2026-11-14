@@ -130,8 +130,11 @@ function applyToState(p, entity, entityId, field, value) {
       break;
     }
     case 'session': {
+      /* 回读形态：value 即完整 session 记录（exec.record 产出，含 status/feel），
+         GET /api/state 的 seed.sessions 直接可读——闭合「后端无 session 回读接口」缺口；
+         非对象 value（旧式包装）保持原样容错 */
       s.sessions = s.sessions || [];
-      s.sessions.push({ entityId: entityId, field: field, value: value });
+      s.sessions.push(isPlainObject(value) ? clone(value) : { entityId: entityId, field: field, value: value });
       break;
     }
     default: {

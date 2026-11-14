@@ -105,6 +105,9 @@ window.ZX = window.ZX || {};
         '<div class="bt">这个视图渲染出错了</div>' +
         '<div class="bs">其他功能不受影响；可切换页签或刷新恢复。</div></div></div>';
     }
+    /* 渲染即持久化：任何状态变更后都会走到这里，统一落本地 overlay
+       （新目标 / 记录 / 跳过 / 补录跨刷新存活；见 state.js 顶部注释） */
+    if (ZX.state.saveOverlay) ZX.state.saveOverlay();
   };
 
   ZX.setTab = function (id) {
@@ -213,6 +216,9 @@ window.ZX = window.ZX || {};
         /* 静默覆盖：成功后用后端数据替换本地状态并刷新视图 */
         if (payload) {
           var changed = ZX.state.adoptServerState(payload);
+          /* 本地优先：本地未上行的 overlay（新目标 / 记录等）在服务端合并后
+             仍保持本地视角，最后覆写，避免被服务端旧种子覆盖丢失 */
+          ZX.state.applyOverlay();
           if (changed) ZX.render();
         }
       }, function () {

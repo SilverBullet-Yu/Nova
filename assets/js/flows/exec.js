@@ -100,8 +100,8 @@ window.ZX = window.ZX || {};
   }
 
   /* ---------- 记录写入 ----------
-     status：正常记录取所选感受；未选时按完成度落 done / partial；
-     跳过固定 'skip'，补录固定 'backfill'（与契约第 4 节枚举一致）。 */
+     status 只承载记录类型（done / partial / skip / backfill，契约第 4 节枚举）；
+     感受词（顺利/吃力/分心/疲惫）独立存 feel 字段——不再与类型混用同一字段。 */
   function record(o) {
     var S = ZX.state;
     var now = Date.now();
@@ -114,6 +114,7 @@ window.ZX = window.ZX || {};
       minutes: Math.max(0, Math.round(U.num(o.minutes, 0))),
       completion: completion,
       status: o.status || (completion >= 100 ? 'done' : 'partial'),
+      feel: o.feel || null,
       isBackfill: !!o.isBackfill
     };
     S.sessions.push(sess);
@@ -140,7 +141,7 @@ window.ZX = window.ZX || {};
       endAt: U.num(o.endAt, now),
       minutes: minutes,
       completion: completion,
-      status: o.status,
+      feel: o.feel || null,   /* 记录弹层的「状态」即感受词；status 由完成度推导 */
       isBackfill: false
     });
 
@@ -297,7 +298,7 @@ window.ZX = window.ZX || {};
     if (!t) return;
     var beforeEst = U.num(t.est, 0);
     var sess = applyRecord(id, {
-      minutes: mins, completion: completion, status: feel,
+      minutes: mins, completion: completion, feel: feel,
       startAt: startAt, endAt: endAt
     });
 

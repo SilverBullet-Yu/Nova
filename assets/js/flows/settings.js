@@ -264,6 +264,7 @@ window.ZX = window.ZX || {};
     };
     writeRaw(TRASH_KEY, JSON.stringify({ at: snap.at, snapshot: snap }));
     dropRaw(QUEUE_KEY);
+    if (ZX.state.dropOverlay) ZX.state.dropOverlay();   /* 本地 overlay 同步清除，防重载复活已删数据 */
     writeRaw(FLASH_KEY, '已删除，可在 7 天内恢复');
 
     /* 先重置内存，再重载到种子状态；重载后由 init() 消费 flash 并提示 */

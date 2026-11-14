@@ -199,10 +199,55 @@ window.ZX = window.ZX || {};
     movedOut: null,
     presetActive: true,
 
+    sessions: [],
+
     serverSeq: 88123,
     replanRecord: null,
     lastFeas: null
   };
+
+  /* ---------- 本地持久化（本地优先） ----------
+     新目标 / 执行记录（含跳过、补录）此前只存在于内存，刷新即回落种子。
+     这里把「用户数据投影」tasks / sessions / goal / feas / week / weekShift
+     落入 localStorage（键 zx.overlay）：ZX.render 统一保存（任何状态变更后
+     必走渲染，避免逐个改动点补写）；启动时恢复；后端状态合并后再覆写一次
+     （本地优先：未上行的本地数据不丢）。删除全部数据时须显式 dropOverlay
+     （flows/settings.js 的 wipe），否则重载会复活已删数据。 */
+  var OVERLAY_KEY = 'zx.overlay';
+
+  function saveOverlay() {
+    try {
+      window.localStorage.setItem(OVERLAY_KEY, JSON.stringify({
+        tasks: state.tasks,
+        sessions: state.sessions || [],
+        goal: state.goal,
+        feas: state.feas,
+        week: state.week,
+        weekShift: state.weekShift,
+        at: Date.now()
+      }));
+    } catch (e) { /* 隐私模式 / 配额不足：会话内仍可用，刷新后回落 */ }
+  }
+
+  function dropOverlay() {
+    try { window.localStorage.removeItem(OVERLAY_KEY); } catch (e) { /* 忽略 */ }
+  }
+
+  function applyOverlay() {
+    var o = null;
+    try { o = JSON.parse(window.localStorage.getItem(OVERLAY_KEY) || 'null'); } catch (e) { o = null; }
+    if (!o || typeof o !== 'object') return false;
+    if (Array.isArray(o.sessions)) state.sessions = o.sessions;
+    if (Array.isArray(o.tasks) && o.tasks.length) state.tasks = o.tasks.map(normTask);
+    if (o.goal && typeof o.goal === 'object') state.goal = o.goal;
+    if (o.feas && typeof o.feas === 'object') state.feas = o.feas;
+    if (Array.isArray(o.week)) state.week = normWeek(o.week);
+    if (Array.isArray(o.weekShift)) state.weekShift = normWeek(o.weekShift);
+    return true;
+  }
+
+  /* 启动恢复：种子之上叠加本地 overlay（新目标 / 记录 / 跳过 / 补录跨刷新存活） */
+  applyOverlay();
 
   /* ---------- 派生计算 ---------- */
   state.plannedMin = function () {
@@ -275,6 +320,9 @@ window.ZX = window.ZX || {};
 
   ZX.SUBJ = SUBJ;
   ZX.state = state;
+  ZX.state.saveOverlay = saveOverlay;
+  ZX.state.dropOverlay = dropOverlay;
+  ZX.state.applyOverlay = applyOverlay;
   ZX.state.seedSource = (window.Rhythm && window.Rhythm.seed && rawSeed() !== FALLBACK_SEED) ? 'shared' : 'fallback';
   ZX.state.normTask = normTask;
   ZX.state.normNotif = normNotif;
