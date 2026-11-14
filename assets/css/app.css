@@ -1842,3 +1842,15 @@ h1{font-size:34px;letter-spacing:0}
 @media (max-width:860px){
   .cp-body .msg{max-width:720px;margin-left:auto;margin-right:auto}
 }
+
+/* =========================================================
+   响应式补全（三）· 861–1080 平板档对话列
+   此档 .cp-body 消息列沿用桌面 820px 随宽拉满（900 视口 CJK 行长约
+   55 字超读）；气泡列与输入台列同步收拢为 720px 居中——只收气泡
+   不收输入台会两处边缘错位 66px。≤860 与 >1080 不受影响。
+   ========================================================= */
+@media (min-width:861px) and (max-width:1080px){
+  .cp-body{padding-left:calc((100% - 720px)/2);padding-right:calc((100% - 720px)/2)}
+  .cp-foot{padding-left:calc((100% - 720px)/2);padding-right:calc((100% - 720px)/2)}
+  .cp-body .msg{max-width:720px}
+}
