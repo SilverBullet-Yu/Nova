@@ -280,12 +280,13 @@ html[data-tab="chat"] .bench{display:none}
   background:var(--panel);
   border-radius:16px;
 }
-.msg.a .txt::before{   /* 尾巴：黑圆，负 z 沉到气泡背景之下，只露出顶缘月牙 */
-  content:"";position:absolute;top:-11px;left:26px;width:18px;height:18px;
+.msg.a .txt::before{   /* 尾巴：黑圆，负 z 沉到气泡背景之下，只露出顶缘月牙；
+                          露出 6px < meta 下边距 8px，不侵入上方字幕栏文字区 */
+  content:"";position:absolute;top:-6px;left:27px;width:16px;height:16px;
   background:var(--txt);border-radius:50%;z-index:-1;
 }
-.msg.a .txt::after{    /* 内层纸白圆，与黑圆同心偏下，形成描边月牙 */
-  content:"";position:absolute;top:-8px;left:29px;width:12px;height:12px;
+.msg.a .txt::after{    /* 内层纸白圆，与黑圆同心，形成描边月牙（环宽 3px） */
+  content:"";position:absolute;top:-3px;left:30px;width:10px;height:10px;
   background:var(--panel);border-radius:50%;z-index:-1;
 }
 .txt p{margin:0 0 9px}
@@ -297,17 +298,17 @@ html[data-tab="chat"] .bench{display:none}
 .msg.u{margin-left:auto;max-width:88%}
 .msg.u .meta{justify-content:flex-end}
 .msg.u .txt{
-  width:fit-content;max-width:100%;
+  width:fit-content;max-width:100%;margin-left:auto;
   position:relative;color:var(--ac-ink);padding:9px 13px;border:2px solid var(--txt);
   background:var(--ac);border-radius:16px;
 }
 .msg.u .txt b{color:var(--ac-ink)}
-.msg.u .txt::before{   /* 尾巴：黑圆露出顶缘月牙 */
-  content:"";position:absolute;top:-11px;right:26px;width:18px;height:18px;
+.msg.u .txt::before{   /* 尾巴：黑圆露出顶缘月牙（与助理侧同尺寸，露出 6px） */
+  content:"";position:absolute;top:-6px;right:27px;width:16px;height:16px;
   background:var(--txt);border-radius:50%;z-index:-1;
 }
 .msg.u .txt::after{    /* 内层天空蓝圆，形成描边月牙 */
-  content:"";position:absolute;top:-8px;right:29px;width:12px;height:12px;
+  content:"";position:absolute;top:-3px;right:30px;width:10px;height:10px;
   background:var(--ac);border-radius:50%;z-index:-1;
 }
 .msg.u .meta .t{margin-left:0}
