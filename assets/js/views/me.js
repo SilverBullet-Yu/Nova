@@ -117,7 +117,7 @@ window.ZX = window.ZX || {};
   function fontRow() {
     var f = ZX.util.prefs().font || '';
     var opts = [['', '标准'], ['m', '稍大'], ['l', '大']];
-    return '<div class="sw"><div><span class="n">字号</span><small>正文字号 · 13 / 14 / 15 px</small></div>' +
+    return '<div class="sw"><div><span class="n">字号</span><small>正文字号 · 15 / 16 / 17 px</small></div>' +
       '<span class="spacer"></span>' +
       '<span class="seg sd-font" role="group" aria-label="字号">' +
         opts.map(function (o) {

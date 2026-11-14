@@ -25,6 +25,12 @@ window.ZX = window.ZX || {};
   }
 
   function nowStr() { var d = new Date(); return pad2(d.getHours()) + ':' + pad2(d.getMinutes()); }
+  /* 真实时钟的星期标签（'日'..'六' → '一'..'日'）；周图「今天」高亮、今日弹性位等
+     按此对齐——seed.week 里的 today 旗标是示例数据（测试有断言），不代表演示日期 */
+  function todayDow() {
+    var map = ['日', '一', '二', '三', '四', '五', '六'];
+    return map[new Date().getDay()];
+  }
   /* 毫秒时间戳 → HH:MM（快照 / 重排记录等展示用；非法输入返回空串） */
   function tsHM(ms) {
     var d = new Date(ms);
@@ -130,7 +136,7 @@ window.ZX = window.ZX || {};
 
   ZX.util = {
     $: $, $$: $$, esc: esc, pad2: pad2, hm: hm,
-    nowStr: nowStr, tsHM: tsHM, isoWeek: isoWeek,
+    nowStr: nowStr, tsHM: tsHM, isoWeek: isoWeek, todayDow: todayDow,
     parseDay: parseDay, isoDay: isoDay, addDays: addDays, retime: retime, pct: pct,
     sleep: sleep, clone: clone, num: num,
     prefs: prefs, applyPrefs: applyPrefs, togglePref: togglePref, setPref: setPref

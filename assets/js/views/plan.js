@@ -140,6 +140,10 @@ window.ZX = window.ZX || {};
   /* delta = 迁入 − 迁出（见 flows/planedit.js weekDeltas） */
   function weekChartData() {
     var data = baseWeekData();
+    /* 「今天」按真实时钟的星期打标：seed 的 today 旗标是示例数据（测试有断言），
+       与演示日期（如 11.14 周六）无关，直接消费会造成高亮与日期眉标矛盾 */
+    var dow = U.todayDow();
+    data.forEach(function (d) { d.today = d.d === dow; });
     var P = ZX.flows && ZX.flows.planedit;
     if (!P || !P.weekDeltas) return data;
     var deltas = P.weekDeltas() || {};

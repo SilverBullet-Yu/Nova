@@ -250,7 +250,10 @@ html[data-tab="chat"] .bench{display:none}
 /* 对话页头部（头像 / 标题 / 在线徽章）已撤除：与顶栏品牌区、同步状态重复，
    形象由欢迎语主立绘承担，聆听 / 离线态素材保留（表情包 / 移动端入口仍可用） */
 
-.cp-body{flex:1;overflow-y:auto;padding:26px max(16px,calc((100% - 852px)/2)) 12px;scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--txt) 22%,transparent) transparent;scroll-behavior:smooth}
+.cp-body{flex:1;overflow-y:auto;padding:26px max(16px,calc((100% - 852px)/2)) 12px;display:flex;flex-direction:column;scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--txt) 22%,transparent) transparent;scroll-behavior:smooth}
+/* 消息贴底：内容不足一屏时首条消息把上方自由空间吃掉，对话重心落在输入台旁；
+   内容超一屏时 auto 边距归零，滚动行为与普通流一致（不用 justify-content:flex-end，避免顶端溢出不可达） */
+.cp-body > .msg:first-child{margin-top:auto}
 .cp-body::-webkit-scrollbar{width:6px}
 .msg{margin-bottom:24px}
 /* 开场形象：诺瓦 v4 主立绘（对话欢迎 / 空状态） */
@@ -272,7 +275,7 @@ html[data-tab="chat"] .bench{display:none}
 .msg.u .meta b::before{content:"";display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--pink);margin-right:5px;vertical-align:1px}
 .msg.u .meta b{color:var(--txt)}
 .meta .eng{font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;color:var(--txt3);margin-left:auto;opacity:.8}
-.txt{font-size:15px;line-height:1.72;color:var(--txt)}
+.txt{font-size:var(--fs-body);line-height:1.72;color:var(--txt)}
 /* 助理气泡：云朵圆角 + 2px 墨框 + 圆月牙尾巴指向说话人（meta 即分镜字幕栏） */
 .msg.a .txt{
   position:relative;
@@ -501,7 +504,7 @@ h1 .sub{font-family:var(--sans);font-size:13px;font-weight:400;color:var(--txt3)
   border:1px solid var(--txt);border-radius:var(--r-xs);
   padding:2px 6px;flex:0 0 auto;position:relative;top:-1px;background:color-mix(in srgb,var(--c) 14%,var(--panel));
 }
-.tt-line h3{margin:0;font-size:15px;font-weight:700;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.012em}
+.tt-line h3{margin:0;font-size:var(--fs-body);font-weight:700;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.012em}
 .tt-row.done .tt-line h3{text-decoration:line-through;text-decoration-thickness:1px;text-decoration-color:var(--line2);color:var(--txt2)}
 .tt-note{margin:4px 0 0;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:11.5px;color:var(--txt3)}
 .tt-note .why{color:var(--txt2)}
@@ -931,6 +934,11 @@ html.no-scroll{overflow:hidden}
 .sa-add-s{padding:0 8px}
 
 @media (max-width:640px){
+  /* 四键 seg（当前基础）收 2×2：顺排 3+1 折行会让末项孤行拉满整行 */
+  .sa-seg-4{display:grid;grid-template-columns:1fr 1fr}
+  .sa-seg-4 button+button{border-left:0}
+  .sa-seg-4 button:nth-child(even){border-left:1px solid var(--line)}
+  .sa-seg-4 button:nth-child(n+3){border-top:1px solid var(--line)}
   .sa-kvs{grid-template-columns:1fr 1fr}
   .sa-kv:nth-child(3){border-left:0;padding-left:0;border-top:1px solid var(--line)}
   .sa-kv:nth-child(4){border-top:1px solid var(--line)}
@@ -938,9 +946,12 @@ html.no-scroll{overflow:hidden}
   .sa-st:nth-child(3){border-left:0;border-top:1px solid var(--line)}
   .sa-st:nth-child(4){border-top:1px solid var(--line)}
   .sa-row{grid-template-columns:16px 44px minmax(0,1fr) 50px auto;gap:7px;padding:9px 8px}
+  /* 添加行显式网格：[科目|工时] / [标题满行] / [按钮满行]，避免自动放置留下空半列 */
   .sa-add{grid-template-columns:1fr 1fr}
-  .sa-add-t{grid-column:1 / -1}
-  .sa-add button{grid-column:1 / -1}
+  .sa-add-s{grid-column:1;grid-row:1}
+  .sa-add-m{grid-column:2;grid-row:1}
+  .sa-add-t{grid-column:1 / -1;grid-row:2}
+  .sa-add button{grid-column:1 / -1;grid-row:3}
 }
 
 /* =========================================================
@@ -1169,7 +1180,9 @@ html.no-scroll{overflow:hidden}
 }
 .sc2-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:7px}
 .sc2-col{
-  display:flex;flex-direction:column;min-width:0;max-height:216px;
+  display:flex;flex-direction:column;min-width:0;
+  /* 不设 max-height：216px 上限时 3 个任务块即超出列框 ~16px，块会画到框外压住列底线；
+     去掉上限后同排各列由 grid 拉伸保持齐平，内容再多也完整可见 */
   border:1px solid var(--line);border-radius:var(--r);background:color-mix(in srgb,var(--txt) 2%,transparent);
   transition:border-color var(--dur) var(--ease),background var(--dur) var(--ease);
 }
@@ -1367,7 +1380,8 @@ html[data-font="l"]{--fs-body:17px;--lh-body:1.58}
   /* 任务表收窄：隐藏列头与数值列，行退化为「任务 + 元行 + 操作」堆叠 */
   .tt-head{display:none}
   .tt-row{grid-template-columns:minmax(0,1fr);row-gap:7px;padding:11px 4px 12px 0}
-  .tt-row::before{left:-8px}
+  /* 竖条留在表格框内（ttable overflow:hidden，负偏移会被整体裁掉）；内容让位见「纯移动端」块的行内距 */
+  .tt-row::before{left:0}
   .c-idx,.c-time,.c-est,.c-wt{display:none}
   .c-act{justify-content:flex-start;flex-wrap:wrap}
   .tt-m{display:block}
@@ -1624,6 +1638,11 @@ h1{font-size:34px;letter-spacing:0}
 
 /* —— 「诺」印落款：助理消息右下角的朱砂方印 —— */
 .msg.a .txt{position:relative;padding-bottom:15px}
+/* 印顶（下沿 7px + 高 14px = 伸入内容区 6px）不与末位块叠压：
+   seal-no 由 say() 追加、恒为 .txt 末子元素，故末位内容块是倒数第二（nth-last-child(2)）；
+   以 ecard / steps 收尾的消息让出印的高度带（重排卡片、降载建议、重排步骤均命中） */
+.msg.a .txt > .ecard:nth-last-child(2),
+.msg.a .txt > .steps:nth-last-child(2){margin-bottom:8px}
 .seal-no{
   position:absolute;right:9px;bottom:7px;width:14px;height:14px;
   display:grid;place-items:center;
@@ -1669,8 +1688,7 @@ h1{font-size:34px;letter-spacing:0}
   :root{--fs-body:16px;--lh-body:1.66}
   html[data-font="m"]{--fs-body:17px;--lh-body:1.62}
   html[data-font="l"]{--fs-body:18px;--lh-body:1.6}
-  .txt{font-size:16px}
-  .tt-line h3{font-size:16px}
+  /* 聊天正文与任务标题已改走 var(--fs-body)，随字号三档联动，此处不再写死 */
   .tt-note,.tt-m{font-size:12px;line-height:1.55}
   .meta{font-size:12px}
   .meta .eng{font-size:11px}
@@ -1715,7 +1733,7 @@ h1{font-size:34px;letter-spacing:0}
   .banner{padding:11px 12px;margin-bottom:14px}
   .notice{padding:9px 11px}
   .buffer{padding:11px 8px 11px 6px}
-  .tt-row{padding:9px 2px 10px 0;row-gap:5px}
+  .tt-row{padding:9px 2px 10px 10px;row-gap:5px}   /* 左 10px：给「进行中」朱砂竖条（left:0，宽 3px）让位，与桌面同构 */
 
   /* —— 对话页：气泡与输入区收紧 —— */
   .cp-body{padding:14px 12px 6px}

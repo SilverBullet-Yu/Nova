@@ -16,10 +16,12 @@ window.ZX = window.ZX || {};
     return U.pad2(d.getMonth() + 1) + '.' + U.pad2(d.getDate()) + ' · ' + WD[d.getDay()];
   }
 
-  /* 今日弹性位分钟数：取周表中 today 行的 buf，与 buffer.time 同源 */
+  /* 今日弹性位分钟数：取周表中「今天」行的 buf，与 buffer.time 同源；
+     按真实时钟星期匹配（seed 的 today 旗标是示例数据，与演示日期无关） */
   function todayBufMin() {
     var S = ZX.state;
-    var w = S.week.filter(function (d) { return d.today; })[0] || S.week[S.week.length - 1] || {};
+    var dow = U.todayDow();
+    var w = S.week.filter(function (d) { return d.d === dow; })[0] || S.week[S.week.length - 1] || {};
     return U.num(w.buf, 0);
   }
 
@@ -142,12 +144,19 @@ window.ZX = window.ZX || {};
       label += (label ? '；' : '') + '弹性位 ' + S.buffer.time;
       blocks += tlBlk(buf, 'buf', '', '弹性位', '弹性位 ' + S.buffer.time + ' · 刻意留空' + (S.buffer.free ? '' : ' · 已占用'));
     }
-    /* 现在时刻：仅落在带内时显示 */
+    /* 现在时刻：仅落在带内时显示。标签「现在 HH:MM」居中需两侧各约 30px，
+       贴边（<7% / >93%）时与帽注两端文字共享 0 间距带、且会出面板框——
+       此时只保留线与菱形标记，时刻可从下方刻度读出 */
     var now = new Date();
     var nowMin = now.getHours() * 60 + now.getMinutes();
-    var nowHtml = (nowMin > TL_FROM && nowMin < TL_TO)
-      ? '<span class="tl-now" style="left:' + tlPos(nowMin).toFixed(2) + '%"><b>现在 ' + U.pad2(now.getHours()) + ':' + U.pad2(now.getMinutes()) + '</b></span>'
-      : '';
+    var nowHtml = '';
+    if (nowMin > TL_FROM && nowMin < TL_TO) {
+      var pos = tlPos(nowMin);
+      var lab = (pos > 7 && pos < 93)
+        ? '<b>现在 ' + U.pad2(now.getHours()) + ':' + U.pad2(now.getMinutes()) + '</b>'
+        : '';
+      nowHtml = '<span class="tl-now" style="left:' + pos.toFixed(2) + '%">' + lab + '</span>';
+    }
     return '<div class="tl" role="img" aria-label="今日时间带：' + U.esc(label || '暂无排程') + '">' +
       '<div class="tl-cap"><span class="t">今日骨架</span>' +
         '<span class="d">' + (done ? '已记录 ' + done + ' 项 · ' : '') + '任务落在空档 · 弹性位刻意留白</span>' +

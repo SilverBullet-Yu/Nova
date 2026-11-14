@@ -185,7 +185,7 @@ window.ZX = window.ZX || {};
         '</div>' +
       '</div>' +
       '<div class="field"><label>当前基础</label>' +
-        '<div class="seg sa-seg">' + BASES.map(function (b) {
+        '<div class="seg sa-seg sa-seg-4">' + BASES.map(function (b) {
           return '<button type="button" data-sa="base" data-v="' + b + '" aria-pressed="' + (d.base === b) + '"' +
             ' class="' + (d.base === b ? 'on' : '') + '">' + b + '（' + BASE_COEF[b].toFixed(2) + '）</button>';
         }).join('') + '</div>' +
