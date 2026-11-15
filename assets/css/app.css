@@ -1808,20 +1808,46 @@ h1{font-size:34px;letter-spacing:0}
 }
 
 /* =========================================================
-   诺瓦灵动（IP 形象优化 · 线B）
+   诺瓦灵动（IP 形象优化 · 线B；2026-11-15 扩展）
    原则：素材本身保持静态——SVG 经 <img> 引用，读不到页面上的
    data-motion 开关，SVG 内不做动画；动效只加在产品侧 img 元素上。
    两道既有总闸自动覆盖本区块：
    · html[data-motion="off"] *{animation:none!important}
    · @media (prefers-reduced-motion:reduce) *{animation:none!important}
-   动效档位：漂浮（欢迎立绘 / 计算中）与呼吸（计时专注），均为
-   位移/缩放的整图变换，无发光、无渐变，情绪上限仍是「平静—关切—欣喜」。
+   档位纪律：常驻循环只保留漂浮 / 呼吸两类（低速、小幅）；状态反应
+   全部为一次性入场 / 反应动效（盖章 / 弹跳 / 歪头 / 摇头 / 到场），
+   均为位移 / 缩放 / 旋转的整图变换，无发光、无渐变，
+   情绪上限仍是「平静—关切—欣喜」。
    ========================================================= */
 @keyframes novaFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
 @keyframes novaBreathe{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
-.cp-body .msg:first-child .msg-mascot{animation:novaFloat 3.6s ease-in-out infinite}
+/* 到场：欢迎立绘上浮淡入，.5s 后无缝接力漂浮 */
+@keyframes novaEnter{from{opacity:0;transform:translateY(10px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
+/* 盖章：助理消息「诺」印落款——收尾帧与 .seal-no 静态值（-2.5deg / .92）精确衔接 */
+@keyframes novaStamp{from{opacity:0;transform:scale(1.6) rotate(-14deg)}to{opacity:.92;transform:scale(1) rotate(-2.5deg)}}
+/* 达成：任务完成的一次性弹跳（含挽救完成横幅） */
+@keyframes novaPop{0%{transform:scale(.5);opacity:0}55%{transform:scale(1.14);opacity:1}78%{transform:scale(.95)}100%{transform:scale(1);opacity:1}}
+/* 兜底：没听懂的歪头 */
+@keyframes novaWobble{0%{transform:rotate(0)}30%{transform:rotate(-6deg)}62%{transform:rotate(4deg)}100%{transform:rotate(0)}}
+/* 提醒：短促摇头（日漫「诶？」，±6° 内，紧张但不夸张） */
+@keyframes novaShake{0%{transform:rotate(0)}22%{transform:rotate(6deg)}48%{transform:rotate(-5deg)}72%{transform:rotate(2.5deg)}100%{transform:rotate(0)}}
+
+/* —— 常驻循环（低速小幅） —— */
+.cp-body .msg:first-child .msg-mascot{animation:novaEnter .5s cubic-bezier(.22,.9,.32,1.18) both,novaFloat 3.6s ease-in-out .5s infinite}
 .msg-state.state-calc{animation:novaFloat 2.6s ease-in-out infinite}
 .tk-mascot{animation:novaBreathe 2.4s ease-in-out infinite}
+.sb-banner .sb-mascot{animation:novaFloat 4.6s ease-in-out infinite}
+
+/* —— 一次性状态反应（元素出现时自动播完） —— */
+.msg-state.state-done,.sb-banner-ok .sb-mascot{animation:novaPop .55s cubic-bezier(.22,.9,.32,1.2) both}
+.msg-state.state-unknown{animation:novaWobble .7s ease-in-out .1s both}
+.warn-flag{animation:novaShake .65s ease-in-out .15s both}
+.msg.a .seal-no{animation:novaStamp .32s cubic-bezier(.2,.9,.3,1.1) both}
+
+/* —— 顶栏品牌回应：hover 时小幅点头歪身（transition 走总闸的降级） —— */
+.seal img,.cp-open img{transition:transform .22s ease}
+.brand:hover .seal img{transform:scale(1.08) rotate(-4deg)}
+.cp-open:hover img{transform:scale(1.08) rotate(4deg)}
 
 /* =========================================================
    查漏补缺（线A · 2026-11-14）

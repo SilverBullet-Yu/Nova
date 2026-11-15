@@ -178,14 +178,20 @@ v4 的做法：**把原设的造型语言整体搬到诺瓦身上，但每一个
 
 **接入原则**：素材只走本地文件（页面承诺不加载第三方资源）；不改动原有布局与网格，形象以「替换既有字块」的方式最小侵入；状态切换不依赖事件派发（CSS `:has()` 直读焦点态 + JS class 双保险）。
 
-**灵动（产品侧动效，2026-11-14 起）**：素材本身保持静态——SVG 经 `<img>` 引用读不到页面上的 `data-motion` 开关，**SVG 内不做动画**；动效只加在产品侧 img 元素上，全部为整图位移/缩放（无发光、无渐变，情绪上限仍是「平静—关切—欣喜」）：
+**灵动（产品侧动效，2026-11-14 起；2026-11-15 扩展）**：素材本身保持静态——SVG 经 `<img>` 引用读不到页面上的 `data-motion` 开关，**SVG 内不做动画**；动效只加在产品侧 img 元素上，全部为整图位移/缩放/旋转（无发光、无渐变，情绪上限仍是「平静—关切—欣喜」）。档位纪律：**常驻循环只保留漂浮 / 呼吸两类**（低速小幅）；状态反应全部为一次性动效，元素出现时自动播完，不添燥感：
 
-| 动效 | 目标 | 参数 |
-|---|---|---|
-| 漂浮 `novaFloat` | 欢迎语主立绘 `.msg-mascot`、计算中 `.msg-state.state-calc` | translateY 0→−3px 往复，3.6s / 2.6s ease-in-out |
-| 呼吸 `novaBreathe` | 计时中的任务行 `.tk-mascot`（专注态） | scale 1→1.06 往复，2.4s ease-in-out |
+| 动效 | 类型 | 目标 | 参数 |
+|---|---|---|---|
+| 漂浮 `novaFloat` | 循环 | 欢迎语主立绘 `.msg-mascot`（接力）、计算中 `.msg-state.state-calc`、挽救横幅 `.sb-banner .sb-mascot`（慢速 4.6s） | translateY 0→−3px 往复，3.6s / 2.6s / 4.6s ease-in-out |
+| 呼吸 `novaBreathe` | 循环 | 计时中的任务行 `.tk-mascot`（专注态） | scale 1→1.06 往复，2.4s ease-in-out |
+| 到场 `novaEnter` | 一次性 | 欢迎语主立绘（入场后 .5s 无缝接力漂浮） | translateY 10px→0 + scale .96→1 + 淡入，.5s |
+| 盖章 `novaStamp` | 一次性 | 助理消息「诺」印落款 `.seal-no` | scale 1.6→1 + rotate −14°→−2.5° + 淡入，.32s；**收尾帧与静态微旋精确衔接** |
+| 弹跳 `novaPop` | 一次性 | 任务完成消息 `.msg-state.state-done`、挽救完成横幅 `.sb-banner-ok .sb-mascot` | scale .5→1.14→.95→1 弹性，.55s |
+| 歪头 `novaWobble` | 一次性 | 兜底回复 `.msg-state.state-unknown` | rotate 0→−6°→4°→0，.7s |
+| 摇头 `novaShake` | 一次性 | 提醒旗标 `.warn-flag`（归因面板 / 负载预警） | rotate 0→±6° 内三摆，.65s |
+| 品牌回应 | hover | 顶栏 `.seal img` / `.cp-open img` | scale 1.08 + rotate ∓4°，.22s transition |
 
-受两道既有总闸约束：`html[data-motion="off"]` 与 `prefers-reduced-motion: reduce` 均会 `animation:none!important`，动效关闭后素材退回静态——与契约「所有动效必须可关闭」一致。
+受两道既有总闸约束：`html[data-motion="off"]` 与 `prefers-reduced-motion: reduce` 均会 `animation:none!important`（hover 的 transition 也被降级到 .01ms），动效关闭后素材退回静态——与契约「所有动效必须可关闭」一致。预览：`design-preview/mascot/preview-v4.html` §07「灵动」（每式带重播按钮）。
 
 ## 7. 禁用清单
 

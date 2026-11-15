@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>诺瓦 v3 · IP 形象预览 · 诺瓦 Nova</title>
+<title>诺瓦 v4 · IP 形象预览 · 诺瓦 Nova</title>
 <style>
   /* 独立预览页，视觉对齐 assets/css/app.css */
   :root{
@@ -180,9 +180,69 @@
     </div>
   </section>
 
+  <section>
+    <h2><span class="no">07</span>灵动 · 产品侧动效（2026-11-15）</h2>
+    <p class="sub">素材保持静态，动效只加在产品侧 img 元素上（整图位移 / 缩放 / 旋转，无发光、无渐变）；受 data-motion 与 prefers-reduced-motion 双闸约束。常驻循环只有漂浮 / 呼吸两类，状态反应均为一次性动效。点「重播」再看一次。</p>
+    <div class="panel">
+      <style>
+        @keyframes pvFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+        @keyframes pvBreathe{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+        @keyframes pvEnter{from{opacity:0;transform:translateY(10px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
+        @keyframes pvStamp{from{opacity:0;transform:scale(1.6) rotate(-14deg)}to{opacity:.92;transform:scale(1) rotate(-2.5deg)}}
+        @keyframes pvPop{0%{transform:scale(.5);opacity:0}55%{transform:scale(1.14);opacity:1}78%{transform:scale(.95)}100%{transform:scale(1);opacity:1}}
+        @keyframes pvWobble{0%{transform:rotate(0)}30%{transform:rotate(-6deg)}62%{transform:rotate(4deg)}100%{transform:rotate(0)}}
+        @keyframes pvShake{0%{transform:rotate(0)}22%{transform:rotate(6deg)}48%{transform:rotate(-5deg)}72%{transform:rotate(2.5deg)}100%{transform:rotate(0)}}
+        .anigrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:18px}
+        .ani{border:1px solid var(--line);background:var(--bg2);padding:14px 10px 12px;text-align:center;
+             display:flex;flex-direction:column;align-items:center;gap:10px;min-height:150px;justify-content:space-between}
+        .ani .box{height:86px;display:flex;align-items:flex-end;justify-content:center}
+        .ani img{width:64px;height:auto}
+        .ani .ani-float{animation:pvFloat 3.6s ease-in-out infinite}
+        .ani .ani-breathe{animation:pvBreathe 2.4s ease-in-out infinite}
+        .ani .ani-enter{animation:pvEnter .5s cubic-bezier(.22,.9,.32,1.18) both}
+        .ani .ani-pop{animation:pvPop .55s cubic-bezier(.22,.9,.32,1.2) both}
+        .ani .ani-wobble{animation:pvWobble .7s ease-in-out .1s both}
+        .ani .ani-shake{animation:pvShake .65s ease-in-out .15s both}
+        .ani .pv-seal{width:14px;height:14px;display:grid;place-items:center;background:var(--cinnabar);color:#fff;
+                      font-family:var(--display);font-size:9px;font-weight:600;transform:rotate(-2.5deg);opacity:.92;
+                      animation:pvStamp .32s cubic-bezier(.2,.9,.3,1.1) both}
+        .ani .t{font-size:11px;color:var(--txt2);line-height:1.5}
+        .ani .t b{display:block;color:var(--txt);font-size:12px;margin-bottom:2px}
+        .ani button{font-size:11px;padding:3px 12px;border:1px solid var(--line2);background:var(--panel);cursor:pointer;color:var(--txt2)}
+        .ani button:hover{border-color:var(--ac);color:var(--ac)}
+      </style>
+      <div class="anigrid">
+        <div class="ani"><div class="box"><img class="ani-enter" src="../../assets/img/mascot-v4.svg" alt="" /></div>
+          <div class="t"><b>到场 novaEnter</b>欢迎立绘 · 上浮淡入后接漂浮</div><button type="button" onclick="pvReplay(this)">重播</button></div>
+        <div class="ani"><div class="box"><img class="ani-float" src="../../assets/img/mascot-v4.svg" alt="" /></div>
+          <div class="t"><b>漂浮 novaFloat</b>欢迎立绘 / 计算中 · 3.6s 往复</div><button type="button" onclick="pvReplay(this)">重播</button></div>
+        <div class="ani"><div class="box"><img class="ani-pop" src="../../assets/img/mascot-v4-done.svg" alt="" /></div>
+          <div class="t"><b>达成 novaPop</b>任务完成消息 / 挽救完成横幅 · 一次性弹跳</div><button type="button" onclick="pvReplay(this)">重播</button></div>
+        <div class="ani"><div class="box"><img class="ani-breathe" src="../../assets/img/mascot-v4-focus.svg" alt="" /></div>
+          <div class="t"><b>呼吸 novaBreathe</b>计时专注 · 2.4s 往复</div><button type="button" onclick="pvReplay(this)">重播</button></div>
+        <div class="ani"><div class="box"><img class="ani-wobble" src="../../assets/img/mascot-v4-unknown.svg" alt="" /></div>
+          <div class="t"><b>兜底 novaWobble</b>没听懂的歪头 · 一次性</div><button type="button" onclick="pvReplay(this)">重播</button></div>
+        <div class="ani"><div class="box"><img class="ani-shake" src="../../assets/img/mascot-v4-warn.svg" alt="" /></div>
+          <div class="t"><b>提醒 novaShake</b>偏差归因 / 负载预警 · 短促摇头</div><button type="button" onclick="pvReplay(this)">重播</button></div>
+        <div class="ani"><div class="box" style="align-items:center"><span class="pv-seal">诺</span></div>
+          <div class="t"><b>盖印 novaStamp</b>助理消息「诺」印落款 · 收尾帧衔接静态微旋</div><button type="button" onclick="pvReplay(this)">重播</button></div>
+      </div>
+      <p class="files" style="margin:14px 0 0">实现位置：assets/css/app.css「诺瓦灵动」区块（keyframes 同源）；挽救横幅另接慢速漂浮。</p>
+    </div>
+  </section>
+
   <footer>
     设定唯一来源：<a href="../../docs/IP-DESIGN.md">docs/IP-DESIGN.md</a>　·　参考来源：《赛尔号》超能NoNo（淘米网络 IP），轮廓类别致敬、细节原创
   </footer>
 </div>
+<script>
+  function pvReplay(btn) {
+    var el = btn.closest('.ani').querySelector('.ani-el, .box > *');
+    if (!el) return;
+    el.style.animation = 'none';
+    void el.offsetWidth;   /* 强制 reflow：重启动画 */
+    el.style.animation = '';
+  }
+</script>
 </body>
 </html>
