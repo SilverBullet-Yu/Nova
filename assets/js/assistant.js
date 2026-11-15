@@ -149,18 +149,18 @@ window.ZX = window.ZX || {};
   }
 
   /* ---------- flow：中断挽救（Stage B · F-7.1 F-7.2 F-7.3） ----------
-     演示入口：真实环境由执行记录（连续无记录天数）调用 ZX.flows.rescue.detect()。
-     这里写入演示天数后走同一套判定与弹层，口径与产品一致。 */
+     天数由执行记录真实计算；确实未断更时才注入演示天数（聊天演示钩子），
+     判定与弹层与产品口径完全一致。 */
   function rescueFlow() {
     if (!ZX.flows || !ZX.flows.rescue) {
       say('<p>挽救流程还没加载完成，刷新页面后再试一次。</p>', '挽救 · 待加载');
       return;
     }
     var R = ZX.flows.rescue;
-    ZX.state.consecutiveZeroDays = R.DEMO_ZERO_DAYS;
-    R.detect();
+    var real = R.zeroDaysFromSessions();
+    R.detect(real >= R.THRESHOLD ? undefined : R.DEMO_ZERO_DAYS);
     var m = R.metrics();
-    say('<p>连续 ' + R.DEMO_ZERO_DAYS + ' 天没有记录。计划还在：这周还剩 ' + m.days + ' 天，缺口 ' +
+    say('<p>连续 ' + U.num(ZX.state.consecutiveZeroDays, 0) + ' 天没有记录。计划还在：这周还剩 ' + m.days + ' 天，缺口 ' +
       U.hm(m.gap) + '。下一步给三种接法，选一个就行，不需要补记录。</p>', '挽救 · 判定');
     ZX.setTab('today');
     R.open();
@@ -203,6 +203,18 @@ window.ZX = window.ZX || {};
     var loadDelta = res && typeof res.loadDelta === 'number' ? res.loadDelta : 0;
     var guards = (res && res.guards) ? res.guards : {};
 
+    /* 防雪崩断言 3 触发（连续未改善）：引擎全线阻断 → 不落库、不重排，转目标校准 */
+    if (res && res.verdict === 'blocked') {
+      say('<div class="ecard">' +
+        '<div class="ecard-h"><b>重排已停止</b><span class="tag warn">防雪崩 · 转校准</span></div>' +
+        '<div class="ecard-b"><p>连续 <b>' + S.noImproveCount() + '</b> 次重排未见改善（撤销或增幅触顶）。' +
+          '按规则停止重排：继续排只会把计划越搅越乱，先校准目标，再谈安排。</p>' +
+        '<div class="ecard-f"><button class="btn" data-say="新建目标">重新设定目标</button>' +
+          '<span class="note">历史计划与记录都保留，不会被清除</span></div></div></div>', '重排 · 熔断');
+      ZX.setTab('plan');
+      return;
+    }
+
     var sL1 = strategies.find(function (s) { return s.level === 1; });
     var sL2 = strategies.find(function (s) { return s.level === 2; });
     var l1Growth = sL1 ? growthOf(sL1.reason) : null;
@@ -231,6 +243,11 @@ window.ZX = window.ZX || {};
         }
         return t;
       });
+
+      /* 重排历史：熔断计数与周报采纳率的数据源 */
+      S.replanHistory = (S.replanHistory || []).concat([
+        { at: Date.now(), loadDelta: loadDelta, appliedLevel: appliedLevel, undone: false }
+      ]);
 
       ZX.api.queueOp({
         entity: 'plan', entityId: 'replan', field: 'applied',
@@ -306,6 +323,9 @@ window.ZX = window.ZX || {};
         timestamp: Date.now()
       };
       S.replanned = true;
+      S.replanHistory = (S.replanHistory || []).concat([
+        { at: Date.now(), loadDelta: U.num(res.loadDelta, 0), appliedLevel: 4, undone: false }
+      ]);
       var abandonedIds = {};
       (confirmed.nextTasks || []).forEach(function (t) {
         if (t.abandoned === true) abandonedIds[t.id] = true;
@@ -346,6 +366,10 @@ window.ZX = window.ZX || {};
     S.tasks = tasks.map(ZX.state.normTask);
     S.snapshot = null;
     S.replanned = false;
+    /* 撤销计入重排历史：连续撤销会累积「未改善」计数，达到阈值后重排被熔断 */
+    for (var i = S.replanHistory.length - 1; i >= 0; i--) {
+      if (S.replanHistory[i] && S.replanHistory[i].undone !== true) { S.replanHistory[i].undone = true; break; }
+    }
     ZX.render();
     say('<p>已撤销。计划恢复到 <span class="mono">' + (U.tsHM(snapTs) || '此前') + '</span> 的快照，未重算，逐条一致。</p>' +
         '<p style="color:var(--txt3);font-size:11px">重排记录保留在 replan_record，不会因为撤销而丢失。</p>', '重排 · 撤销');
@@ -460,9 +484,10 @@ window.ZX = window.ZX || {};
     var rows = todo.map(function (t) {
       return '<div class="erow"><span class="k">' + t.time.split('–')[0] + '</span><span class="why" style="flex:1;color:var(--txt2)">' + t.s + ' · ' + U.esc(t.title) + '</span><span class="v">' + U.hm(t.est) + '</span></div>';
     }).join('');
+    var bufTime = (S.buffer && S.buffer.time ? S.buffer.time : '20:30–21:30').split('–')[0];
     say('<p>今天还剩 <b>' + todo.length + '</b> 项，共 <b>' + U.hm(mD.remain) + '</b>。顺序不是按科目排的，是按「截止紧迫度 ↓ + 权重 ↓」排的。</p>' +
-      '<div class="ecard"><div class="ecard-h"><b>接下来</b><span class="tag">弹性位 20:30</span></div><div class="ecard-b">' + rows +
-        '<div class="erow"><span class="k">20:30</span><span class="why" style="flex:1;color:var(--txt3)">弹性位 · 刻意留空</span><span class="v">60m</span></div>' +
+      '<div class="ecard"><div class="ecard-h"><b>接下来</b><span class="tag">弹性位 ' + U.esc(bufTime) + '</span></div><div class="ecard-b">' + rows +
+        '<div class="erow"><span class="k">' + U.esc(bufTime) + '</span><span class="why" style="flex:1;color:var(--txt3)">弹性位 · 刻意留空</span><span class="v">60m</span></div>' +
       '</div></div>' +
       '<p style="margin-top:10px">先做数学：极限是本周权重最高的一项（0.92），且 10:30 是你历史的高效时段。</p>', '排程 · 68ms');
     ZX.setTab('today');

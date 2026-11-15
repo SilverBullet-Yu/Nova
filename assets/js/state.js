@@ -139,6 +139,11 @@ window.ZX = window.ZX || {};
 
     sessions: [],
 
+    /* 环节⑧归因计数：执行记录后由 attribute 引擎回写 {类型: 次数}，数据页消费 */
+    attrCounts: {},
+    /* 环节⑦重排历史：[{at, loadDelta, undone}]——熔断计数与周报采纳率的数据源 */
+    replanHistory: [],
+
     serverSeq: 88123,
     replanRecord: null,
     lastFeas: null
@@ -162,6 +167,8 @@ window.ZX = window.ZX || {};
         feas: state.feas,
         week: state.week,
         weekShift: state.weekShift,
+        attrCounts: state.attrCounts || {},
+        replanHistory: state.replanHistory || [],
         at: Date.now()
       }));
     } catch (e) { /* 隐私模式 / 配额不足：会话内仍可用，刷新后回落 */ }
@@ -181,6 +188,8 @@ window.ZX = window.ZX || {};
     if (o.feas && typeof o.feas === 'object') state.feas = o.feas;
     if (Array.isArray(o.week)) state.week = normWeek(o.week);
     if (Array.isArray(o.weekShift)) state.weekShift = normWeek(o.weekShift);
+    if (o.attrCounts && typeof o.attrCounts === 'object') state.attrCounts = o.attrCounts;
+    if (Array.isArray(o.replanHistory)) state.replanHistory = o.replanHistory;
     return true;
   }
 
@@ -207,6 +216,19 @@ window.ZX = window.ZX || {};
   state.weekInput = function () {
     return state.week.map(function (d) { return { date: d.d, minutes: U.num(d.total, 0), buf: U.num(d.buf, 0) }; });
   };
+  /* 「连续未改善」真算：从最近一次重排往回数，连续「被撤销」或「增幅触顶」的次数。
+     这是防雪崩断言 3（连续 3 次未改善 → 转目标校准）的数据源，替换原硬编码 0。 */
+  var LOAD_GROWTH_CAP = 0.20;
+  state.noImproveCount = function () {
+    var n = 0;
+    var hist = state.replanHistory || [];
+    for (var i = hist.length - 1; i >= 0; i--) {
+      var r = hist[i] || {};
+      if (r.undone === true || U.num(r.loadDelta, 0) >= LOAD_GROWTH_CAP) n++;
+      else break;
+    }
+    return n;
+  };
   state.replanInput = function () {
     return {
       /* 原样带上 domain / freq / substituted / abandoned 等语义字段，避免重排丢上下文 */
@@ -215,10 +237,10 @@ window.ZX = window.ZX || {};
       /* 锁定是硬约束：作为入参进入引擎，而不是在结果上事后过滤 */
       locks: U.clone(state.locks || {}),
       params: {
-        loadGrowthCap: 0.20, compressFloor: 0.60, compressedShareCap: 0.30,
+        loadGrowthCap: LOAD_GROWTH_CAP, compressFloor: 0.60, compressedShareCap: 0.30,
         consecutiveNoImproveCap: 3, bufferRatio: 0.15
       },
-      history: { consecutiveNoImprove: 0 },
+      history: { consecutiveNoImprove: state.noImproveCount() },
       timestamp: Date.now()
     };
   };

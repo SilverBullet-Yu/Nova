@@ -15,6 +15,11 @@ window.ZX = window.ZX || {};
 
   var U = ZX.util;
 
+  /* 对话输出统一走 assistant（goal.js 在 assistant.js 之前加载） */
+  function say(html, eng) {
+    if (ZX.assistant && typeof ZX.assistant.say === 'function') ZX.assistant.say(html, eng);
+  }
+
   /* 演示口径：基准需求工时（小时）。产品化后应由知识树节点标准工时累加得出，
      这里的常量只保证 demo 的数值可复现，不与后端 seed 冲突。 */
   var BASE_HOURS = { '考研': 913, '考公': 660, '项目导学': 520 };
@@ -482,13 +487,86 @@ window.ZX = window.ZX || {};
     }
   }
 
-  /* ---------- 生效 ---------- */
-  function timeAt(idx, est) {
-    var starts = [9 * 60, 10 * 60 + 30, 14 * 60, 17 * 60];
-    var s = starts[idx] !== undefined ? starts[idx] : 9 * 60 + idx * 150;
-    var e = s + est;
-    return U.pad2(Math.floor(s / 60)) + ':' + U.pad2(s % 60) + '–' +
-      U.pad2(Math.floor(e / 60)) + ':' + U.pad2(e % 60);
+  /* ---------- 生效 ----------
+     环节③④贯通：草案确认后交给 schedule 引擎真排进本周空档，
+     今日任务、任务时段与周视图全部来自引擎输出，不再硬编码时段。 */
+
+  /* 本周可排空档：每天 18:00–22:00 学习窗（8 格 × 30min）+ 22:00–23:00 弹性位（2 格）。
+     「今天」排数组最前：候选按 slots 顺序评估，权重最高的任务先占今天。 */
+  var DAY_ORDER = ['一', '二', '三', '四', '五', '六', '日'];
+  var STUDY_FROM = 18 * 60;        /* 18:00 */
+  var STUDY_TO = 22 * 60;          /* 22:00 */
+  var BUFFER_TIME = '22:00–23:00'; /* 与排程槽位同源（bufferRatio 预留之外的显式弹性位） */
+  var BUFFER_MIN = 60;             /* 每日弹性位容量，与 seed.buf 一致 */
+
+  function fmtMin(m) { return U.pad2(Math.floor(m / 60)) + ':' + U.pad2(m % 60); }
+
+  function buildSlots() {
+    var dow = U.todayDow();
+    var days = [dow].concat(DAY_ORDER.filter(function (x) { return x !== dow; }));
+    var slots = [];
+    days.forEach(function (d) {
+      for (var s = STUDY_FROM; s < STUDY_TO; s += 30) {
+        slots.push({ date: d, startMin: s, durMin: 30, available: true, isBuffer: false });
+      }
+      slots.push({ date: d, startMin: STUDY_TO, durMin: 30, available: true, isBuffer: true });
+      slots.push({ date: d, startMin: STUDY_TO + 30, durMin: 30, available: true, isBuffer: true });
+    });
+    return slots;
+  }
+
+  /* 引擎 blocks → 周视图（segs 按科目聚合；弹性位容量单列，与周图 .buf 同语） */
+  function weekFromBlocks(blocks) {
+    var dow = U.todayDow();
+    var byDay = {};
+    blocks.forEach(function (b) { (byDay[b.date] = byDay[b.date] || []).push(b); });
+    return DAY_ORDER.map(function (d) {
+      var segs = [];
+      var sum = 0;
+      (byDay[d] || []).forEach(function (b) {
+        if (b.isBuffer) return;
+        var hit = null;
+        for (var i = 0; i < segs.length; i++) if (segs[i][0] === b.subject) { hit = segs[i]; break; }
+        if (hit) hit[1] += b.durMin;
+        else segs.push([b.subject, b.durMin]);
+        sum += b.durMin;
+      });
+      return { d: d, segs: segs, buf: BUFFER_MIN, total: sum + BUFFER_MIN, today: d === dow };
+    });
+  }
+
+  /* 引擎 blocks → 今日任务：今天排进 ≥30 分钟的任务按开始时间取前 4 项 */
+  function todayTasksFromBlocks(blocks, all, stamp) {
+    var S = ZX.state;
+    var dow = U.todayDow();
+    var byTask = {};
+    blocks.forEach(function (b) {
+      if (b.date !== dow || b.isBuffer) return;
+      var g = byTask[b.taskId] = byTask[b.taskId] || { first: b.startMin, last: b.startMin + b.durMin, min: 0 };
+      g.first = Math.min(g.first, b.startMin);
+      g.last = Math.max(g.last, b.startMin + b.durMin);
+      g.min += b.durMin;
+    });
+    return Object.keys(byTask)
+      .map(function (id) {
+        var src = null;
+        for (var i = 0; i < all.length; i++) if (all[i].id === id) { src = all[i]; break; }
+        return src ? { src: src, g: byTask[id] } : null;
+      })
+      .filter(function (x) { return x && x.g.min >= 30; })
+      .sort(function (a, b) { return a.g.first - b.g.first; })
+      .slice(0, 4)
+      .map(function (x, i) {
+        return S.normTask({
+          id: 't_' + stamp + i,
+          subject: x.src.subject,
+          title: x.src.title,
+          est: x.src.estMin,
+          time: fmtMin(x.g.first) + '–' + fmtMin(x.g.last),
+          weight: x.src.weight,
+          done: false
+        });
+      });
   }
 
   function apply() {
@@ -499,7 +577,9 @@ window.ZX = window.ZX || {};
     var f = feasOf(d);
     if (f.R < GATE) { ZX.ui.toast('R 低于 0.70，先完成校准', 'warn'); return; }
 
-    var picked = plan().slice(0, 4);
+    var all = plan().map(function (it) {
+      return { id: it.id, subject: it.s, title: it.title, estMin: it.est, weight: it.weight };
+    });
     var stamp = Date.now().toString(36);
 
     S.goal.name = String(d.name || '').trim();
@@ -510,19 +590,7 @@ window.ZX = window.ZX || {};
     S.feas.discount = DISCOUNT;
     S.feas.demand = d.demand;
 
-    S.tasks = picked.map(function (it, i) {
-      return S.normTask({
-        id: 't_' + stamp + i,
-        subject: it.s,
-        title: it.title,
-        est: it.est,
-        time: timeAt(i, it.est),
-        weight: it.weight,
-        done: false
-      });
-    });
-
-    /* 新目标生效后，旧计时与旧重排快照都失去对应任务，一并作废 */
+    /* 新目标生效后，旧计时 / 旧重排快照 / 旧降载态都失去对应任务，一并作废 */
     S.running = null;
     S.timerStart = null;
     S.pausedAt = null;
@@ -530,16 +598,58 @@ window.ZX = window.ZX || {};
     S.replanned = false;
     S.snapshot = null;
     S.replanRecord = null;
+    S.tiredAdopted = false;
+    S.movedOut = null;
+    S.replanHistory = [];
 
     S.goalDraft = null;
     S.planDraft = null;
 
-    ZX.ui.toast('目标已生效', 'ok');
+    ZX.ui.toast('目标已生效 · 排程中', 'ok');
     var ctl = api;
     api = null;
     if (ctl) ctl.close('applied');
     ZX.render();
     ZX.setTab('plan');
+
+    /* 排程走统一入口（后端优先 → 本地降级），结果回来后写任务与周视图 */
+    ZX.engine.schedule({ tasks: all, slots: buildSlots(), params: {} }).then(function (res) {
+      applyScheduled(res, all, stamp);
+    }, function () {
+      say('<p>排程没有完成：引擎不可用。计划草案已保存，稍后说「重排」可以再排一次。</p>', '排程 · 失败');
+    });
+  }
+
+  function applyScheduled(res, all, stamp) {
+    var S = ZX.state;
+    var blocks = (res && Array.isArray(res.blocks)) ? res.blocks : [];
+    var unplanned = (res && Array.isArray(res.unplanned)) ? res.unplanned : [];
+    var dow = U.todayDow();
+
+    var week = weekFromBlocks(blocks);
+    S.week = week;
+    S.weekShift = U.clone(week);
+    S.buffer = {
+      time: BUFFER_TIME,
+      free: !blocks.some(function (b) { return b.isBuffer && b.date === dow; })
+    };
+    S.tasks = todayTasksFromBlocks(blocks, all, stamp);
+
+    ZX.render();
+
+    var rows = S.tasks.map(function (t) {
+      return '<div class="erow"><span class="k">' + U.esc(t.time.split('–')[0]) + '</span>' +
+        '<span class="why" style="flex:1;color:var(--txt2)">' + U.esc(t.s) + ' · ' + U.esc(t.title) + '</span>' +
+        '<span class="v">' + U.hm(t.est) + '</span></div>';
+    }).join('');
+    var unplannedTxt = unplanned.length
+      ? '<div class="ecard-f"><span class="note">另 ' + unplanned.length + ' 项未排入：' +
+        U.esc(unplanned.map(function (u) { return (u.reason || '无可用时段').split('，')[0]; }).join('；')) + '</span></div>'
+      : '';
+    say('<p>排程完成：<b>' + all.length + '</b> 项计划已排进本周空档（每天 18:00–22:00 学习窗 + 22:00 弹性位），' +
+      '今天先做 <b>' + S.tasks.length + '</b> 项。</p>' +
+      '<div class="ecard"><div class="ecard-h"><b>今晚开始</b><span class="tag">引擎 ' + U.esc(res.version || '') + '</span></div>' +
+      '<div class="ecard-b">' + rows + unplannedTxt + '</div></div>', '排程 · ' + blocks.length + ' 块');
   }
 
   /* ---------- 事件 ---------- */

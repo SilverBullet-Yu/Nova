@@ -30,12 +30,15 @@ window.ZX = window.ZX || {};
   var choice = 'compress';   /* 默认压缩 */
   var resumeBannerSeen = false;  /* 零惩罚回归提示是否已被用户收起 */
 
-  /* ---------- 状态初始化（只新增契约第 4 节预留字段） ---------- */
+  /* ---------- 状态初始化（只新增契约第 4 节预留字段） ----------
+     初始化后立即按真实执行记录识别一次：断更 ≥ 阈值时今日页 banner 直接出现，
+     不再依赖用户先在对话里说「我断了几天」。 */
   (function initState() {
     var S = ZX.state;
     if (typeof S.consecutiveZeroDays !== 'number') S.consecutiveZeroDays = 0;
     if (S.interrupted === undefined) S.interrupted = null;
     if (S.rescueRecord === undefined) S.rescueRecord = null;
+    detect();
   })();
 
   /* ---------- 缺口口径 ---------- */
@@ -207,12 +210,31 @@ window.ZX = window.ZX || {};
     return key === 'defer' ? '顺延' : key === 'downgrade' ? '降级' : '压缩';
   }
 
-  /* ---------- 识别 ---------- */
-  /* 真实环境：由执行记录（sessions / 每日是否记录）算出连续无记录天数后调用；
-     这里只做判定，不伪造数据。 */
-  function detect() {
+  /* ---------- 识别 ----------
+     数据源 = 执行记录：从 sessions 统计「最近一次有记录的日子距今天几天」。
+     · 今天有记录 → 0；从未有记录（新用户 / 纯种子态）→ 0，不把首日判成中断
+     · detect() 无参调用即为真实计算；显式传天数仅用于对话演示钩子 */
+  function zeroDaysFromSessions() {
     var S = ZX.state;
-    var n = U.num(S.consecutiveZeroDays, 0);
+    var list = Array.isArray(S.sessions) ? S.sessions : [];
+    if (!list.length) return 0;
+    var days = {};
+    list.forEach(function (s) {
+      var k = U.dayKey(s && (s.endAt || s.startAt));
+      if (k) days[k] = true;
+    });
+    var base = new Date();
+    base.setHours(0, 0, 0, 0);
+    if (days[U.isoDay(base)]) return 0;
+    for (var i = 1; i <= 60; i++) {
+      if (days[U.isoDay(U.addDays(base, -i))]) return i;
+    }
+    return 60;   /* 有记录但已超出回看窗口：按窗口上限计 */
+  }
+
+  function detect(explicitDays) {
+    var S = ZX.state;
+    var n = (typeof explicitDays === 'number') ? explicitDays : zeroDaysFromSessions();
     S.consecutiveZeroDays = n;
     S.interrupted = n >= THRESHOLD ? true : (S.interrupted === true ? false : S.interrupted);
     return S.interrupted === true;
@@ -559,6 +581,7 @@ window.ZX = window.ZX || {};
     THRESHOLD: THRESHOLD,
     DEMO_ZERO_DAYS: DEMO_ZERO_DAYS,
     detect: detect,
+    zeroDaysFromSessions: zeroDaysFromSessions,
     open: open,
     banner: banner,
     metrics: metrics,

@@ -58,13 +58,9 @@ window.ZX = window.ZX || {};
     if (ZX.assistant && typeof ZX.assistant.say === 'function') ZX.assistant.say(html, eng);
   }
 
-  function dayKey(ts) {
-    var d = new Date(U.num(ts, 0));
-    if (isNaN(d.getTime())) return '';
-    return d.getFullYear() + '-' + U.pad2(d.getMonth() + 1) + '-' + U.pad2(d.getDate());
-  }
+  function dayKey(ts) { return U.dayKey(ts); }
 
-  function todayKey() { return dayKey(Date.now()); }
+  function todayKey() { return U.todayKey(); }
 
   /* 今日补录分钟（只统计当天写入的补录，不计入达成率） */
   function backfillMin() {
@@ -167,6 +163,66 @@ window.ZX = window.ZX || {};
   }
 
   /* 时段重算用 util.js 共用的 U.retime（部分完成后避免「45m」与「10:30–12:00」矛盾） */
+
+  /* ---------- 内在 loop：执行 → 偏差识别 → 归因回写（环节⑥⑧） ----------
+     每次记录执行后自动跑一遍：输入全部由本地状态推导，不读种子摆拍数据。
+     归因结果计入 state.attrCounts（数据页「偏差归因」卡片的真实数据源）。 */
+  function timeoutCount() {
+    var n = 0;
+    (ZX.state.sessions || []).forEach(function (s) {
+      if (!s || s.isBackfill) return;
+      var t = task(s.taskId);
+      if (t && U.num(s.minutes, 0) > U.num(t.est, 0)) n++;
+    });
+    return n;
+  }
+
+  function externalRatio() {
+    var skipped = ZX.state.tasks.filter(function (t) { return t.skipped; });
+    if (!skipped.length) return 0;
+    var ext = skipped.filter(function (t) { return t.skipReason === '临时有事'; }).length;
+    return ext / skipped.length;
+  }
+
+  function runAttribution(t, sess, beforeEst) {
+    var S = ZX.state;
+    var m = metrics();
+    var input = {
+      planLoadRatio: m.planned / Math.max(1, U.num(S.user.dailyCapMin, 300)),
+      consecutiveZeroDays: (ZX.flows.rescue ? ZX.flows.rescue.zeroDaysFromSessions() : 0),
+      consecutiveTimeoutCount: timeoutCount(),
+      efficiencyRatio: U.num(sess.minutes, 0) / Math.max(1, U.num(beforeEst, 1)),
+      completion: U.num(sess.completion, 0) / 100,
+      externalRatio: externalRatio()
+    };
+    var res = ZX.engine.attributeNow(input);
+    if (res && res.type && res.type !== '无偏差') {
+      S.attrCounts[res.type] = U.num(S.attrCounts[res.type], 0) + 1;
+    }
+    return res;
+  }
+
+  /* 归因结果卡片：一句依据 + 一条可执行的下一步（反焦虑：不命中阻断不给按钮） */
+  function attributionHtml(attr, interrupted) {
+    if (!attr) return '';
+    var btn = '';
+    if (interrupted) {
+      btn = '<button class="btn" data-say="我断了四天">进入挽救</button>';
+    } else if (attr.type === '计划过载') {
+      btn = '<button class="btn" data-say="这周太乱，帮我重排">重新安排本周</button>';
+    } else if (attr.type === '效率不足') {
+      btn = '<button class="btn" data-say="今天有点累">降载一点</button>';
+    }
+    var matched = (attr.evidence && attr.evidence.matched && attr.evidence.matched[0]) || '';
+    return '<div class="ecard sc-attr">' +
+      '<div class="ecard-h"><b>偏差归因</b>' +
+        '<span class="tag ' + (attr.type === '无偏差' ? 'ok' : 'warn') + '">' + U.esc(attr.type) + '</span></div>' +
+      '<div class="ecard-b">' +
+        '<div class="erow"><span class="k">依据</span><span class="why">' + U.esc(matched) + '</span>' +
+          '<span class="v">置信 ' + Math.round(U.num(attr.confidence, 0) * 100) + '%</span></div>' +
+        '<div class="ecard-f">' + (btn || '<span class="note">' + U.esc(attr.actions[0] || '保持当前节奏') + '</span>') + '</div>' +
+      '</div></div>';
+  }
 
   /* ---------- 计时口径（与 assistant.tickTimer 同源） ---------- */
   function elapsedMin() {
@@ -321,11 +377,18 @@ window.ZX = window.ZX || {};
         : '今天 ' + m.total + ' 项全部记录，累计 <b class="ac">' + U.hm(m.worked) + '</b>。弹性位留空 60 分钟。';
     }
 
+    /* 内在 loop：识别偏差（断更由真实记录计算）→ 归因 → 数据回流 + 一键衔接 */
+    var interrupted = ZX.flows.rescue ? ZX.flows.rescue.detect() : false;
+    var attr = runAttribution(t, sess, beforeEst);
+
     say((completion >= 100 ? '<img class="msg-state state-done" src="assets/img/mascot-v4-done.svg" width="32" height="28" alt="" />' : '') +
       '<p>' + head + tail + '</p>' +
       (completion < 100
-        ? '<p style="color:var(--txt3);font-size:11px">部分完成不追加补作，剩余工时只占用弹性位。</p>'
-        : (left ? '' : '<p style="color:var(--txt3);font-size:11px">没有追加任务。按计划结束，比多学 20 分钟更重要。</p>')),
+        ? '<p style="color:var(--txt3);font-size:11px">部分完成不追加补作，剩余工时只占用弹性位。</p>' +
+          '<div class="ecard-f"><button class="btn" data-say="这周太乱，帮我重排">重新安排本周</button>' +
+          '<span class="note">剩余工时已落在弹性位，重排会把它排进新空档</span></div>'
+        : (left ? '' : '<p style="color:var(--txt3);font-size:11px">没有追加任务。按计划结束，比多学 20 分钟更重要。</p>')) +
+      attributionHtml(attr, interrupted),
       '执行 · 完成 ' + (sess ? sess.completion : 100) + '%');
   }
 

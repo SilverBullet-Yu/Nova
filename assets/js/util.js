@@ -83,6 +83,14 @@ window.ZX = window.ZX || {};
     return (Math.round(v * 1000) / 10) + '%';
   }
 
+  /* ---------- 记录日口径（执行记录 / 中断识别 / 周报共用） ---------- */
+  /* 毫秒时间戳 → 'YYYY-MM-DD'（本地时区）；非法输入返回空串 */
+  function dayKey(ts) {
+    var d = new Date(num(ts, 0));
+    return isNaN(d.getTime()) ? '' : isoDay(d);
+  }
+  function todayKey() { return isoDay(new Date()); }
+
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   function clone(v) { return v === undefined ? v : JSON.parse(JSON.stringify(v)); }
   function num(v, dft) { var n = Number(v); return isFinite(n) ? n : dft; }
@@ -138,6 +146,7 @@ window.ZX = window.ZX || {};
     $: $, $$: $$, esc: esc, pad2: pad2, hm: hm,
     nowStr: nowStr, tsHM: tsHM, isoWeek: isoWeek, todayDow: todayDow,
     parseDay: parseDay, isoDay: isoDay, addDays: addDays, retime: retime, pct: pct,
+    dayKey: dayKey, todayKey: todayKey,
     sleep: sleep, clone: clone, num: num,
     prefs: prefs, applyPrefs: applyPrefs, togglePref: togglePref, setPref: setPref
   };

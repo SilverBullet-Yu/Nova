@@ -1,7 +1,8 @@
 /* =========================================================
    诺瓦 Nova · 数据视图
-   KPI / 周报 / 结构与归因全部取自 ZX.state.weekStats，不写死数值；
-   周数与日期范围由当前时间推导（ISO 周）。
+   KPI / 科目结构 / 归因全部由本地执行记录与归因计数推导（环节⑧回流），
+   不读种子摆拍数据；只有历史趋势沿用 seed.WEEKS（过去几周无数据源），
+   并把最后一周替换为本周真算的达成率。周数与日期范围由当前时间推导（ISO 周）。
    ========================================================= */
 window.ZX = window.ZX || {};
 
@@ -18,8 +19,83 @@ window.ZX = window.ZX || {};
     '外部干扰': ['var(--m-en)', '重排弹性位，避开不可用时段']
   };
 
-  function stats() { return ZX.state.weekStats || {}; }
-  function kpis() { return stats().kpis || {}; }
+  /* ---------- 周报真算（不读种子摆拍） ---------- */
+  function realStats() {
+    var S = ZX.state;
+    var m = ZX.flows.exec.metrics();          /* 达成率与剩余口径，过滤 skipped */
+    var sess = Array.isArray(S.sessions) ? S.sessions : [];
+
+    /* 有效学习 / 科目结构 / 记录天数：来自执行记录（补录不计） */
+    var effMin = 0;
+    var bySubject = {};
+    var daySet = {};
+    sess.forEach(function (s) {
+      if (!s || s.isBackfill) return;
+      var min = U.num(s.minutes, 0);
+      effMin += min;
+      var t = null;
+      for (var i = 0; i < S.tasks.length; i++) if (S.tasks[i].id === s.taskId) { t = S.tasks[i]; break; }
+      var key = t ? t.s : '其他';
+      bySubject[key] = U.num(bySubject[key], 0) + min;
+      var k = U.dayKey(s.endAt || s.startAt);
+      if (k) daySet[k] = true;
+    });
+
+    /* 重排采纳：来自重排历史（撤销不计为采纳） */
+    var hist = Array.isArray(S.replanHistory) ? S.replanHistory : [];
+    var adopted = hist.filter(function (r) { return r && r.undone !== true; }).length;
+
+    var seedStats = S.weekStats || {};
+    var seedKpis = seedStats.kpis || {};
+
+    var kpis = {
+      effectiveHours: Math.round(effMin / 60 * 10) / 10,
+      targetHours: U.num(seedKpis.targetHours, 15),
+      achievementRate: m.rate,
+      achievementDeltaPt: null,               /* 无上周数据源：不显示环比 */
+      replanAdopted: adopted,
+      replanTotal: hist.length,
+      replanRate: hist.length ? Math.round(adopted / hist.length * 100) : null,
+      recordedDays: Object.keys(daySet).length,
+      totalDays: 7
+    };
+
+    /* 科目结构：会话分钟 → 占比 */
+    var subjectMix = {};
+    var mixSum = 0;
+    Object.keys(bySubject).forEach(function (k) { mixSum += bySubject[k]; });
+    if (mixSum > 0) {
+      Object.keys(bySubject).forEach(function (k) {
+        subjectMix[k] = Math.round(bySubject[k] / mixSum * 100);
+      });
+    }
+
+    /* 归因分布：执行后的归因计数 → 占比 */
+    var counts = S.attrCounts || {};
+    var cSum = 0;
+    Object.keys(counts).forEach(function (k) { cSum += U.num(counts[k], 0); });
+    var attribution = {};
+    if (cSum > 0) {
+      Object.keys(counts).forEach(function (k) {
+        attribution[k] = Math.round(U.num(counts[k], 0) / cSum * 100);
+      });
+    }
+
+    /* 趋势：历史周沿用 seed，最后一周替换为本周真算 */
+    var WEEKS = Array.isArray(seedStats.WEEKS) ? seedStats.WEEKS.slice() : [];
+    if (WEEKS.length) WEEKS[WEEKS.length - 1] = m.rate;
+
+    return {
+      WEEKS: WEEKS,
+      kpis: kpis,
+      subjectMix: subjectMix,
+      attribution: attribution,
+      actions: Array.isArray(seedStats.actions) ? seedStats.actions : []
+    };
+  }
+
+  function stats() { return realStats(); }
+  function kpis() { return stats().kpis; }
 
   function weeks() {
     var w = stats().WEEKS;
@@ -43,7 +119,7 @@ window.ZX = window.ZX || {};
   function data() {
     var k = kpis();
     var attr = stats().attribution || {};
-    var delta = U.num(k.achievementDeltaPt, 0);
+    var dPt = k.achievementDeltaPt;
     return '<div class="wrap">' +
       '<div class="vhead"><div>' +
         '<div class="eyebrow">第 ' + U.isoWeek() + ' 周 · ' + weekRange() + '</div>' +
@@ -53,8 +129,10 @@ window.ZX = window.ZX || {};
       '<div class="sec-h"><span class="n">01</span><span class="t">本周概览</span><span class="rule"></span></div>' +
       '<div class="kpis">' +
         '<div class="kpi"><span>有效学习</span><b>' + U.num(k.effectiveHours, 0) + '<span class="u">h</span></b><span class="d">目标 ' + U.num(k.targetHours, 0) + ' h</span></div>' +
-        '<div class="kpi"><span>达成率</span><b>' + U.num(k.achievementRate, 0) + '<span class="u">%</span></b><span class="d ' + (delta < 0 ? 'dn' : 'up') + '">较上周 ' + (delta >= 0 ? '+' : '−') + Math.abs(delta) + ' pt</span></div>' +
-        '<div class="kpi"><span>重排采纳</span><b>' + U.num(k.replanAdopted, 0) + '<span class="u">/ ' + U.num(k.replanTotal, 0) + '</span></b><span class="d up">采纳率 ' + U.num(k.replanRate, 0) + '%</span></div>' +
+        '<div class="kpi"><span>达成率</span><b>' + U.num(k.achievementRate, 0) + '<span class="u">%</span></b><span class="d">' +
+          (dPt === null ? '本周为基线周' : '较上周 ' + (dPt >= 0 ? '+' : '−') + Math.abs(dPt) + ' pt') + '</span></div>' +
+        '<div class="kpi"><span>重排采纳</span><b>' + U.num(k.replanAdopted, 0) + '<span class="u">/ ' + U.num(k.replanTotal, 0) + '</span></b><span class="d">' +
+          (k.replanRate === null ? '本周还没有重排' : '采纳率 ' + U.num(k.replanRate, 0) + '%') + '</span></div>' +
         '<div class="kpi"><span>记录天数</span><b>' + U.num(k.recordedDays, 0) + '<span class="u">/ ' + U.num(k.totalDays, 0) + '</span></b><span class="d">' +
           (U.num(k.recordedDays, 0) >= U.num(k.totalDays, 0) ? '无中断' : '有 ' + (U.num(k.totalDays, 0) - U.num(k.recordedDays, 0)) + ' 天未记录') + '</span></div>' +
       '</div>' +
@@ -151,15 +229,16 @@ window.ZX = window.ZX || {};
     var mix = stats().subjectMix || {};
     var attr = stats().attribution || {};
     var actions = Array.isArray(stats().actions) ? stats().actions : [];
-    var delta = U.num(k.achievementDeltaPt, 0);
+    var delta = k.achievementDeltaPt;
     var gap = Math.round(Math.max(0, U.num(k.targetHours, 0) - U.num(k.effectiveHours, 0)) * 10) / 10;   /* 消除浮点误差（15-11.2=3.800…07） */
     var mixTxt = Object.keys(mix).map(function (n) { return n + ' ' + U.num(mix[n], 0) + '%'; }).join(' / ');
     var attrTxt = Object.keys(attr).map(function (n) { return n + ' ' + U.num(attr[n], 0) + '%'; }).join('、');
     return '<div class="report">' +
       '<div class="report-h"><b>第 ' + U.isoWeek() + ' 周 · 周报</b><span>' + genStamp() + ' 生成</span></div>' +
       /* 荧光笔静态用法（清晰线遗留项）：结论行的关键数字「划重点」，仅装饰、不承载语义 */
-      '<div class="rp-row"><div class="k">结论</div><div class="v">本周达成率 <b class="hl">' + U.num(k.achievementRate, 0) + '%</b>，较上周' +
-        (delta >= 0 ? '上升' : '下降') + ' ' + Math.abs(delta) + ' 个百分点；有效学习 <b class="hl">' + U.num(k.effectiveHours, 0) + ' 小时</b>（目标 ' + U.num(k.targetHours, 0) + ' 小时）' +
+      '<div class="rp-row"><div class="k">结论</div><div class="v">本周达成率 <b class="hl">' + U.num(k.achievementRate, 0) + '%</b>' +
+        (delta === null ? '' : '，较上周' + (delta >= 0 ? '上升' : '下降') + ' ' + Math.abs(delta) + ' 个百分点') +
+        '；有效学习 <b class="hl">' + U.num(k.effectiveHours, 0) + ' 小时</b>（目标 ' + U.num(k.targetHours, 0) + ' 小时）' +
         (gap > 0 ? '。计划仍然存活，缺口 <b class="hl">' + gap + ' 小时</b>。' : '。') + '</div></div>' +
       '<div class="rp-row"><div class="k">依据</div><div class="v">' +
         (mixTxt ? '科目分布 ' + U.esc(mixTxt) + '；' : '') +
