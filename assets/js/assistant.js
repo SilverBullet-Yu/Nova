@@ -300,7 +300,7 @@ window.ZX = window.ZX || {};
         ? '<button type="button" class="btn sc2-veto" data-veto="' + U.esc(d.taskId) + '" data-vop="' + d.op + '"' +
           ' aria-label="否决：' + U.esc(label + ' ' + (d.subject || '')) + '">否决</button>'
         : '';
-      return '<div class="diff-line sc2-diff" data-diff="' + idx + '"><span class="s ' + cls + '">' + label + '</span>' +
+        return '<div class="diff-line sc2-diff" data-diff="' + idx + '" style="--d:' + idx + '"><span class="s ' + cls + '">' + label + '</span>' +
         '<span class="n">' + U.esc(d.subject || '') + '</span>' +
         '<span class="d">' + U.esc(detail) + '</span>' + veto + '</div>';
     }).join('');

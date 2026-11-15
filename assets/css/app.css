@@ -1849,6 +1849,27 @@ h1{font-size:34px;letter-spacing:0}
 .brand:hover .seal img{transform:scale(1.08) rotate(-4deg)}
 .cp-open:hover img{transform:scale(1.08) rotate(4deg)}
 
+/* —— 聊天流（2026-11-15 二次扩展） ——
+   消息气泡入场：助理上浮、用户右滑，各播一次（chat DOM 持久不重绘，
+   每条消息只在插入瞬间播；刷新后仅欢迎语重播一次）。typing 气泡
+   （.msg.a.typing）随助理侧同款入场，内部打字点原有动画不变。 */
+@keyframes novaMsgA{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes novaMsgU{from{opacity:0;transform:translateX(14px)}to{opacity:1;transform:translateX(0)}}
+#chat .msg.a{animation:novaMsgA .32s ease-out both}
+#chat .msg.u{animation:novaMsgU .28s ease-out both}
+/* 重排卡片 diff 行：逐条过账（--d 由模板注入序号，45ms 阶梯），呼应「逐条可见、给理由」 */
+@keyframes novaDiffIn{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:translateX(0)}}
+.msg .diff-line{animation:novaDiffIn .3s ease-out both;animation-delay:calc(var(--d,0)*45ms)}
+/* 快捷指令：依次浮现（boot 时一次性 stagger） */
+@keyframes novaChipIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+#chips .chip{animation:novaChipIn .3s ease-out both}
+#chips .chip:nth-child(1){animation-delay:.05s}
+#chips .chip:nth-child(2){animation-delay:.1s}
+#chips .chip:nth-child(3){animation-delay:.15s}
+#chips .chip:nth-child(4){animation-delay:.2s}
+#chips .chip:nth-child(5){animation-delay:.25s}
+#chips .chip:nth-child(6){animation-delay:.3s}
+
 /* =========================================================
    查漏补缺（线A · 2026-11-14）
    1) 荧光笔静态用法：周报结论行关键数字「划重点」——此前 --hlbg

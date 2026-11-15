@@ -190,8 +190,11 @@ v4 的做法：**把原设的造型语言整体搬到诺瓦身上，但每一个
 | 歪头 `novaWobble` | 一次性 | 兜底回复 `.msg-state.state-unknown` | rotate 0→−6°→4°→0，.7s |
 | 摇头 `novaShake` | 一次性 | 提醒旗标 `.warn-flag`（归因面板 / 负载预警） | rotate 0→±6° 内三摆，.65s |
 | 品牌回应 | hover | 顶栏 `.seal img` / `.cp-open img` | scale 1.08 + rotate ∓4°，.22s transition |
+| 气泡入场 `novaMsgA/U` | 一次性 | 聊天流消息：助理 `.msg.a` 上浮 8px、用户 `.msg.u` 右滑 14px | .32s / .28s ease-out；chat DOM 持久故各播一次，typing 气泡随助理侧 |
+| 逐条过账 `novaDiffIn` | 一次性 | 重排卡片 diff 行（`--d` 序号阶梯 45ms） | translateX −6px→0 + 淡入，.3s；呼应「逐条可见、给理由」 |
+| 依次浮现 | 一次性 | 快捷指令 `#chips .chip`（6 枚 stagger 50ms） | translateY 6px→0 + 淡入，.3s |
 
-受两道既有总闸约束：`html[data-motion="off"]` 与 `prefers-reduced-motion: reduce` 均会 `animation:none!important`（hover 的 transition 也被降级到 .01ms），动效关闭后素材退回静态——与契约「所有动效必须可关闭」一致。预览：`design-preview/mascot/preview-v4.html` §07「灵动」（每式带重播按钮）。
+受两道既有总闸约束：`html[data-motion="off"]` 与 `prefers-reduced-motion: reduce` 均会 `animation:none!important`（hover 的 transition 也被降级到 .01ms），动效关闭后素材退回静态——与契约「所有动效必须可关闭」一致。预览：`design-preview/mascot/preview-v4.html` §07「灵动」（每式带重播按钮）；聊天流三式（气泡 / 过账 / chips）在真实对话中直接可见。
 
 ## 7. 禁用清单
 
