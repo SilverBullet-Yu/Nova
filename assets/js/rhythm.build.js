@@ -941,12 +941,15 @@
       for (var i = 0; i < 4; i++) {
         var level = i + 1;
         var name = LEVEL_NAMES[level];
+        /* growth：该级的负载增幅数值（前端直接消费，不再从 reason 文本正则抠）；
+           被短路跳过的级别没有对应的 attempt，记 0 */
+        var g = (attempts[i] ? round(num(attempts[i].growth, 0), 4) : 0);
         if (acceptedIdx !== null && acceptedIdx !== undefined) {
-          if (level < acceptedIdx) strategies.push({ level: level, name: name, applied: false, reason: attempts[i].reason });
-          else if (level === acceptedIdx) strategies.push({ level: level, name: name, applied: true, reason: attempts[i].reason });
-          else strategies.push({ level: level, name: name, applied: false, reason: '前置级别已通过校验，无需进入' });
+          if (level < acceptedIdx) strategies.push({ level: level, name: name, applied: false, growth: g, reason: attempts[i].reason });
+          else if (level === acceptedIdx) strategies.push({ level: level, name: name, applied: true, growth: g, reason: attempts[i].reason });
+          else strategies.push({ level: level, name: name, applied: false, growth: 0, reason: '前置级别已通过校验，无需进入' });
         } else {
-          strategies.push({ level: level, name: name, applied: false, reason: attempts[i].reason });
+          strategies.push({ level: level, name: name, applied: false, growth: g, reason: attempts[i].reason });
         }
       }
       if (acceptedIdx === null || acceptedIdx === undefined) {
@@ -959,7 +962,8 @@
     if (!consecutiveOk) {
       var blockedReason = '连续 ' + consecutive + ' 次重排未改善，停止重排并转目标校准';
       var attempts0 = [
-        { reason: blockedReason }, { reason: blockedReason }, { reason: blockedReason }, { reason: blockedReason }
+        { reason: blockedReason, growth: 0 }, { reason: blockedReason, growth: 0 },
+        { reason: blockedReason, growth: 0 }, { reason: blockedReason, growth: 0 }
       ];
       return {
         strategies: pack(attempts0, null),

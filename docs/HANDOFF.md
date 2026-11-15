@@ -128,7 +128,7 @@ replan({
   },
   history: { consecutiveNoImprove: number }
 }) -> {
-  strategies: [{ level: 1..4, name: '顺延'|'压缩'|'替代'|'放弃', applied: boolean, reason: string }],
+  strategies: [{ level: 1..4, name: '顺延'|'压缩'|'替代'|'放弃', applied: boolean, growth: number, reason: string }],   // growth = 该级负载增幅数值（被短路跳过的级别为 0）
   diff: [{
     op: 'defer' | 'compress' | 'substitute' | 'abandon',
     taskId, subject, from: string, to: string, detail: string

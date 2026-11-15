@@ -167,6 +167,10 @@ window.ZX = window.ZX || {};
         feas: state.feas,
         week: state.week,
         weekShift: state.weekShift,
+        dayAssign: state.dayAssign || {},
+        locks: state.locks || {},
+        avail: state.avail || null,
+        notif: state.notif || null,
         attrCounts: state.attrCounts || {},
         replanHistory: state.replanHistory || [],
         at: Date.now()
@@ -188,6 +192,11 @@ window.ZX = window.ZX || {};
     if (o.feas && typeof o.feas === 'object') state.feas = o.feas;
     if (Array.isArray(o.week)) state.week = normWeek(o.week);
     if (Array.isArray(o.weekShift)) state.weekShift = normWeek(o.weekShift);
+    /* 手工改期 / 锁定 / 可用时段 / 通知开关：此前只发 op 不入 overlay，刷新即丢 */
+    if (o.dayAssign && typeof o.dayAssign === 'object') state.dayAssign = o.dayAssign;
+    if (o.locks && typeof o.locks === 'object') state.locks = o.locks;
+    if (Array.isArray(o.avail) && o.avail.length === 7) state.avail = o.avail;
+    if (o.notif && typeof o.notif === 'object') state.notif = o.notif;
     if (o.attrCounts && typeof o.attrCounts === 'object') state.attrCounts = o.attrCounts;
     if (Array.isArray(o.replanHistory)) state.replanHistory = o.replanHistory;
     return true;

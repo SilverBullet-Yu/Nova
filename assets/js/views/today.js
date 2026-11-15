@@ -218,8 +218,9 @@ window.ZX = window.ZX || {};
     return '<div class="buffer">' +
       '<div class="ico">◇</div>' +
       '<div class="bf-main"><div class="bf-t"><b>弹性位</b><span>' + U.esc(S.buffer.time) +
-        (todayBufMin() ? ' · ' + U.hm(todayBufMin()) : '') + '</span></div></div>' +
-      '<div class="c-act"><button class="btn ghost" data-act="buffer">占用</button></div>' +
+        (todayBufMin() ? ' · ' + U.hm(todayBufMin()) : '') +
+        (S.buffer.free ? '' : ' · 已占用') + '</span></div></div>' +
+      '<div class="c-act"><button class="btn ghost" data-act="buffer">' + (S.buffer.free ? '占用' : '释放') + '</button></div>' +
     '</div>';
   }
 

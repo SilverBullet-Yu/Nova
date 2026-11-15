@@ -147,7 +147,7 @@ window.ZX = window.ZX || {};
     if (act === 'start') { ZX.assistant.startTask(b.dataset.id); return; }
     if (act === 'finish') { ZX.assistant.finishTask(b.dataset.id, false); return; }
     if (act === 'done') { ZX.assistant.finishTask(b.dataset.id, true); return; }
-    if (act === 'buffer') { ZX.assistant.bufferWarn(); return; }
+    if (act === 'buffer') { ZX.assistant.toggleBuffer(); return; }
     if (act === 'undo') { ZX.assistant.undoReplan(); return; }
     if (act === 'tired') { ZX.assistant.adoptTired(); return; }
     if (act === 'preset') { ZX.assistant.togglePreset(); return; }

@@ -15,11 +15,10 @@ window.ZX = window.ZX || {};
   var U = ZX.util;
 
   /* ---------- 口径常量 ----------
-     THRESHOLD / DEMO_ZERO_DAYS / REMAIN_DAYS 是演示参数；
+     THRESHOLD / DEMO_ZERO_DAYS 是演示参数；剩余天数由真算断更天数推导；
      缺口、工时、容量本身一律由 state 推导，改 state 就会跟着变。 */
   var THRESHOLD = 3;         /* 连续 ≥3 天无记录判定为中断 */
-  var DEMO_ZERO_DAYS = 4;    /* 演示入口写入的连续无记录天数 */
-  var REMAIN_DAYS = 3;       /* 演示口径：中断 4 天后本周只剩 3 天 */
+  var DEMO_ZERO_DAYS = 4;    /* 演示入口注入的连续无记录天数（真实天数达标时不注入） */
   var COMPRESS_RATE = 0.40;  /* 压缩：剩余工时下调 40% */
   var MIN_EST = 15;          /* 压缩下限 15 分钟 */
   var DEFER_DAYS = 7;        /* 顺延：截止日期 +7 天、周容量 +1 周 */
@@ -50,9 +49,16 @@ window.ZX = window.ZX || {};
     return U.num(ZX.state.feas.weeklyH, 0) * 60 / 7;
   }
 
+  /* 剩余天数真算：一周 7 天 − 已断更天数（下限 1）。
+     演示钩子注入 4 天 → 剩 3，与原「中断 4 天后本周只剩 3 天」口径一致；
+     真实断更 5 天 → 剩 2，不再是写死的 3。 */
+  function remainDays() {
+    return Math.max(1, 7 - U.num(ZX.state.consecutiveZeroDays, 0));
+  }
+
   /* 剩余可用 = 每日可用 × 剩余天数（不取整，取整只发生在展示层） */
   function availMin(days) {
-    return dailyAvailMin() * U.num(days === undefined ? REMAIN_DAYS : days, REMAIN_DAYS);
+    return dailyAvailMin() * U.num(days, remainDays());
   }
 
   /* 缺口 = max(0, 计划 − 已投入 − 剩余可用) */
@@ -64,12 +70,13 @@ window.ZX = window.ZX || {};
     var S = ZX.state;
     var planned = weekPlannedMin();
     var worked = S.workedMin();
-    var avail = availMin(REMAIN_DAYS);
+    var days = remainDays();
+    var avail = availMin(days);
     return {
       planned: planned,
       worked: worked,
       daily: dailyAvailMin(),
-      days: REMAIN_DAYS,
+      days: days,
       avail: avail,
       gap: Math.max(0, Math.round(planned - worked - avail))
     };
@@ -117,7 +124,7 @@ window.ZX = window.ZX || {};
 
     if (key === 'defer') {
       var planMin = weekPlannedMin();
-      var days = REMAIN_DAYS + DEFER_DAYS;
+      var days = remainDays() + DEFER_DAYS;
       var base = U.parseDay(S.goal.deadline) || new Date();
       return {
         key: 'defer', label: '顺延',
@@ -140,9 +147,9 @@ window.ZX = window.ZX || {};
       var cur = parseInt(String(S.goal.target || ''), 10);
       return {
         key: 'downgrade', label: '降级',
-        planMin: planD, days: REMAIN_DAYS,
-        avail: availMin(REMAIN_DAYS),
-        gap: gapOf(planD, REMAIN_DAYS),
+        planMin: planD, days: remainDays(),
+        avail: availMin(remainDays()),
+        gap: gapOf(planD, remainDays()),
         items: [],
         dropped: dropped,
         targetFrom: isFinite(cur) ? cur : null,
@@ -164,9 +171,9 @@ window.ZX = window.ZX || {};
     var planC = S.workedMin() + sumEst(items);
     return {
       key: 'compress', label: '压缩',
-      planMin: planC, days: REMAIN_DAYS,
-      avail: availMin(REMAIN_DAYS),
-      gap: gapOf(planC, REMAIN_DAYS),
+      planMin: planC, days: remainDays(),
+      avail: availMin(remainDays()),
+      gap: gapOf(planC, remainDays()),
       items: items,
       dropped: dropC
     };

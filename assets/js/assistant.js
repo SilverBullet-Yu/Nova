@@ -103,9 +103,33 @@ window.ZX = window.ZX || {};
     exec.commitRecord(id, mins, 100, '', startAt || (Date.now() - mins * 60000), Date.now());
   }
 
-  function bufferWarn() {
-    say('<p>该时段为<b>弹性位</b>，占用后本周抗中断能力下降。自动排程不允许占满它，手动占用需要你确认。</p>' +
-        '<p style="color:var(--txt3);font-size:11px">建议：把要补的内容放进周六 15:00–17:00 的空闲段，那里还有 2 小时余量。</p>', '排程 · 守护');
+  /* ---------- 弹性位占用 / 释放（真交互） ----------
+     占用需二次确认（反焦虑：提示代价，不诱导）；释放即时生效。 */
+  function toggleBuffer() {
+    var S = ZX.state;
+    var t = (S.buffer && S.buffer.time) || '';
+    if (S.buffer.free) {
+      ZX.ui.confirm({
+        eyebrow: '排程 / 弹性位',
+        title: '占用弹性位？',
+        text: '弹性位是本周的抗中断余量。占用后 再遇到突发，就只剩压缩或顺延两条路。',
+        okText: '占用'
+      }).then(function (ok) {
+        if (!ok) return;
+        S.buffer.free = false;
+        ZX.render();
+        ZX.ui.toast('弹性位已占用', 'warn');
+        say('<p>弹性位（' + U.esc(t) + '）已标记为<b>占用</b>。本周的抗中断余量用掉了，之后的突发要走重排。</p>' +
+            '<p style="color:var(--txt3);font-size:11px">随时可以在同一位置释放，不影响任何任务。</p>', '排程 · 弹性位');
+        ZX.api.queueOp({ entity: 'buffer', entityId: 'today', field: 'occupied', value: true });
+      });
+    } else {
+      S.buffer.free = true;
+      ZX.render();
+      ZX.ui.toast('弹性位已释放', 'ok');
+      say('<p>弹性位（' + U.esc(t) + '）已释放，重新留空。自动排程不会占满它。</p>', '排程 · 弹性位');
+      ZX.api.queueOp({ entity: 'buffer', entityId: 'today', field: 'occupied', value: false });
+    }
   }
 
   /* ---------- 意图路由 ---------- */
@@ -217,8 +241,9 @@ window.ZX = window.ZX || {};
 
     var sL1 = strategies.find(function (s) { return s.level === 1; });
     var sL2 = strategies.find(function (s) { return s.level === 2; });
-    var l1Growth = sL1 ? growthOf(sL1.reason) : null;
-    var l2Growth = sL2 ? growthOf(sL2.reason) : null;
+    /* 负载增幅取引擎结构化字段 strategies[].growth（0.18 → '18%'），不再解析 reason 文本 */
+    var l1Growth = (sL1 && typeof sL1.growth === 'number') ? U.pct(sL1.growth) : null;
+    var l2Growth = (sL2 && typeof sL2.growth === 'number') ? U.pct(sL2.growth) : null;
 
     var deferred = diff.filter(function (d) { return d.op === 'defer'; });
     var compressed = diff.filter(function (d) { return d.op === 'compress'; });
@@ -280,12 +305,12 @@ window.ZX = window.ZX || {};
         '<span class="d">' + U.esc(detail) + '</span>' + veto + '</div>';
     }).join('');
 
-    var guardNote = [];
-    if (sL1 && sL1.applied) guardNote.push('L1 顺延到未来 7 天容量内的空闲时段，负载 +' + (l1Growth === null ? U.pct(loadDelta) : l1Growth) + '%，未超单次上限 20%，直接生效');
-    else guardNote.push('L1 顺延后负载 +' + (l1Growth === null ? U.pct(loadDelta) : l1Growth) + '%，超过单次上限 20%，已回退该级');
-    if (sL2 && sL2.applied) guardNote.push('L2 按容量溢出压缩低权重项后复核通过（+' + (l2Growth === null ? U.pct(loadDelta) : l2Growth) + '%），因此未进入替代与放弃');
-    else if (sL2) guardNote.push('L2 压缩后复核未通过，已进入后续级别');
-    if (needsConfirm) guardNote.push('L4 放弃只是建议，确认后才会落库');
+      var guardNote = [];
+      if (sL1 && sL1.applied) guardNote.push('L1 顺延到未来 7 天容量内的空闲时段，负载 +' + (l1Growth === null ? U.pct(loadDelta) : l1Growth) + '，未超单次上限 20%，直接生效');
+      else guardNote.push('L1 顺延后负载 +' + (l1Growth === null ? U.pct(loadDelta) : l1Growth) + '，超过单次上限 20%，已回退该级');
+      if (sL2 && sL2.applied) guardNote.push('L2 按容量溢出压缩低权重项后复核通过（+' + (l2Growth === null ? U.pct(loadDelta) : l2Growth) + '），因此未进入替代与放弃');
+      else if (sL2) guardNote.push('L2 压缩后复核未通过，已进入后续级别');
+      if (needsConfirm) guardNote.push('L4 放弃只是建议，确认后才会落库');
 
     say('<p>收到。先归因，再走四级流水线；任何一级通过防雪崩校验就停，不追求把计划排满。</p>' +
       '<div class="ecard">' +
@@ -342,13 +367,6 @@ window.ZX = window.ZX || {};
       say('<p>已确认放弃 ' + Object.keys(abandonedIds).length + ' 项，结果已落库。如需回到确认前，说「撤销」。</p>', '重排 · 已确认');
       ZX.setTab('plan');
     });
-  }
-
-  /* 从引擎 reason 文本中提取负载增幅百分比（形如 "23.0%"）；百分比格式化用 util.js 的 U.pct */
-  function growthOf(reason) {
-    if (!reason) return null;
-    var m = String(reason).match(/(\d+(?:\.\d+)?)%/);
-    return m ? m[1] : null;
   }
 
   /* ---------- flow：撤销 ---------- */
@@ -413,25 +431,34 @@ window.ZX = window.ZX || {};
     }, function () { /* 已降级 */ });
   }
 
-  /* ---------- flow：调参（数学加时间） ---------- */
+  /* ---------- flow：调参（数学加时间） ----------
+     卡片数值全部由前后两次可行性真算得出，不写死演示数字。 */
   function adjustMath() {
     var S = ZX.state;
-    if (S.feas.demand > 950) {
-      say('<p>数学本周已是 14 小时（+2 h）。再加会触发 30% 修改幅度阈值，需要重算可行性与阶段容量。</p>' +
-          '<p style="color:var(--txt3);font-size:11px">当前 R ' + S.feasibility().R.toFixed(2) + '，继续加时请先说「调整目标」或「延长周期」。</p>', '拆解 · 阈值守护');
+    var ADD_H = 116;                       /* 单次加的需求工时（演示口径：约 +2 h/周 × 58 周） */
+    var AMP_CAP = 0.30;                    /* 与拆解草案同一修改幅度阈值 */
+    var before = U.num(S.feas.demand, 0);
+    var beforeFeas = S.feasibility();
+    var amp = before > 0 ? ADD_H / before : 0;
+    if (before <= 0 || amp > AMP_CAP) {
+      say('<p>当前需求 <b>' + Math.round(before) + ' h</b>，再加 ' + ADD_H + ' h 的修改幅度 ' +
+          U.pct(amp) + ' 已超过 30% 阈值，需要重算可行性与阶段容量。</p>' +
+          '<p style="color:var(--txt3);font-size:11px">当前 R ' + beforeFeas.R.toFixed(2) + '，继续加时请先说「调整目标」或「延长周期」。</p>', '拆解 · 阈值守护');
       return;
     }
-    S.feas.demand += 116;
+    S.feas.demand = before + ADD_H;
     var f = S.feasibility();
     ZX.render();
+    var buf0 = Math.max(0, beforeFeas.T - beforeFeas.D);
+    var buf1 = Math.max(0, f.T - f.D);
     say('<div class="ecard">' +
-      '<div class="ecard-h"><b>已调整 · 数学</b><span class="tag ac">本周 12 h → 14 h</span></div>' +
+      '<div class="ecard-h"><b>已调整 · 数学</b><span class="tag ac">需求 +' + ADD_H + ' h（≈ +' + (Math.round(ADD_H / Math.max(1, S.feas.weeks) * 10) / 10) + ' h/周）</span></div>' +
       '<div class="ecard-b">' +
-        '<div class="erow"><span class="k">R 值</span><span class="why">需求增加 116 h（2 h × 58 周）</span><span class="v ' + (f.R >= 0.9 ? 'ac' : 'warn') + '">1.08 → ' + f.R.toFixed(2) + '</span></div>' +
-        '<div class="erow"><span class="k">判定</span><span class="why">仍在合理区间，但缓冲从 73 h 降到 0</span><span class="v warn">' + f.verdict + '</span></div>' +
-        '<div class="erow"><span class="k">影响</span><span class="why">阶段容量按 45/35/20 重新分配，政治基础期被压缩</span><span class="v">+7.4%</span></div>' +
+        '<div class="erow"><span class="k">R 值</span><span class="why">需求 ' + Math.round(before) + ' → ' + Math.round(S.feas.demand) + ' h</span><span class="v ' + (f.R >= 0.9 ? 'ac' : 'warn') + '">' + beforeFeas.R.toFixed(2) + ' → ' + f.R.toFixed(2) + '</span></div>' +
+        '<div class="erow"><span class="k">缓冲</span><span class="why">真实可损耗余量随之收窄</span><span class="v ' + (buf1 > 0 ? 'ac' : 'warn') + '">' + buf0 + ' → ' + buf1 + ' h</span></div>' +
+        '<div class="erow"><span class="k">判定</span><span class="why">修改幅度 ' + U.pct(amp) + '，未超过 30% 阈值</span><span class="v ' + (f.R >= 0.9 ? 'ac' : 'warn') + '">' + f.verdict + '</span></div>' +
       '</div></div>' +
-      '<p style="margin-top:10px">修改幅度 17%，未超过 30% 阈值，因此不阻断。计划草案与阶段容量已同步更新。</p>', '拆解 · 15ms');
+      '<p style="margin-top:10px">可行性已按新需求重算' + (buf1 > 0 ? '，仍有缓冲，不阻断。' : '，缓冲归零：再加就会大面积裁剪。') + '</p>', '拆解 · 15ms');
     ZX.setTab('plan');
     ZX.api.queueOp({
       entity: 'goal', entityId: (S.goal.id || 'g_2027'), field: 'feas.demand', value: S.feas.demand
@@ -558,7 +585,7 @@ window.ZX = window.ZX || {};
 
   ZX.assistant = {
     pushMsg: pushMsg, say: say, me: me, typing: typing,
-    startTask: startTask, tickTimer: tickTimer, elapsedMs: elapsedMs, finishTask: finishTask, bufferWarn: bufferWarn,
+    startTask: startTask, tickTimer: tickTimer, elapsedMs: elapsedMs, finishTask: finishTask, toggleBuffer: toggleBuffer,
     route: route, INTENTS: INTENTS,
     goalFlow: goalFlow,
     rescueFlow: rescueFlow,

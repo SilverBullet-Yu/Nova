@@ -490,6 +490,11 @@ test('replan：结构完整（strategies / diff / guards / snapshot）', () => {
   assert.deepEqual(Object.keys(res.guards).sort(), [
     'bufferPreserved', 'compressedShareOk', 'consecutiveOk', 'loadGrowthOk'
   ]);
+  /* growth：策略级负载增幅数值（前端直接消费，不解析 reason 文本） */
+  res.strategies.forEach((s) => {
+    assert.equal(typeof s.growth, 'number');
+    assert.ok(isFinite(s.growth));
+  });
   assert.deepEqual(Object.keys(res.snapshot).sort(), ['tasks', 'timestamp', 'week']);
   res.diff.forEach((d) => {
     assert.ok(['defer', 'compress', 'substitute', 'abandon'].indexOf(d.op) >= 0);
