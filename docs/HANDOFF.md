@@ -239,10 +239,26 @@ seed = {
 | POST | `/api/sync/ops` | `{ ops: [{ opId, entity, entityId, field, value, clientTs, baseSeq }] }` | `{ accepted: [opId], serverSeq }` — 单批 ≤ 200 |
 | GET | `/api/reports/weekly` | — | `{ week, achievement, effectiveHours, subjectMix, attribution, actions }` |
 
+**错误码表**（Demo 实现口径，定义见 `server/api/routes.js` 的 `ERRORS`；架构文档附录 B 是生产形态设计稿的独立口径，语义不同，**不是**本契约的取值来源）：
+
+| code | HTTP | 含义 |
+|---|---|---|
+| E1001 | 400 | 请求参数非法或缺失 |
+| E2001 | 404 | 资源不存在 |
+| E3001 | 409 | 状态冲突 |
+| E3002 | 409 | 资源已存在 |
+| E4001 | 200 | 幂等键重复，已返回首次结果 |
+| E4002 | 400 | 请求体过大或单批超过上限 200 |
+| E4010 | 401 | 未提供有效凭证 |
+| E4030 | 403 | 无权访问该用户数据 |
+| E4290 | 429 | 请求过于频繁 |
+| E5001 | 500 | 服务内部错误 |
+| E9001 | 500 | 未分类异常 |
+
 约定：
 - 鉴权：业务接口一律从 `Authorization: Bearer <token>` 解析身份（实现见 `server/auth.js`）；免鉴权仅 `/api/health` 与 `/api/auth/session` 两条
-- HTTP 错误统一 `{ error: { code, message } }`；`code` 取架构文档附录 B 的错误码（E1001/E2001/E3001/E4001…）
-- `POST /api/sessions` 与 `/api/sync/ops` 的幂等键为 `opId`，重复提交返回**首次的** `serverSeq`（架构文档 E4001 视为成功）
+- HTTP 错误统一 `{ error: { code, message } }`，`code` 取上方错误码表
+- `POST /api/sessions` 与 `/api/sync/ops` 的幂等键为 `opId`，重复提交返回**首次的** `serverSeq`（幂等命中不算错误，对应 E4001）
 - 服务端**不读时钟做业务判断**；需要时间戳时由请求体传入或使用单调计数器
 
 ---
@@ -265,6 +281,8 @@ ZX.api.syncSince(n)    -> Promise<{ops, serverSeq, hasMore}>
 ZX.api.reportsWeekly() -> Promise<report>
 ZX.api.health()        -> Promise<{ok, version}>
 ```
+
+> 其中 `schedule` / `postSession` / `syncSince` / `reportsWeekly` 为**契约预留面**：后端端点已实现且有测试覆盖（对应 §5 路由表），前端 UI 暂未接线。属于有意保留的接口面，不是死代码——裁剪前先同步本节与 §5。
 
 **降级要求（架构文档 C1 / C4）**：
 1. 请求超时 **3000ms**，超时或网络失败 → 抛错
