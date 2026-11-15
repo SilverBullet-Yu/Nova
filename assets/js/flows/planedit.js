@@ -38,9 +38,7 @@ window.ZX = window.ZX || {};
   }
 
   function findTask(id) {
-    var list = ZX.state.tasks || [];
-    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
-    return null;
+    return U.findById(ZX.state.tasks, id);
   }
 
   /* 参与日程块的任务：未完成且未跳过（与今日页口径一致） */
@@ -184,8 +182,7 @@ window.ZX = window.ZX || {};
     else S.locks[id] = true;
     ZX.render();
     /* 重绘会重建按钮，焦点按 data-pe-lock 重放，键盘连续操作不丢位置 */
-    var again = document.querySelector('[data-pe-lock="' + id + '"]');
-    if (again) { try { again.focus(); } catch (e) { /* 忽略 */ } }
+    U.refocus(document.querySelector('[data-pe-lock="' + id + '"]'));
     ZX.ui.toast(on ? '已解锁 · 重排会重新考虑这一块' : '已锁定 · 重排不会改动', on ? '' : 'ok');
     ZX.api.queueOp({ entity: 'plan', entityId: id, field: 'locked', value: !on });
   }
@@ -226,7 +223,7 @@ window.ZX = window.ZX || {};
     sp.setAttribute('tabindex', '-1');
     sp.textContent = '已否决';
     btn.parentNode.replaceChild(sp, btn);
-    try { sp.focus(); } catch (e) { /* 忽略 */ }
+    U.refocus(sp);
   }
 
   function veto(taskId, op, btn) {

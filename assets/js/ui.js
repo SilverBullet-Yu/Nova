@@ -226,6 +226,72 @@ window.ZX = window.ZX || {};
     if (first) { try { first.focus(); } catch (e2) { /* 忽略 */ } }
   }
 
+  /* ---------- 弹层 footer 三键（取消 / 上一步 / 主按钮） ----------
+     goal / rescue / exec 的 9 份同构 footer 收敛为一个 builder。
+     ns 为该 flow 的委托属性名（goal 'sa'、rescue 'sb'、exec 'sc'）。 */
+  function footNav(o) {
+    o = o || {};
+    return '<button type="button" class="btn ghost" data-close>取消</button>' +
+      (o.back ? '<button type="button" class="btn" data-' + o.ns + '="back">上一步</button>' : '') +
+      '<button type="button" class="btn pri" data-' + o.ns + '="' + (o.act || 'next') + '"' +
+        (o.disabled ? ' disabled' : '') +
+        (o.title ? ' title="' + U.esc(o.title) + '"' : '') + '>' + U.esc(o.label || '下一步') + '</button>';
+  }
+
+  /* ---------- 多步弹层（goal / rescue 共用的步骤编排骨架） ----------
+     cfg = {
+       ns: 'sa',                    // 焦点记忆用委托属性名
+       step: 1,                     // 初始步骤
+       steps: { 1: fn -> { head: [eyebrow, title, sub], body, footer, wide? }, ... },
+       beforeRender: fn(step),      // 重绘前钩子（如留住输入中的草稿）
+       bind: fn(api),               // 事件绑定（挂 api.root）
+       onClose: fn()
+     }
+     返回 { api, step(), go(n), render(), open() }；open() 返回 sheet 控制器。 */
+  function flowSheet(cfg) {
+    var api = null;
+    var step = (cfg && cfg.step) || 1;
+    var flow = {
+      api: null,
+      step: function () { return step; },
+      go: function (n) { step = n; flow.render(); },
+      render: function () {
+        if (!api) return;
+        if (cfg.beforeRender) cfg.beforeRender(step);
+        var keep = recallFocus(api, cfg.ns);
+        var def = cfg.steps[step](step);
+        api.setBody(def.body);
+        api.setFooter(def.footer);
+        setHead(api, def.head[0], def.head[1], def.head[2]);
+        var el = api.root.querySelector('.sheet');
+        if (el && def.wide !== undefined) el.classList.toggle('wide', !!def.wide);
+        restoreFocus(api, cfg.ns, keep);
+      },
+      open: function () {
+        if (api) return null;   /* 已打开：避免重复叠加弹层 */
+        var first = cfg.steps[step](step);
+        api = sheet({
+          eyebrow: first.head[0],
+          title: first.head[1],
+          sub: first.head[2],
+          body: first.body,
+          footer: first.footer,
+          wide: !!first.wide,
+          onClose: function () {
+            api = null;
+            flow.api = null;
+            if (cfg.onClose) cfg.onClose();
+          }
+        });
+        flow.api = api;
+        if (cfg.bind) cfg.bind(api);
+        flow.render();
+        return api;
+      }
+    };
+    return flow;
+  }
+
   /** 轻提示（role=status 供读屏播报；多条同现时向上错开，避免完全重叠） */
   function toast(text, kind) {
     var prev = document.querySelectorAll('.toast:not(.out)').length;
@@ -273,6 +339,7 @@ window.ZX = window.ZX || {};
   ZX.ui = {
     sheet: sheet, confirm: confirm, toast: toast, close: close,
     setHead: setHead, recallFocus: recallFocus, restoreFocus: restoreFocus,
+    footNav: footNav, flowSheet: flowSheet,
     fold: fold, loadFolds: loadFolds, saveFolds: saveFolds, countTo: countTo
   };
 })(window.ZX);

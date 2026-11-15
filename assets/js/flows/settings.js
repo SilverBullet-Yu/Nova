@@ -105,8 +105,7 @@ window.ZX = window.ZX || {};
     g[d][s] = !g[d][s];
     queueAvail('toggle', { day: d, slot: s, value: g[d][s] });
     syncDom();
-    var btn = U.$('.sd-cell[data-day="' + d + '"][data-slot="' + s + '"]');
-    if (btn) { try { btn.focus(); } catch (e) { /* 忽略 */ } }
+    U.refocus(U.$('.sd-cell[data-day="' + d + '"][data-slot="' + s + '"]'));
   }
 
   /* kind: copy（周一到工作日） / clear（全部清空） / reset（恢复默认） */
@@ -130,8 +129,7 @@ window.ZX = window.ZX || {};
       return;
     }
     syncDom();
-    var btn = U.$('[data-act="avail-bulk"][data-kind="' + kind + '"]');
-    if (btn) { try { btn.focus(); } catch (e) { /* 忽略 */ } }
+    U.refocus(U.$('[data-act="avail-bulk"][data-kind="' + kind + '"]'));
   }
 
   /* ---------- 导出（本地 CSV，无后端可用；pad2 用 util.js 共用实现） ---------- */
@@ -314,8 +312,7 @@ window.ZX = window.ZX || {};
     ZX.util.setPref('font', val);
     if (ZX.state.tab === 'me') ZX.render();
     /* 全量重绘会丢焦点：放回当前档位按钮（与 toggle/bulk 的焦点重放一致） */
-    var btn = U.$('[data-act="font"][data-v="' + val + '"]');
-    if (btn) { try { btn.focus(); } catch (e) { /* 忽略 */ } }
+    U.refocus(U.$('[data-act="font"][data-v="' + val + '"]'));
   }
 
   /* ---------- 启动 ---------- */

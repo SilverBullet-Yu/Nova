@@ -38,9 +38,7 @@ window.ZX = window.ZX || {};
   function tasks() { return ZX.state.tasks; }
 
   function task(id) {
-    var list = tasks();
-    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
-    return null;
+    return U.findById(tasks(), id);
   }
 
   /* 参与今日统计的任务：跳过项不算计划、不算剩余、不算达成率分母 */
@@ -155,10 +153,7 @@ window.ZX = window.ZX || {};
       t.completion = completion;
     }
 
-    S.running = null;
-    S.timerStart = null;
-    S.pausedAt = null;
-    S.pausedTotal = 0;
+    S.resetTimer();
     return sess;
   }
 
@@ -315,8 +310,7 @@ window.ZX = window.ZX || {};
       title: '记录这次执行',
       sub: '完成度与状态都可以改，默认按 100% 记。',
       body: recordBody(t, mins, completion, feel),
-      footer: '<button type="button" class="btn ghost" data-close>取消</button>' +
-              '<button type="button" class="btn pri" data-sc="save-record">记录</button>',
+      footer: ZX.ui.footNav({ ns: 'sc', act: 'save-record', label: '记录' }),
       onClose: function () { ctl = null; }
     });
 
@@ -415,8 +409,7 @@ window.ZX = window.ZX || {};
       body: '<div class="field"><label>原因</label>' +
           '<div class="sc-opts" role="radiogroup" aria-label="跳过原因">' + opts + '</div></div>' +
         '<div class="notice sc-note">跳过不计入欠账，也不占今日剩余时长。之后可以在「已跳过」里恢复。</div>',
-      footer: '<button type="button" class="btn ghost" data-close>取消</button>' +
-              '<button type="button" class="btn pri" data-sc="save-skip">记入跳过</button>',
+      footer: ZX.ui.footNav({ ns: 'sc', act: 'save-skip', label: '记入跳过' }),
       onClose: function () { ctl = null; }
     });
 
@@ -475,8 +468,7 @@ window.ZX = window.ZX || {};
     t.skippedAt = null;
     ZX.render();
     /* 全量重绘会丢焦点：放回同项的「恢复」按钮（该按钮存在时） */
-    var btn = U.$('[data-sc="restore"][data-id="' + id + '"]');
-    if (btn) { try { btn.focus(); } catch (e) { /* 忽略 */ } }
+    U.refocus(U.$('[data-sc="restore"][data-id="' + id + '"]'));
     ZX.ui.toast('已恢复', 'ok');
   }
 
@@ -484,8 +476,7 @@ window.ZX = window.ZX || {};
     var S = ZX.state;
     S.skippedOpen = !S.skippedOpen;
     ZX.render();
-    var btn = U.$('[data-sc="skipped-toggle"]');
-    if (btn) { try { btn.focus(); } catch (e) { /* 忽略 */ } }
+    U.refocus(U.$('[data-sc="skipped-toggle"]'));
   }
 
   /* ---------- 补录 ---------- */
@@ -522,8 +513,7 @@ window.ZX = window.ZX || {};
         '</div>' +
         '<div class="field"><label>完成度</label>' + segPct(100) + '</div>' +
         '<div class="notice sc-note">补录记为「补录」，不计入今日达成率，也不改任务工时。</div>',
-      footer: '<button type="button" class="btn ghost" data-close>取消</button>' +
-              '<button type="button" class="btn pri" data-sc="save-backfill">记录补录</button>',
+      footer: ZX.ui.footNav({ ns: 'sc', act: 'save-backfill', label: '记录补录' }),
       onClose: function () { ctl = null; }
     });
 

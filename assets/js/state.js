@@ -203,6 +203,13 @@ window.ZX = window.ZX || {};
     return state.tasks.filter(function (t) { return t.done; })
       .reduce(function (a, t) { return a + U.num(t.actual || t.est, 0); }, 0);
   };
+  /* 计时四元组复位（记录完成 / 目标生效 / 删除数据等收尾共用） */
+  state.resetTimer = function () {
+    state.running = null;
+    state.timerStart = null;
+    state.pausedAt = null;
+    state.pausedTotal = 0;
+  };
   state.feasInput = function () {
     return {
       weeklyH: state.feas.weeklyH,

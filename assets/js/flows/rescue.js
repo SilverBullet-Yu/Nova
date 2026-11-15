@@ -25,8 +25,8 @@ window.ZX = window.ZX || {};
   var DEFER_DAYS = 7;        /* 顺延：截止日期 +7 天、周容量 +1 周 */
   var DOWN_POINTS = 30;      /* 降级：目标值下调 30 分 */
 
-  var api = null;            /* ZX.ui.sheet 控制器 */
-  var screen = 1;            /* 1 缺口 / 2 方式 / 3 确认 */
+  var api = null;            /* ZX.ui.sheet 控制器（flow.open() 产出） */
+  var flow = null;           /* ZX.ui.flowSheet 步骤控制器 */
   var choice = 'compress';   /* 默认压缩 */
   var resumeBannerSeen = false;  /* 零惩罚回归提示是否已被用户收起 */
 
@@ -240,46 +240,48 @@ window.ZX = window.ZX || {};
     return S.interrupted === true;
   }
 
-  /* ---------- 弹层骨架 ---------- */
+  /* ---------- 弹层骨架（flowSheet 统一步骤编排） ----------
+     两屏：01 缺口与方式（四宫格 + 三选一）→ 02 确认摘要。
+     中断后用户耐心极低，把「看缺口」与「选接法」合并成一屏，全流程两步走完。 */
   function stepMarks(active) {
-    var names = ['01 缺口', '02 方式', '03 确认'];
+    var names = ['01 缺口与方式', '02 确认'];
     return names.map(function (n, i) {
       return '<i class="' + (i + 1 === active ? 'on' : '') + '">' + n + '</i>';
     }).join('');
   }
 
-  /* 弹层头 / 焦点记忆用 ui.js 共用实现（setHead / recallFocus / restoreFocus） */
-
-  function render() {
-    if (!api) return;
-    var keep = ZX.ui.recallFocus(api, 'sb');
-    var head;
-    if (screen === 1) {
-      head = ['RESCUE / 缺口', '把计划接回来', '先看这周缺口有多大，再决定怎么接；任何一步都不需要补记录。'];
-      api.setBody(bodyGap());
-      api.setFooter(footGap());
-    } else if (screen === 2) {
-      head = ['RESCUE / 方式', '选一种接法', '三种方式都会让缺口归零，区别只在代价。'];
-      api.setBody(bodyChoice());
-      api.setFooter(footChoice());
-    } else {
-      head = ['RESCUE / 确认', '确认并恢复', '确认后立即生效；关闭或取消不会写入任何状态。'];
-      api.setBody(bodyConfirm());
-      api.setFooter(footConfirm());
+  function stepDef(n) {
+    if (n === 1) {
+      return {
+        head: ['RESCUE / 缺口', '把计划接回来', '先看缺口有多大，再选一种接法；任何一步都不需要补记录。'],
+        body: bodyGapAndChoice(),
+        footer: ZX.ui.footNav({ ns: 'sb', act: 'next', label: '下一步 · 确认摘要' }),
+        wide: true
+      };
     }
-    ZX.ui.setHead(api, head[0], head[1], head[2]);
-    ZX.ui.restoreFocus(api, 'sb', keep);
+    return {
+      head: ['RESCUE / 确认', '确认并恢复', '确认后立即生效；关闭或取消不会写入任何状态。'],
+      body: bodyConfirm(),
+      footer: ZX.ui.footNav({ ns: 'sb', back: true, act: 'apply', label: '确认并恢复' }),
+      wide: true
+    };
   }
 
-  /* ---------- 第 1 屏：缺口四宫格 ---------- */
+  /* ---------- 第 1 屏：缺口四宫格 + 三选一（一次算齐，不再重复推演） ---------- */
   function cell(label, val, note, cls) {
     return '<div class="sb-cell ' + (cls || '') + '">' +
       '<span>' + label + '</span><b>' + val + '</b><i>' + note + '</i></div>';
   }
 
-  function bodyGap() {
+  function bodyGapAndChoice() {
     var m = metrics();
     var zero = m.gap === 0;
+    var cmp = optionOf('compress');
+    var dfr = optionOf('defer');
+    var dwn = optionOf('downgrade');
+    var cmpTxt = cmp.items.length
+      ? cmp.items.map(function (i) { return i.from + ' → ' + i.est; }).join('、') + ' min'
+      : '已无未完成项';
     return '<div class="sb-steps">' + stepMarks(1) + '</div>' +
       '<div class="sb-metrics">' +
         cell('本周原计划', U.hm(m.planned), '7 天合计 · ' + m.planned + ' min') +
@@ -289,31 +291,36 @@ window.ZX = window.ZX || {};
       '</div>' +
       '<div class="notice sb-note">缺口 = 本周原计划 − 已投入 − 剩余可用。' +
         '这 ' + m.days + ' 天每天可用 ' + U.hm(Math.round(m.daily)) + '，合计 ' + U.hm(Math.round(m.avail)) + '。' +
-        (zero
-          ? '本周没有硬缺口，可选择降载保节奏。'
-          : '三种方式都会把它归零，代价各不相同，下一步逐条列出。') +
+        (zero ? '本周没有硬缺口，可选择降载保节奏。' : '三种方式都会把它归零，代价各不相同。') +
+      '</div>' +
+      '<div class="sb-opts" role="radiogroup" aria-label="挽救方式">' +
+        optCard(cmp,
+          '今天剩下的 ' + (cmp.items.length + cmp.dropped.length) + ' 项按 60% 重排，放弃权重最低的 1 项。',
+          '工时下调 40%（' + cmpTxt + '，不低于 15 分钟），这些项标记为降级完成。',
+          '本周计划 ' + U.hm(m.planned) + ' → ' + U.hm(cmp.planMin) + ' · 放弃 ' + cmp.dropped.length + ' 项') +
+        optCard(dfr,
+          '截止日期 +7 天、周期 +1 周；任务一项不删，工时一项不压。',
+          '整体完成时间推后 7 天，截止 ' + dfr.deadlineAfter + '。',
+          '剩余可用 ' + U.hm(Math.round(m.avail)) + ' → ' + U.hm(Math.round(dfr.avail)) + ' · 任务数不变') +
+        optCard(dwn,
+          '目标值下调，放弃权重最低的 2 项。',
+          (dwn.targetFrom ? '目标 ' + dwn.targetFrom + ' → ' + dwn.targetAfter + ' 分，' : '') +
+            '放弃 ' + dwn.dropped.length + ' 项，重心收在权重最高的项上。',
+          '本周计划 ' + U.hm(m.planned) + ' → ' + U.hm(dwn.planMin) + ' · 放弃 ' + dwn.dropped.length + ' 项') +
       '</div>' +
       '<p class="sb-hint">中断天数由执行记录计算：连续 ' + U.num(ZX.state.consecutiveZeroDays, 0) +
-        ' 天没有记录，达到 ' + THRESHOLD + ' 天即进入挽救。</p>';
+        ' 天没有记录，达到 ' + THRESHOLD + ' 天即进入挽救。以上数字由同一套公式实时算出，选择不会立即生效。</p>';
   }
 
-  function footGap() {
-    return '<button type="button" class="btn ghost" data-close>取消</button>' +
-      '<button type="button" class="btn pri" data-sb="next">下一步 · 选择方式</button>';
-  }
-
-  /* ---------- 第 2 屏：三选项 ---------- */
-  function optCard(key, act, cost, extra) {
-    var o = optionOf(key);
-    var on = choice === key;
-    var m = metrics();
-    var impact = '缺口 ' + U.hm(m.gap) + ' → ' + U.hm(o.gap) +
+  function optCard(o, act, cost, extra) {
+    var on = choice === o.key;
+    var impact = '缺口 ' + U.hm(metrics().gap) + ' → ' + U.hm(o.gap) +
       (o.gap === 0 ? ' · 归零' : '');
     return '<button type="button" class="sb-opt' + (on ? ' on' : '') + '" role="radio" aria-checked="' + on + '"' +
         ' tabindex="' + (on ? '0' : '-1') + '"' +   /* roving tabindex：Tab 只进选中项，方向键在组内移动 */
-        ' data-sb="pick" data-v="' + key + '">' +
+        ' data-sb="pick" data-v="' + o.key + '">' +
         '<div class="sb-opt-h"><b>' + o.label + '</b>' +
-          (key === 'compress' ? '<span class="sb-tag">默认</span>' : '') +
+          (o.key === 'compress' ? '<span class="sb-tag">默认</span>' : '') +
           '<span class="sb-opt-k">' + (on ? '已选择' : '选择') + '</span></div>' +
         '<p class="sb-opt-a">' + act + '</p>' +
         '<p class="sb-opt-c">代价：' + cost + '</p>' +
@@ -321,40 +328,7 @@ window.ZX = window.ZX || {};
       '</button>';
   }
 
-  function bodyChoice() {
-    var cmp = optionOf('compress');
-    var dfr = optionOf('defer');
-    var dwn = optionOf('downgrade');
-    var m = metrics();
-    var cmpTxt = cmp.items.length
-      ? cmp.items.map(function (i) { return i.from + ' → ' + i.est; }).join('、') + ' min'
-      : '已无未完成项';
-    return '<div class="sb-steps">' + stepMarks(2) + '</div>' +
-      '<div class="sb-opts" role="radiogroup" aria-label="挽救方式">' +
-        optCard('compress',
-          '今天剩下的 ' + (cmp.items.length + cmp.dropped.length) + ' 项按 60% 重排，放弃权重最低的 1 项。',
-          '工时下调 40%（' + cmpTxt + '，不低于 15 分钟），这些项标记为降级完成。',
-          '本周计划 ' + U.hm(m.planned) + ' → ' + U.hm(cmp.planMin) + ' · 放弃 ' + cmp.dropped.length + ' 项') +
-        optCard('defer',
-          '截止日期 +7 天、周期 +1 周；任务一项不删，工时一项不压。',
-          '整体完成时间推后 7 天，截止 ' + dfr.deadlineAfter + '。',
-          '剩余可用 ' + U.hm(Math.round(m.avail)) + ' → ' + U.hm(Math.round(dfr.avail)) + ' · 任务数不变') +
-        optCard('downgrade',
-          '目标值下调，放弃权重最低的 2 项。',
-          (dwn.targetFrom ? '目标 ' + dwn.targetFrom + ' → ' + dwn.targetAfter + ' 分，' : '') +
-            '放弃 ' + dwn.dropped.length + ' 项，重心收在权重最高的项上。',
-          '本周计划 ' + U.hm(m.planned) + ' → ' + U.hm(dwn.planMin) + ' · 放弃 ' + dwn.dropped.length + ' 项') +
-      '</div>' +
-      '<p class="sb-hint">以上数字由同一套公式实时算出：计划 − 已投入 − 剩余可用。选择不会立即生效，下一步确认。</p>';
-  }
-
-  function footChoice() {
-    return '<button type="button" class="btn ghost" data-close>取消</button>' +
-      '<button type="button" class="btn" data-sb="back">上一步</button>' +
-      '<button type="button" class="btn pri" data-sb="next">下一步 · 确认摘要</button>';
-  }
-
-  /* ---------- 第 3 屏：确认摘要 ---------- */
+  /* ---------- 第 2 屏：确认摘要 ---------- */
   function row(label, val) {
     return '<div class="sb-row"><span>' + label + '</span><b>' + val + '</b></div>';
   }
@@ -388,16 +362,10 @@ window.ZX = window.ZX || {};
       : row('本周计划', U.hm(m.planned) + ' → ' + U.hm(o.planMin)));
     rows.push(row('连续记录', '从今天重新开始，之前的 ' + U.num(ZX.state.consecutiveZeroDays, 0) + ' 天不计为欠账'));
 
-    return '<div class="sb-steps">' + stepMarks(3) + '</div>' +
+    return '<div class="sb-steps">' + stepMarks(2) + '</div>' +
       '<div class="sb-sum">' + rows.join('') + '</div>' +
       '<p class="sb-sum-note">确认后：任务工时 / 周期 / 截止日期按上面一行改写，连续记录归零重计，' +
         '并在对话里留一条说明。关闭或取消不会写入任何状态。</p>';
-  }
-
-  function footConfirm() {
-    return '<button type="button" class="btn ghost" data-close>取消</button>' +
-      '<button type="button" class="btn" data-sb="back">上一步</button>' +
-      '<button type="button" class="btn pri" data-sb="apply">确认并恢复</button>';
   }
 
   /* ---------- 生效 ---------- */
@@ -459,7 +427,7 @@ window.ZX = window.ZX || {};
     resumeBannerSeen = false;
     var ctl = api;
     api = null;
-    screen = 1;
+    flow = null;
     if (ctl) ctl.close('applied');
 
     if (S.tab !== 'today') ZX.setTab('today');
@@ -508,17 +476,15 @@ window.ZX = window.ZX || {};
 
     if (act === 'pick') {
       choice = t.dataset.v || 'compress';
-      render();
+      flow.render();
       return;
     }
     if (act === 'next') {
-      screen = Math.min(3, screen + 1);
-      render();
+      flow.go(2);
       return;
     }
     if (act === 'back') {
-      screen = Math.max(1, screen - 1);
-      render();
+      flow.go(1);
       return;
     }
     if (act === 'apply') { apply(); return; }
@@ -528,42 +494,39 @@ window.ZX = window.ZX || {};
   function open() {
     if (api) return;
     if (!ZX.ui) return;
-    screen = 1;
     choice = 'compress';
 
-    api = ZX.ui.sheet({
-      eyebrow: 'RESCUE / 缺口',
-      title: '把计划接回来',
-      sub: '先看这周缺口有多大，再决定怎么接；任何一步都不需要补记录。',
-      body: bodyGap(),
-      footer: footGap(),
-      wide: true,
+    flow = ZX.ui.flowSheet({
+      ns: 'sb',
+      step: 1,
+      steps: { 1: stepDef, 2: stepDef },
+      bind: function (a) {
+        a.root.addEventListener('click', onClick);
+        /* 三选一卡片的方向键导航（radio 惯例）：←↑ 上一项，→↓ 下一项，循环 */
+        a.root.addEventListener('keydown', function (e) {
+          if (!api || flow.step() !== 1) return;
+          var delta = e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1
+            : e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : 0;
+          if (!delta) return;
+          var cards = a.root.querySelectorAll('[data-sb="pick"]');
+          if (!cards.length) return;
+          var idx = -1;
+          for (var i = 0; i < cards.length; i++) if (cards[i] === document.activeElement) idx = i;
+          if (idx < 0) return;   /* 焦点不在选项上：不接管方向键 */
+          e.preventDefault();
+          var next = (idx + delta + cards.length) % cards.length;
+          choice = cards[next].dataset.v || choice;
+          U.refocus(cards[next]);
+          flow.render();
+        });
+      },
       onClose: function () {
         /* 关闭 / 取消：不写任何状态 */
         api = null;
-        screen = 1;
+        flow = null;
       }
     });
-
-    api.root.addEventListener('click', onClick);
-
-    /* 三选一卡片的方向键导航（radio 惯例）：←↑ 上一项，→↓ 下一项，循环 */
-    api.root.addEventListener('keydown', function (e) {
-      if (screen !== 2 || api === null) return;
-      var delta = e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1
-        : e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : 0;
-      if (!delta) return;
-      var cards = api.root.querySelectorAll('[data-sb="pick"]');
-      if (!cards.length) return;
-      var idx = -1;
-      for (var i = 0; i < cards.length; i++) if (cards[i] === document.activeElement) idx = i;
-      if (idx < 0) return;   /* 焦点不在选项上：不接管方向键 */
-      e.preventDefault();
-      var next = (idx + delta + cards.length) % cards.length;
-      choice = cards[next].dataset.v || choice;
-      cards[next].focus();
-      render();
-    });
+    api = flow.open();
   }
 
   /* 今日页 banner 的按钮在视图里，事件在这里委托（不改 main.js） */

@@ -52,8 +52,8 @@ window.ZX = window.ZX || {};
     { s: '英语', title: '长难句 · 从句拆解 15 句', est: 30, weight: 0.62 }
   ];
 
-  var api = null;           /* ZX.ui.sheet 控制器 */
-  var step = 1;
+  var api = null;           /* ZX.ui.sheet 控制器（flow.open() 产出） */
+  var flow = null;          /* ZX.ui.flowSheet 步骤控制器 */
   var initialPlan = [];     /* 初始草案快照，用于计算修改幅度 */
   var addForm = { s: '数学', title: '', min: 45 };
   var dragId = null;
@@ -118,9 +118,7 @@ window.ZX = window.ZX || {};
   }
 
   function findItem(id) {
-    var list = plan();
-    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
-    return null;
+    return U.findById(plan(), id);
   }
 
   /* ---------- 校准求解：只调参数，不复制 T/D 公式 ---------- */
@@ -138,31 +136,28 @@ window.ZX = window.ZX || {};
     return 520;
   }
 
-  /* ---------- 渲染骨架（setHead / 焦点记忆用 ui.js 共用实现） ---------- */
-  function render() {
-    if (!api) return;
-    if (step === 3) captureAdd();   /* 重绘前留住「添加计划项」里已输入的内容 */
-    var keep = ZX.ui.recallFocus(api, 'sa');
-    var head, body, footer;
-    if (step === 1) {
-      head = ['目标 / 新建', '设定你的目标', '先设目标，再判断可行性；不可行就先校准，不直接砍计划。'];
-      body = formHtml();
-      footer = formFooter();
-    } else if (step === 2) {
-      head = ['目标 / 可行性', '可行性判定', 'R = T / D。低于 0.70 时先校准，再决定怎么拆。'];
-      body = feasHtml();
-      footer = feasFooter();
-    } else {
-      head = ['目标 / 拆解', '拆解草案', '这一页只调计划项；确认后写入「计划」并生成今天的前 4 项。'];
-      body = planHtml();
-      footer = planFooter();
+  /* ---------- 渲染骨架（flowSheet 统一步骤编排：头三行 / 焦点记忆 / wide 切换） ---------- */
+  function stepDef(n) {
+    if (n === 1) {
+      return {
+        head: ['目标 / 新建', '设定你的目标', '先设目标，再判断可行性；不可行就先校准，不直接砍计划。'],
+        body: formHtml(),
+        footer: formFooter()
+      };
     }
-    api.setBody(body);
-    api.setFooter(footer);
-    ZX.ui.setHead(api, head[0], head[1], head[2]);
-    var sheetEl = api.root.querySelector('.sheet');
-    if (sheetEl) sheetEl.classList.toggle('wide', step === 3);
-    ZX.ui.restoreFocus(api, 'sa', keep);
+    if (n === 2) {
+      return {
+        head: ['目标 / 可行性', '可行性判定', 'R = T / D。低于 0.70 时先校准，再决定怎么拆。'],
+        body: feasHtml(),
+        footer: feasFooter()
+      };
+    }
+    return {
+      head: ['目标 / 拆解', '拆解草案', '这一页只调计划项；确认后由排程引擎排进本周空档。'],
+      body: planHtml(),
+      footer: planFooter(),
+      wide: true
+    };
   }
 
   /* ---------- 第 1 步：表单 ---------- */
@@ -209,8 +204,7 @@ window.ZX = window.ZX || {};
   }
 
   function formFooter() {
-    return '<button type="button" class="btn ghost" data-close>取消</button>' +
-      '<button type="button" class="btn pri" data-sa="next">下一步 · 可行性判定</button>';
+    return ZX.ui.footNav({ ns: 'sa', act: 'next', label: '下一步 · 可行性判定' });
   }
 
   function captureForm() {
@@ -355,10 +349,10 @@ window.ZX = window.ZX || {};
   function feasFooter() {
     var f = feasOf(draft());
     var ok = f.R >= GATE;
-    return '<button type="button" class="btn ghost" data-close>取消</button>' +
-      '<button type="button" class="btn" data-sa="back">上一步</button>' +
-      '<button type="button" class="btn pri" data-sa="decompose"' + (ok ? '' : ' disabled') +
-      (ok ? '' : ' title="R 低于 0.70，先完成校准"') + '>进入拆解</button>';
+    return ZX.ui.footNav({
+      ns: 'sa', back: true, act: 'decompose', label: '进入拆解',
+      disabled: !ok, title: ok ? '' : 'R 低于 0.70，先完成校准'
+    });
   }
 
   /* ---------- 第 3 步：拆解草案 ---------- */
@@ -453,8 +447,8 @@ window.ZX = window.ZX || {};
       '</div>';
   }
 
-  function captureAdd() {
-    if (step !== 3) return;
+  function captureAdd(n) {
+    if (n !== 3) return;
     var s = api.$('#saAddS');
     var t = api.$('#saAddT');
     var m = api.$('#saAddM');
@@ -464,10 +458,10 @@ window.ZX = window.ZX || {};
   }
 
   function planFooter() {
-    var empty = totalMin() <= 0;
-    return '<button type="button" class="btn ghost" data-close>取消</button>' +
-      '<button type="button" class="btn" data-sa="back">上一步</button>' +
-      '<button type="button" class="btn pri" data-sa="confirm"' + (empty ? ' disabled' : '') + '>确认生效</button>';
+    return ZX.ui.footNav({
+      ns: 'sa', back: true, act: 'confirm', label: '确认生效',
+      disabled: totalMin() <= 0
+    });
   }
 
   /* 按权重从低到高压缩到 1.0 倍容量，单项单次不超过原工时 40% */
@@ -591,10 +585,7 @@ window.ZX = window.ZX || {};
     S.feas.demand = d.demand;
 
     /* 新目标生效后，旧计时 / 旧重排快照 / 旧降载态都失去对应任务，一并作废 */
-    S.running = null;
-    S.timerStart = null;
-    S.pausedAt = null;
-    S.pausedTotal = 0;
+    S.resetTimer();
     S.replanned = false;
     S.snapshot = null;
     S.replanRecord = null;
@@ -654,7 +645,7 @@ window.ZX = window.ZX || {};
 
   /* ---------- 事件 ---------- */
   function onInput(e) {
-    if (step !== 1 || !api) return;
+    if (!api || flow.step() !== 1) return;
     var id = e.target && e.target.id;
     if (id !== 'saName' && id !== 'saDeadline' && id !== 'saWeekly') return;
     captureForm();
@@ -662,66 +653,54 @@ window.ZX = window.ZX || {};
     if (calc) calc.innerHTML = calcPreview();
   }
 
-  function onClick(e) {
-    if (!api) return;
-    var t = e.target.closest ? e.target.closest('[data-sa]') : null;
-    if (!t) return;
-    var act = t.dataset.sa;
-
+  /* 第 1 步：目标表单 */
+  function onClickForm(act, t) {
     if (act === 'type' || act === 'base') {
       captureForm();
       if (act === 'type') draft().type = t.dataset.v;
       else draft().base = t.dataset.v;
       draft().demand = demandOf(draft().type, draft().base);
-      render();
+      flow.render();
       return;
     }
-
     if (act === 'next') {
       captureForm();
       draft().name = String(draft().name || '').trim();
       var errs = validate();
       markErrors(errs);
       if (Object.keys(errs).length) { ZX.ui.toast('还有几项需要补全', 'warn'); return; }
-      step = 2;
-      render();
-      return;
+      flow.go(2);
     }
+  }
 
-    if (act === 'back') {
-      step = step === 3 ? 2 : 1;
-      render();
-      return;
-    }
-
+  /* 第 2 步：可行性与校准路径 */
+  function onClickFeas(act) {
     if (act === 'decompose') {
       if (feasOf(draft()).R < GATE) return;
-      step = 3;
-      render();
+      flow.go(3);
       return;
     }
-
     if (act === 'fix-weekly') {
       var needW = solveWeekly(draft(), TARGET_R);
       draft().weeklyH = Math.min(80, needW);
-      render();
+      flow.render();
       return;
     }
-
     if (act === 'fix-weeks') {
       var needK = solveWeeks(draft(), TARGET_R);
       draft().weeks = needK;
       draft().deadline = U.isoDay(U.addDays(today0(), needK * 7));
-      render();
+      flow.render();
       return;
     }
-
     if (act === 'fix-demand') {
       draft().demand = Math.round(draft().demand * 0.85);
-      render();
-      return;
+      flow.render();
     }
+  }
 
+  /* 第 3 步：拆解草案 */
+  function onClickPlan(act, t) {
     if (act === 'up' || act === 'down') {
       /* 键盘排序：与指针拖拽共用同一份 planDraft 顺序（拖拽的键盘替代路径） */
       var list = plan();
@@ -731,12 +710,11 @@ window.ZX = window.ZX || {};
       if (i < 0 || j < 0 || j >= list.length) return;
       var tmp = list[i]; list[i] = list[j]; list[j] = tmp;
       list.forEach(function (x, idx) { x.order = idx; });
-      render();
+      flow.render();
       /* 移动后原按钮可能因到边而禁用（如升到首行）：聚焦该行仍可用的方向按钮，
          键盘连续移动不丢焦点 */
       var nextAct = j === 0 ? 'down' : 'up';
-      var back = api.root.querySelector('[data-sa="' + nextAct + '"][data-id="' + t.dataset.id + '"]');
-      if (back && !back.disabled) { try { back.focus(); } catch (e) { /* 忽略 */ } }
+      U.refocus(api.root.querySelector('[data-sa="' + nextAct + '"][data-id="' + t.dataset.id + '"]:not([disabled])'));
       return;
     }
 
@@ -749,12 +727,12 @@ window.ZX = window.ZX || {};
         ZX.state.planDraft = plan().filter(function (x) { return x.id !== it.id; });
         ZX.ui.toast('已删除「' + it.title + '」', 'warn');
       }
-      render();
+      flow.render();
       return;
     }
 
     if (act === 'add') {
-      captureAdd();
+      captureAdd(3);
       var title = String(addForm.title || '').trim();
       if (!title) { ZX.ui.toast('先写一个计划项标题', 'warn'); return; }
       plan().push({
@@ -766,17 +744,30 @@ window.ZX = window.ZX || {};
         order: plan().length
       });
       addForm.title = '';
-      render();
+      flow.render();
       return;
     }
 
     if (act === 'compress') {
       compressToCap();
-      render();
+      flow.render();
       return;
     }
 
-    if (act === 'confirm') { apply(); return; }
+    if (act === 'confirm') { apply(); }
+  }
+
+  function onClick(e) {
+    if (!api) return;
+    var t = e.target.closest ? e.target.closest('[data-sa]') : null;
+    if (!t) return;
+    var act = t.dataset.sa;
+
+    if (act === 'back') { flow.go(flow.step() === 3 ? 2 : 1); return; }
+
+    if (flow.step() === 1) onClickForm(act, t);
+    else if (flow.step() === 2) onClickFeas(act);
+    else onClickPlan(act, t);
   }
 
   function onDragStart(e) {
@@ -817,7 +808,7 @@ window.ZX = window.ZX || {};
       list.forEach(function (x, i) { x.order = i; });
     }
     clearDrag();
-    render();
+    flow.render();
   }
 
   function clearDrag() {
@@ -835,30 +826,31 @@ window.ZX = window.ZX || {};
     ZX.state.goalDraft = defaultDraft();
     ZX.state.planDraft = makePlan();
     initialPlan = U.clone(ZX.state.planDraft);
-    step = 1;
     addForm = { s: '数学', title: '', min: 45 };
 
-    api = ZX.ui.sheet({
-      eyebrow: '目标 / 新建',
-      title: '设定你的目标',
-      sub: '先设目标，再判断可行性；不可行就先校准，不直接砍计划。',
-      body: formHtml(),
-      footer: formFooter(),
+    flow = ZX.ui.flowSheet({
+      ns: 'sa',
+      step: 1,
+      steps: { 1: stepDef, 2: stepDef, 3: stepDef },
+      beforeRender: function (n) { if (api) captureAdd(n); },
+      bind: function (a) {
+        a.root.addEventListener('click', onClick);
+        a.root.addEventListener('input', onInput);
+        a.root.addEventListener('change', onInput);
+        a.root.addEventListener('dragstart', onDragStart);
+        a.root.addEventListener('dragover', onDragOver);
+        a.root.addEventListener('drop', onDrop);
+        a.root.addEventListener('dragend', clearDrag);
+      },
       onClose: function () {
         ZX.state.goalDraft = null;
         ZX.state.planDraft = null;
         initialPlan = [];
         api = null;
+        flow = null;
       }
     });
-
-    api.root.addEventListener('click', onClick);
-    api.root.addEventListener('input', onInput);
-    api.root.addEventListener('change', onInput);
-    api.root.addEventListener('dragstart', onDragStart);
-    api.root.addEventListener('dragover', onDragOver);
-    api.root.addEventListener('drop', onDrop);
-    api.root.addEventListener('dragend', clearDrag);
+    api = flow.open();
   }
 
   ZX.flows = ZX.flows || {};

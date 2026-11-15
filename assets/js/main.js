@@ -117,8 +117,7 @@ window.ZX = window.ZX || {};
     if (id === 'chat') {
       var body = U.$('#chat');
       if (body) body.scrollTop = body.scrollHeight;
-      var input = U.$('#input');
-      if (input) { try { input.focus(); } catch (e) { /* 忽略 */ } }
+      U.refocus(U.$('#input'));
     } else {
       U.$('#view').scrollTop = 0;
     }
@@ -187,7 +186,7 @@ window.ZX = window.ZX || {};
     if (e.key === '/' && !typing && !document.querySelector('.ovl')) {
       e.preventDefault();
       if (ZX.state.tab !== 'chat') ZX.setTab('chat');
-      else { var input = U.$('#input'); if (input) { try { input.focus(); } catch (err) { /* 忽略 */ } } }
+      else U.refocus(U.$('#input'));
     }
   });
 

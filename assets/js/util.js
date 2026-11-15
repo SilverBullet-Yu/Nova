@@ -91,6 +91,18 @@ window.ZX = window.ZX || {};
   }
   function todayKey() { return isoDay(new Date()); }
 
+  /* ---------- 通用小件 ---------- */
+  /* 按 id 线性查找（任务 / 草案项共用，替换各 flow 的同名三胞胎） */
+  function findById(list, id) {
+    var arr = Array.isArray(list) ? list : [];
+    for (var i = 0; i < arr.length; i++) if (arr[i] && arr[i].id === id) return arr[i];
+    return null;
+  }
+  /* 聚焦重放：全量重绘后把焦点放回原控件；不抛错 */
+  function refocus(el) {
+    if (el && el.focus) { try { el.focus(); } catch (e) { /* 忽略 */ } }
+  }
+
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   function clone(v) { return v === undefined ? v : JSON.parse(JSON.stringify(v)); }
   function num(v, dft) { var n = Number(v); return isFinite(n) ? n : dft; }
@@ -147,6 +159,7 @@ window.ZX = window.ZX || {};
     nowStr: nowStr, tsHM: tsHM, isoWeek: isoWeek, todayDow: todayDow,
     parseDay: parseDay, isoDay: isoDay, addDays: addDays, retime: retime, pct: pct,
     dayKey: dayKey, todayKey: todayKey,
+    findById: findById, refocus: refocus,
     sleep: sleep, clone: clone, num: num,
     prefs: prefs, applyPrefs: applyPrefs, togglePref: togglePref, setPref: setPref
   };
