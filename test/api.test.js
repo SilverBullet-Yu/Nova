@@ -272,6 +272,36 @@ test('同步合并：删除类墓碑优先且不可翻转', async () => {
   assert.equal(model.tasks.find((t) => t.id === 't3').deleted, true);
 });
 
+test('回放：moved / locked / notif / buffer 经 state 可读（多端一致）', async () => {
+  await call('POST', '/api/sync/ops', {
+    ops: [
+      { opId: 'rp-1', entity: 'plan', entityId: 'dayAssign', field: 'moved', value: { taskId: 't2', day: '三' }, clientTs: 500 },
+      { opId: 'rp-2', entity: 'plan', entityId: 't2', field: 'locked', value: true, clientTs: 501 },
+      { opId: 'rp-3', entity: 'notif', entityId: 'daily', field: 'daily', value: false, clientTs: 502 },
+      { opId: 'rp-4', entity: 'buffer', entityId: 'today', field: 'occupied', value: true, clientTs: 503 }
+    ]
+  }, userA.token);
+
+  const r = await call('GET', '/api/state', undefined, userA.token);
+  assert.equal(r.status, 200);
+  assert.equal(r.body.seed.dayAssign.t2, '三');
+  assert.equal(r.body.seed.locks.t2, true);
+  const daily = r.body.notifications.find((n) => n.kind === 'daily');
+  assert.equal(daily.enabled, false);
+  assert.equal(r.body.seed.buffer.free, false);
+
+  /* 回基线日 = 撤销改期；value=false 解锁 = 删除键 */
+  await call('POST', '/api/sync/ops', {
+    ops: [
+      { opId: 'rp-5', entity: 'plan', entityId: 'dayAssign', field: 'moved', value: { taskId: 't2', day: '日' }, clientTs: 600 },
+      { opId: 'rp-6', entity: 'plan', entityId: 't2', field: 'locked', value: false, clientTs: 601 }
+    ]
+  }, userA.token);
+  const r2 = await call('GET', '/api/state', undefined, userA.token);
+  assert.equal(r2.body.seed.dayAssign.t2, undefined);
+  assert.equal(r2.body.seed.locks.t2, undefined);
+});
+
 /* ── 错误码 ───────────────────────────────────────────────────────────── */
 
 test('错误：未知接口返回 E2001 / 404', async () => {

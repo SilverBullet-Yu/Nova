@@ -99,6 +99,9 @@ window.ZX = window.ZX || {};
       buffer: Object.assign({}, r.buffer || {}),
       week: normWeek(r.week),
       weekShift: normWeek(r.weekShift),
+      /* 服务端回放的手工改期 / 锁定（op 只写不读缺口的回读面） */
+      dayAssign: (r.dayAssign && typeof r.dayAssign === 'object') ? r.dayAssign : {},
+      locks: (r.locks && typeof r.locks === 'object') ? r.locks : {},
       notif: normNotif(r.notif),
       weekStats: Object.assign({}, r.weekStats || {}),
       subjectColors: Object.assign({}, r.subjectColors || {})
@@ -182,6 +185,12 @@ window.ZX = window.ZX || {};
     try { window.localStorage.removeItem(OVERLAY_KEY); } catch (e) { /* 忽略 */ }
   }
 
+  /* 启动时本地 overlay 是否存在：服务端采纳后的 applyOverlay 以此区分两种场景——
+     · 回访用户（true）：overlay 承载未上行的本地数据，采纳后照常覆写（本地优先，C4）
+     · 换设备 / 已清空（false）：启动渲染会把「采纳前内存」写进 overlay，那份快照
+       只是种子投影，不得覆盖服务端回放值——否则回放永远活不过启动序列 */
+  var bootOverlayLoaded = false;
+
   function applyOverlay() {
     var o = null;
     try { o = JSON.parse(window.localStorage.getItem(OVERLAY_KEY) || 'null'); } catch (e) { o = null; }
@@ -203,7 +212,7 @@ window.ZX = window.ZX || {};
   }
 
   /* 启动恢复：种子之上叠加本地 overlay（新目标 / 记录 / 跳过 / 补录跨刷新存活） */
-  applyOverlay();
+  bootOverlayLoaded = applyOverlay();
 
   /* ---------- 派生计算 ----------
      计划 / 已投入 / 剩余 / 达成率的统一口径在 flows/exec.metrics（过滤 skipped）；
@@ -270,6 +279,9 @@ window.ZX = window.ZX || {};
       state.user = s.user; state.goal = s.goal; state.feas = s.feas;
       state.tasks = s.tasks; state.buffer = s.buffer; state.week = s.week;
       state.weekShift = s.weekShift; state.notif = s.notif; state.weekStats = s.weekStats;
+      /* 服务端回放的改期 / 锁定并入；随后 applyOverlay() 覆写（本地优先） */
+      state.dayAssign = s.dayAssign;
+      state.locks = s.locks;
       changed = true;
     }
     if (payload.notifications) {
@@ -293,6 +305,7 @@ window.ZX = window.ZX || {};
   ZX.state.saveOverlay = saveOverlay;
   ZX.state.dropOverlay = dropOverlay;
   ZX.state.applyOverlay = applyOverlay;
+  ZX.state.bootOverlayLoaded = function () { return bootOverlayLoaded; };
   ZX.state.normTask = normTask;
 
 })(window.ZX);

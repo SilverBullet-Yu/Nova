@@ -211,9 +211,10 @@ window.ZX = window.ZX || {};
         /* 静默覆盖：成功后用后端数据替换本地状态并刷新视图 */
         if (payload) {
           var changed = ZX.state.adoptServerState(payload);
-          /* 本地优先：本地未上行的 overlay（新目标 / 记录等）在服务端合并后
-             仍保持本地视角，最后覆写，避免被服务端旧种子覆盖丢失 */
-          ZX.state.applyOverlay();
+          /* 本地优先：回访用户的 overlay 承载未上行的本地数据，采纳后覆写保持本地视角；
+             换设备（启动时无 overlay）则不回读——启动渲染写下的只是种子投影，
+             覆写会吃掉服务端回放的改期 / 锁定等状态 */
+          if (ZX.state.bootOverlayLoaded()) ZX.state.applyOverlay();
           if (changed) ZX.render();
         }
       }, function () {

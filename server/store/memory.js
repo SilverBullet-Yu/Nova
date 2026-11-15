@@ -132,13 +132,58 @@ function applyToState(p, entity, entityId, field, value) {
       s.sessions.push(isPlainObject(value) ? clone(value) : { entityId: entityId, field: field, value: value });
       break;
     }
+    case 'plan': {
+      /* 回放形态：手工改期 / 锁定 / 逐条否决，GET /api/state 的 seed.dayAssign /
+         seed.locks 与 replan.vetoed 直接可读——闭合「op 只写不读」的多端一致缺口 */
+      if (field === 'moved' && isPlainObject(value) && value.taskId !== undefined) {
+        s.dayAssign = s.dayAssign || {};
+        const day = String(value.day === undefined ? '' : value.day);
+        if (day && day !== '日') s.dayAssign[String(value.taskId)] = day;
+        else delete s.dayAssign[String(value.taskId)];   // 回到基线日「日」= 撤销改期
+      } else if (field === 'locked') {
+        s.locks = s.locks || {};
+        if (value === true) s.locks[String(entityId)] = true;
+        else delete s.locks[String(entityId)];
+      } else if (field === 'vetoed' && p.replanRecords.length) {
+        const rec = p.replanRecords[p.replanRecords.length - 1];
+        rec.vetoed = rec.vetoed || [];
+        rec.vetoed.push({
+          taskId: String(value && value.taskId !== undefined ? value.taskId : entityId),
+          op: (value && value.op) || null,
+          at: num(value && value.at, 0)
+        });
+      } else {
+        applyExtra(s, entity, entityId, field, value);
+      }
+      break;
+    }
+    case 'notif': {
+      /* 通知开关回放：getNotifications 由 state.notif 派生，开关状态多端可见 */
+      if (s.notif && Object.prototype.hasOwnProperty.call(s.notif, field)) s.notif[field] = value;
+      else applyExtra(s, entity, entityId, field, value);
+      break;
+    }
+    case 'buffer': {
+      /* 弹性位占用回放：value=true 占用（free=false） */
+      if (field === 'occupied') {
+        s.buffer = Object.assign({}, s.buffer || {}, { free: value !== true });
+      } else {
+        applyExtra(s, entity, entityId, field, value);
+      }
+      break;
+    }
     default: {
-      s.extra = s.extra || {};
-      s.extra[entity] = s.extra[entity] || {};
-      s.extra[entity][entityId] = s.extra[entity][entityId] || {};
-      s.extra[entity][entityId][field] = value;
+      applyExtra(s, entity, entityId, field, value);
     }
   }
+}
+
+/** 未识别的实体 / 字段统一落入 extra 桶（原 default 分支） */
+function applyExtra(s, entity, entityId, field, value) {
+  s.extra = s.extra || {};
+  s.extra[entity] = s.extra[entity] || {};
+  s.extra[entity][entityId] = s.extra[entity][entityId] || {};
+  s.extra[entity][entityId][field] = value;
 }
 
 /** 字段级合并：返回是否实际改写了状态 */

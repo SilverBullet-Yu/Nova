@@ -138,7 +138,7 @@ window.ZX = window.ZX || {};
     { k: ['我断了四天', '断了', '中断', '挽救', '没打开'], run: rescueFlow },
     { k: ['新建目标', '定目标', '改目标'], run: goalFlow },
     { k: ['撤销', '恢复', '撤回'], run: undoReplan },
-    { k: ['数学', '多给', '加时间', '延长一点'], run: adjustMath },
+    { k: ['多给', '加时间', '延长一点'], run: adjustMath },
     { k: ['重排', '落下', '落后', '来不及', '崩'], run: replanFlow },
     { k: ['周报', '复盘', '这周怎么样'], run: weeklyFlow },
     { k: ['累', '状态不好', '没精神', '压力', '疲惫'], run: tiredFlow },
