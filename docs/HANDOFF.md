@@ -225,11 +225,13 @@ seed = {
 
 | 方法 | 路径 | 请求 | 响应 |
 |---|---|---|---|
-| GET | `/api/health` | — | `{ ok: true, version, uptimeMs }` |
+| GET | `/api/health` | — | `{ ok: true, version, uptimeMs }`（免鉴权） |
+| POST | `/api/auth/session` | — | 签发 Bearer 演示凭证（7 天有效，免鉴权）；其余接口均需 `Authorization: Bearer <token>`，缺失 / 过期返回 401，写接口另有 429 限流（见 `server/auth.js`） |
 | GET | `/api/state` | — | `{ seed, replan, notifications }` — 前端启动时拉取的初始全量 |
 | POST | `/api/feasibility` | `{ weeklyH, weeks, discount, demand }` | `feasibility()` 的返回 |
 | POST | `/api/schedule` | `{ tasks, slots, params }` | `schedule()` 的返回 |
 | POST | `/api/replan` | `{ tasks, week, params, history }` | `replan()` 的返回（含 snapshot） |
+| POST | `/api/replan/confirm` | `{ result }` | `confirmReplan(result)` 的返回 — L4「放弃」项经确认后才生效 |
 | POST | `/api/replan/undo` | `{ snapshot }` | `{ tasks, week }` |
 | POST | `/api/attribute` | `{ ...attribute 输入 }` | `attribute()` 的返回 |
 | POST | `/api/sessions` | `{ opId, taskId, durationMin, completion }` | `{ ok: true, serverSeq }` — 幂等：同 `opId` 重复提交返回同一 `serverSeq` |
@@ -238,6 +240,7 @@ seed = {
 | GET | `/api/reports/weekly` | — | `{ week, achievement, effectiveHours, subjectMix, attribution, actions }` |
 
 约定：
+- 鉴权：业务接口一律从 `Authorization: Bearer <token>` 解析身份（实现见 `server/auth.js`）；免鉴权仅 `/api/health` 与 `/api/auth/session` 两条
 - HTTP 错误统一 `{ error: { code, message } }`；`code` 取架构文档附录 B 的错误码（E1001/E2001/E3001/E4001…）
 - `POST /api/sessions` 与 `/api/sync/ops` 的幂等键为 `opId`，重复提交返回**首次的** `serverSeq`（架构文档 E4001 视为成功）
 - 服务端**不读时钟做业务判断**；需要时间戳时由请求体传入或使用单调计数器
@@ -251,11 +254,15 @@ seed = {
 ```js
 ZX.api.getState()      -> Promise<state>
 ZX.api.feasibility(p)  -> Promise<result>
+ZX.api.schedule(p)     -> Promise<result>
 ZX.api.replan(p)       -> Promise<result>
+ZX.api.confirmReplan(result) -> Promise<result>   /* 确认采纳含「放弃」项的重排 */
 ZX.api.undo(snapshot)  -> Promise<{tasks, week}>
 ZX.api.attribute(p)    -> Promise<result>
 ZX.api.postSession(p)  -> Promise<{ok, serverSeq}>
 ZX.api.syncOps(ops)    -> Promise<{accepted, serverSeq}>
+ZX.api.syncSince(n)    -> Promise<{ops, serverSeq, hasMore}>
+ZX.api.reportsWeekly() -> Promise<report>
 ZX.api.health()        -> Promise<{ok, version}>
 ```
 
@@ -263,7 +270,8 @@ ZX.api.health()        -> Promise<{ok, version}>
 1. 请求超时 **3000ms**，超时或网络失败 → 抛错
 2. 前端在捕获错误后**必须**降级到本地引擎产物（`assets/js/rhythm.build.js`，由 `npm run build:engine` 从 `shared/engine/*` 生成），保证离线双击打开时全部功能可用
 3. 本地写操作先入 `localStorage` 的 op 队列（键 `zx.op_queue`），联网成功后清 pending 标记（对应 C4 写路径顺序）
-4. 顶栏同步指示器需反映三种状态：`已同步` / `离线 · 待上行 N` / `离线 · 本地计算`
+4. 本地持久化键 `zx.overlay`：种子之上叠加本机增量（新目标 / 打卡记录 / 跳过 / 补录），跨刷新存活；改期与锁定不入 overlay，仅存 op 队列
+5. 顶栏同步指示器需反映三种状态：`已同步` / `离线 · 待上行 N` / `离线 · 本地计算`
 
 ---
 
@@ -271,7 +279,7 @@ ZX.api.health()        -> Promise<{ok, version}>
 
 1. `index.html` 必须支持 **file:// 双击直接打开**（引擎产物随仓库提交，无需构建步骤；`npm run build:engine` 可重建，不依赖 CDN）
 2. 视觉沿用现行「日漫清晰线」体系（2026-11-14 起，历经暖纸琥珀 → 纸白墨蓝 → 清晰线分格 → 日漫化四轮演进）：奶油纸白底 `#FBF7EF` + 天空蓝为唯一活性色、主容器 2px 实墨线全框、圆润 `--r:10px` 体系、等宽数字、超重黑体标题；全部视觉参数集中在 `assets/css/app.css` 顶部 token 区（设计语言以其头注释为准），新增样式必须复用变量，不得另起一套配色；IP 形象规范见 `docs/IP-DESIGN.md`
-3. 现有**全部交互**必须保留：4 个 Tab（今日/计划/数据/我的）、对话意图路由、重排流程、撤销、计时器、降载采纳、预置撤销、通知开关、导出
+3. 现有**全部交互**必须保留：5 个页签（对话/今日/计划/数据/我的，对话为默认）、对话意图路由、重排流程、撤销、计时器、降载采纳、预置撤销、通知开关、导出
 4. 现有文案与数值（如 R 1.08、+11.2%、68%）不得擅自改动
 5. 不得引入任何第三方库或 CDN 资源
 
@@ -281,5 +289,5 @@ ZX.api.health()        -> Promise<{ok, version}>
 
 - `npm test` 全绿，且引擎单测覆盖四个模块的：确定性快照断言、重排回退与撤销等价、弹性位不被清空、归因顺序不变量
 - `node server/main.js` 启动后 `GET /api/health` 返回 `ok: true`
-- `index.html` 双击打开：4 个 Tab 可切换、重排/撤销/计时/降载链路可用、顶栏在无后端时显示离线态
+- `index.html` 双击打开：5 个页签可切换（对话为默认）、重排/撤销/计时/降载链路可用、顶栏在无后端时显示离线态
 - `git log --oneline` 至少 4 条可独立回滚的提交

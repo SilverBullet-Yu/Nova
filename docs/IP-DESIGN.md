@@ -145,14 +145,14 @@ v4 的做法：**把原设的造型语言整体搬到诺瓦身上，但每一个
 
 | # | 状态 | 视觉变化 | 素材 | 接入位置 |
 |---|---|---|---|---|
-| ① | 待机 idle | 标准竖条眼 | `mascot-v4.svg` | 欢迎语主形象、顶栏与对话头像 |
-| ② | 聆听 listening | 眼拉高 1.28× + 耳侧声弧 | `mascot-v4-listen.svg` / `avatar-v4-listen.svg` | 输入聚焦时的对话头像 |
+| ① | 待机 idle | 标准竖条眼 | `mascot-v4.svg` | 欢迎语主形象、顶栏品牌标记 |
+| ② | 聆听 listening | 眼拉高 1.28× + 耳侧声弧 | `mascot-v4-listen.svg` / `avatar-v4-listen.svg` | ~~输入聚焦时的对话头像~~ **已撤除**（随对话页头部，见 §6）；素材保留供表情包 / 周边 |
 | ③ | 计算中 scheduling | 面罩内六点矩阵 | `mascot-v4-calc.svg` | 对话「处理中」等待消息 |
 | ④ | 专注 focusing | 双耳与面罩描边转**朱砂** + 印章进度环 | `mascot-v4-focus.svg` | 今日页计时中的任务行 |
 | ⑤ | 达成 done | 月牙眼 + 笑弧 + 纸屑 | `mascot-v4-done.svg` | 任务完成消息；挽救完成横幅 |
 | ⑥ | 挽救 rescue | 闭眼下弯、机身微倾、递纸条 | `mascot-v4-rescue.svg` | 今日页顶部中断横幅 |
 | ⑦ | 提醒 warn | 「><」紧张眼、耳变深墨蓝、耳尖闪线 | `mascot-v4-warn.svg` | 数据页「偏差归因」面板；计划页负载增幅 ≥ 20% 时亮预警旗标 |
-| ⑧ | 离线 offline | 横条眼、耳变灰、整体褪色 | `mascot-v4-offline.svg` / `avatar-v4-offline.svg` | 无后端时对话头像切褪色态（与顶栏「离线 · 本地计算」同步） |
+| ⑧ | 离线 offline | 横条眼、耳变灰、整体褪色 | `mascot-v4-offline.svg` / `avatar-v4-offline.svg` | ~~无后端时对话头像切褪色态~~ **已撤除**（随对话页头部）；离线指示由顶栏「离线 · 本地计算」承担 |
 | ⑨ | 兜底 unknown | 单眼 + 「?」 + o 嘴 | `mascot-v4-unknown.svg` | 关键词未命中的兜底回复 |
 
 情绪上限仍为「平静—关切—欣喜」三档：⑧离线为状态性褪色（非情绪），⑦提醒为紧张但克制（眼形变化、耳色加深，无红色、无尖角）。
@@ -174,7 +174,7 @@ v4 的做法：**把原设的造型语言整体搬到诺瓦身上，但每一个
 | ~~离线态（⑧ 离线 · 对话头像）~~ | — | `avatar-v4-offline.svg` | **已撤除**（随对话页头部）；离线指示由顶栏「离线 · 本地计算」承担 |
 | 兜底回复（⑨ 兜底） | 32×28 | `mascot-v4-unknown.svg` | `assistant.js` fallback |
 | 助理消息「诺」印落款 | 14×14 | 同胸口印构型（CSS `.seal-no`，无独立素材） | `assistant.js` pushMsg；朱砂方印 + 微旋，仅助理侧消息 |
-| 应用图标 | 16×16 | `favicon-v4.svg` | `index.html` `link rel=icon`；底色与 `theme-color` 同为 `#F5F6F8` |
+| 应用图标 | 16×16 | `favicon-v4.svg` | `index.html` `link rel=icon`；底色与 `theme-color` 同为 `#FBF7EF` |
 
 **接入原则**：素材只走本地文件（页面承诺不加载第三方资源）；不改动原有布局与网格，形象以「替换既有字块」的方式最小侵入；状态切换不依赖事件派发（CSS `:has()` 直读焦点态 + JS class 双保险）。
 

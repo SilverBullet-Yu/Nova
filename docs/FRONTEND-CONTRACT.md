@@ -13,7 +13,7 @@
 | A | 目标落地 | F-1.1 / F-1.2 / F-2.1 / F-2.2 / F-2.3 | 新建目标 → 可行性判定 → R<0.7 校准 → 草案编辑（改工时 / 增删 / 拖动排序 / 超载提示）→ 确认后进入计划页 |
 | B | 中断挽救 | F-7.1 / F-7.2 / F-7.3 | 连续 ≥3 天无记录可识别 → 缺口量化 → 压缩 / 顺延 / 降级三选一 → 一键生效 → 零惩罚文案 |
 | C | 执行与计划交互 | F-4.1 / F-4.2 / F-4.3 / F-3.2 / F-3.3 / F-3.5 / F-5.2 | 暂停/继续、部分完成、跳过、补录；周视图拖动改期 + 日上限校验 + 锁定；重排显性入口与逐条否决 |
-| D | 设置与适配 | F-8.1 / F-8.3 / F-8.4 / 移动端 | 可用时段编辑与批量复制、真实导出文件、删除全部数据；≤860px 单列 + 底部导航 |
+| D | 设置与适配 | F-8.1 / F-8.3 / F-8.4 / 移动端 | 可用时段编辑与批量复制、真实导出文件、删除全部数据；≤860px 单列（导航布局后经「界面结构调整（二）」改为**所有尺寸顶端**，底部导航退役，见 §8 交接日志） |
 
 阶段**串行**执行：同一时间只允许一个执行者改动仓库。
 
@@ -74,7 +74,7 @@ ZX.ui.toast('已保存', 'ok' | 'warn' | 'bad')
 ## 5. 样式规范
 
 - 颜色、间距、动效只取 `app.css` 顶部 token：`--ac` `--txt*` `--line*` `--dur` `--ease`。
-- 直角优先（`--r: 2px`），1px 发丝线，数字用 `--mono` / `--display`。
+- 圆润体系（`--r: 10px`）+ 2px 实墨线全框（2026-11-14 日漫清晰线起；早先「直角 2px + 1px 发丝线」已随换肤退役），数字用 `--mono` / `--display`。
 - 新增选择器统一加阶段前缀：`.sa-`（A）、`.sb-`（B）、`.sc-`（C）、`.sd-`（D），避免与既有类冲突。
 - 新样式**追加**到 `app.css` 末尾对应阶段区块，不重排既有规则。
 - 所有动效必须可被 `html[data-motion="off"]` 与 `prefers-reduced-motion` 关闭。
@@ -95,7 +95,7 @@ npm test
 - 浏览器：`PORT=8788 HOST=127.0.0.1 node server/main.js`，Playwright 截图 1440×900；
   新增移动端布局的阶段需补 390×844。
 - 检查项：无横向溢出、无文字截断、无 console 报错、`file://` 可打开、关闭动效后不破版。
-- 验收截图存放 `.tmp/ui/`，不入库。
+- 验收截图存放 `.tmp/ui/`，不入库（后续轮次的对外留档截图改存 `过程产物/UI验证截图/`，见 §8 交接日志）。
 
 ## 8. 交接日志
 
@@ -448,13 +448,13 @@ npm test
 | 态 | 素材 | 接入点 | 实现位置 |
 |---|---|---|---|
 | ① 待机 | `mascot-v4.svg` | 欢迎语主形象（132×116） | `main.js` `greetingHtml()` |
-| ② 聆听 | `avatar-v4-listen.svg` | 对话栏头像（34×34） | `main.js` focus/blur + `app.css` `:has(.composer:focus-within)` |
+| ② 聆听 | `avatar-v4-listen.svg` | ~~对话栏头像（34×34）~~ **已撤除**（随对话页头部） | 素材保留供表情包 / 周边；原实现 `main.js` focus/blur 已移除 |
 | ③ 计算中 | `mascot-v4-calc.svg` | 对话「处理中」等待消息（24×21） | `assistant.js` `typing()` |
 | ④ 专注 | `mascot-v4-focus.svg` | 计时中的任务行（24×30） | `views/today.js` `taskRow()` |
 | ⑤ 达成 | `mascot-v4-done.svg` | 任务完成消息 / 挽救完成横幅（32×28） | `flows/exec.js` `commitRecord()`、`assistant.js`、`flows/rescue.js` |
 | ⑥ 挽救 | `mascot-v4-rescue.svg` | 今日页中断横幅（32×28） | `flows/rescue.js` `banner()` |
 | ⑦ 提醒 | `mascot-v4-warn.svg` | 数据页「偏差归因」面板（22×19）；计划页负载预警旗标 | `views/data.js`、`views/plan.js` `loadWarnFlag()` |
-| ⑧ 离线 | `avatar-v4-offline.svg` | 无后端时对话头像褪色 | `main.js` `updateSync()` 切 `.is-offline` |
+| ⑧ 离线 | `avatar-v4-offline.svg` | ~~无后端时对话头像褪色~~ **已撤除**（随对话页头部） | 离线指示由顶栏 `updateSync()` 文案承担 |
 | ⑨ 兜底 | `mascot-v4-unknown.svg` | 关键词未命中的兜底回复（32×28） | `assistant.js` `fallback()` |
 | 应用图标 | `favicon-v4.svg` | 16×16 · 奶油纸底「脸」形（标签页 / 手机桌面） | `index.html` `link rel=icon`；`theme-color` 同为 `#FBF7EF`（随日漫化换肤同步） |
 

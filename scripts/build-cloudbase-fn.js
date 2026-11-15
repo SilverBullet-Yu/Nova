@@ -5,7 +5,7 @@
  * 源仓库保持原样（前后端同源可本地 npm start），这里只做「取子集 + 落入口文件」：
  *   .deploy/cloudbase-functions/nova/
  *
- * 用法：node scripts/build-cloudbase-fn.mjs
+ * 用法：node scripts/build-cloudbase-fn.js（或 npm run build:cloudbase）
  * 之后用 functionRootPath = .deploy/cloudbase-functions 交给 CloudBase 部署。
  */
 

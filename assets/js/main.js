@@ -264,7 +264,7 @@ window.ZX = window.ZX || {};
     ZX.state.folds = ZX.ui.loadFolds();
     if (ZX.flows && ZX.flows.settings) ZX.flows.settings.init();
     ZX.api.onStatus(updateSync);
-    updateSync();   /* 初始同步态：离线时头像即为褪色态 */
+    updateSync();   /* 初始同步态：离线时顶栏显示「离线 · 本地计算」 */
 
     U.$('#chips').innerHTML = CHIPS.map(function (c) {
       return '<button class="chip" data-act="say" data-say="' + c + '">' + c + '</button>';

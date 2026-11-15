@@ -4,7 +4,7 @@
  * 云函数运行时要求：常驻 Web 服务监听 9000 端口（由 scf_bootstrap 拉起）。
  * 这里只做一件事——把仓库里的 server/main.js 启动起来。
  *
- * 目录约定（构建产物，见 scripts/build-cloudbase-fn.mjs）：
+ * 目录约定（构建产物，见 scripts/build-cloudbase-fn.js）：
  *   nova/
  *   ├── index.js          ← 本文件
  *   ├── scf_bootstrap
@@ -18,7 +18,8 @@
  *
  * 鉴权部署要求（与 server/auth.js 一致，不存在免鉴权的旁路入口）：
  * 1. 云函数环境变量必须配置 NOVA_AUTH_SECRET（≥32 字节随机串）；
- *    生产环境缺少该变量时 server/auth.js 会直接拒绝启动，避免各实例密钥不一致。
+ *    NODE_ENV=production 时缺少该变量 server/auth.js 会直接拒绝启动，避免各实例
+ *    密钥不一致——部署清单需同时设置 NODE_ENV=production 与该密钥，缺一不可。
  * 2. HTTP 网关需放行 Authorization 请求头，并强制 HTTPS——凭证是 Bearer 明文传输。
  * 3. 所有业务接口都由同一个 server/main.js 处理鉴权与限流，网关层不要再暴露其他入口。
  */
