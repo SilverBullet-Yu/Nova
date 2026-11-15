@@ -86,9 +86,10 @@
  *    —— 即弹性位优先给非弹性（刚性）任务。
  * 5. params.bufferRatio：每日按 bufferRatio 预留弹性余量，
  *    非弹性任务当日占用 ≤ dailyCapMin − round(dailyCapMin × bufferRatio)。
- * 6. params.deadlineMs：时间预算。纯函数不读时钟，改以「固定轮次上界」体现
- *    （非弹性轮 + 弹性位兜底轮，共 2 轮），结果与时间无关。
- * 7. params.slotMinutes：仅作为校验用的粒度参考（排程以 slot 自身 durMin 为准）。
+ * 6. 任务工时统一读 estMin（唯一生产者 = 目标 flow 的拆解草案，同格式）；
+ *    排程以 slot 自身 durMin 为准，粒度由调用方构造 slots 时决定。
+ * 7. 输出钉死为 { blocks, unplanned, version }：时间预算（原 deadlineMs）在纯函数里
+ *    以「固定轮次上界」体现（非弹性轮 + 弹性位兜底轮），不引入时间参数与评分输出。
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -105,20 +106,19 @@
   function normalizeParams(params) {
     var p = params || {};
     return {
-      slotMinutes: num(p.slotMinutes, 30),
       bufferRatio: num(p.bufferRatio, 0.15),
       maxContiguousMin: num(p.maxContiguousMin, 150),
-      deadlineMs: num(p.deadlineMs, 200),
       dailyCapMin: num(p.dailyCapMin, 300)
     };
   }
 
+  /* 任务统一格式：estMin + subject（不做 est / s 别名兼容） */
   function normalizeTask(t, idx) {
     var src = t || {};
     return {
       id: String(src.id !== undefined ? src.id : ('t' + (idx + 1))),
-      subject: String(src.subject !== undefined ? src.subject : (src.s !== undefined ? src.s : '未分类')),
-      estMin: num(src.estMin !== undefined ? src.estMin : src.est, 0),
+      subject: String(src.subject !== undefined ? src.subject : '未分类'),
+      estMin: num(src.estMin, 0),
       weight: num(src.weight, 0),
       date: src.date !== undefined && src.date !== null ? String(src.date) : null,
       startMin: src.startMin !== undefined && src.startMin !== null ? num(src.startMin, null) : null,
@@ -300,7 +300,6 @@
       return '单科目连续上限 ' + P.maxContiguousMin + ' min 限制，剩余 ' + remaining + ' min 未排入';
     }
     if (cause.dayFull) return '日上限 ' + P.dailyCapMin + ' min 已满，剩余 ' + remaining + ' min 未排入';
-    if (cause.noTail) return '无可用时段，剩余 ' + remaining + ' min 未排入';
     return '无可用时段，剩余 ' + remaining + ' min 未排入';
   }
 
@@ -438,34 +437,11 @@
       }
     });
 
-    /* ── 汇总 ── */
-    var loadByDay = {};
-    blocks.forEach(function (b) {
-      loadByDay[b.date] = (loadByDay[b.date] || 0) + b.durMin;
-    });
-
-    var bufferCap = 0;
-    slots.forEach(function (s) { if (s.isBuffer && s.available) bufferCap += s.durMin; });
-    var bufferUsed = 0;
-    blocks.forEach(function (b) { if (b.isBuffer) bufferUsed += b.durMin; });
-
-    var softScore = 0;
-    var placedByTask = {};
-    blocks.forEach(function (b) { placedByTask[b.taskId] = (placedByTask[b.taskId] || 0) + b.durMin; });
-    tasks.forEach(function (t) {
-      if (t.estMin <= 0) return;
-      var cov = Math.min(1, (placedByTask[t.id] || 0) / t.estMin);
-      softScore += t.weight * cov * 100;
-    });
-
+    /* ── 汇总：输出钉死为 { blocks, unplanned, version }，不附评分 / 统计字段 ── */
     return {
       blocks: blocks,
       unplanned: unplanned,
-      softScore: Math.round(softScore * 100) / 100,
-      truncated: unplanned.length > 0,
-      version: VERSION,
-      loadByDay: loadByDay,
-      bufferUsedRatio: bufferCap > 0 ? Math.round((bufferUsed / bufferCap) * 10000) / 10000 : 0
+      version: VERSION
     };
   }
 
@@ -484,11 +460,12 @@
  * ── 模型说明（契约未展开处的显式裁决）────────────────────────────────────────
  * · 「未来 7 天负载」= week 中各日 minutes 之和；顺延把未完成项放进未来 7 天的空闲时段，
  *   因此负载 = 原负载 + 顺延分钟数；负载增幅 = (新负载 − 原负载) / 原负载。
- * · week 元素兼容三种写法：{ date, minutes } / { d, total } / { date, minutes, buf, capacity }。
+ * · week 元素统一格式：{ date, minutes, buffer, capacity? }（capacity 缺省取 dailyCapMin）。
  *   输入顺序即周内顺序（不做字典序排序，避免 '一' '二' '三' 被重排）。
  * · capacity = 该日刚性学习分钟上限（默认 params.dailyCapMin = 300）；
- *   buffer = 该日弹性池（默认 round(capacity × bufferRatio)，或 week 里的 buf）。
+ *   buffer = 该日弹性池（必填，前端由 state.weekInput 给出）。
  *   弹性池在容量之外，重排只占用 capacity 以内的空闲分钟，绝不侵占弹性池。
+ * · 任务工时统一读 est（与前端 state.tasks 同格式；schedule 引擎用 estMin，各自钉死）。
  * · compressedShareCap 解释为「被压缩掉的分钟数 / 输入全部任务的总分钟数」的上限。
  * · L1 顺延：按权重从高到低把未完成项填入未来 7 天 capacity 以内的空闲分钟。
  *   不按 task.date 改变装载顺序，也不占用 buffer——弹性池是保留余量，任何级别都不得侵占。
@@ -531,17 +508,14 @@
     return (v * 100).toFixed(1) + '%';
   }
 
+  /* 任务工时统一读 est（唯一生产者 = 前端 state.tasks，同格式；
+     schedule 引擎用 estMin，两个引擎各自钉死单一格式，不做双写兼容） */
   function taskMinutes(t) {
-    if (!t) return 0;
-    if (t.estMin !== undefined && t.estMin !== null) return num(t.estMin, 0);
-    if (t.est !== undefined && t.est !== null) return num(t.est, 0);
-    return 0;
+    return t ? num(t.est, 0) : 0;
   }
 
   function setMinutes(t, v) {
-    if (t.estMin !== undefined && t.estMin !== null) t.estMin = v;
-    else if (t.est !== undefined && t.est !== null) t.est = v;
-    else t.estMin = v;
+    t.est = v;
     return t;
   }
 
@@ -561,19 +535,19 @@
     };
   }
 
+  /* 周负载统一格式 { date, minutes, buffer, capacity? }（capacity 缺省取 dailyCapMin），
+     不再兼容 d / total / buf 等别名写法 */
   function normalizeDays(week, P) {
     var days = [];
     var seen = {};
     (week || []).forEach(function (w) {
       var src = w || {};
-      var date = String(src.date !== undefined && src.date !== null ? src.date
-        : (src.d !== undefined && src.d !== null ? src.d : ''));
+      var date = String(src.date !== undefined && src.date !== null ? src.date : '');
       if (!date || seen[date]) return;
       seen[date] = true;
       var capacity = num(src.capacity, P.dailyCapMin);
-      var buf = src.buffer !== undefined && src.buffer !== null ? num(src.buffer, 0)
-        : (src.buf !== undefined && src.buf !== null ? num(src.buf, 0) : Math.round(capacity * P.bufferRatio));
-      var minutes = num(src.minutes !== undefined && src.minutes !== null ? src.minutes : src.total, 0);
+      var buf = num(src.buffer, 0);
+      var minutes = num(src.minutes, 0);
       days.push({ date: date, minutes: minutes, buffer: buf, capacity: capacity });
     });
     return days;
@@ -1207,7 +1181,6 @@
     }
 
     evidence.matched = matched;
-    evidence.rule = matched;
 
     return {
       type: type,

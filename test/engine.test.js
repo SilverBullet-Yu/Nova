@@ -88,7 +88,7 @@ test('schedule：确定性（同输入两次全等）', () => {
       { date: '一', startMin: 630, durMin: 30, available: true, isBuffer: false },
       { date: '一', startMin: 1230, durMin: 60, available: true, isBuffer: true }
     ],
-    params: { slotMinutes: 30, bufferRatio: 0.15, maxContiguousMin: 150, deadlineMs: 200 }
+    params: { bufferRatio: 0.15, maxContiguousMin: 150 }
   };
   assert.deepEqual(schedule(input), schedule(input));
 });
@@ -133,7 +133,6 @@ test('schedule：单科目连续不超过 maxContiguousMin', () => {
       prevEnd = iv[1];
     });
   });
-  assert.equal(res.truncated, true);
   assert.equal(res.unplanned.length, 1);
 });
 
@@ -157,7 +156,7 @@ test('schedule：弹性位优先给非弹性（指定时段的刚性）任务', 
   assert.equal(flex.length, 1);
   assert.equal(flex[0].isBuffer, false);
   assert.equal(flex[0].startMin, 600);
-  assert.equal(res.bufferUsedRatio, 1);
+  assert.equal(res.blocks.filter((b) => b.isBuffer).reduce((a, b) => a + b.durMin, 0), 60);
 });
 
 test('schedule：弹性 Slot 优先级最低，仅在无其他选择时使用', () => {
@@ -172,7 +171,7 @@ test('schedule：弹性 Slot 优先级最低，仅在无其他选择时使用', 
   assert.equal(res.blocks.length, 1);
   assert.equal(res.blocks[0].isBuffer, false);
   assert.equal(res.blocks[0].startMin, 600);
-  assert.equal(res.bufferUsedRatio, 0);
+  assert.equal(res.blocks.some((b) => b.isBuffer), false);
 });
 
 test('schedule：单日总时长不超日上限', () => {
@@ -191,9 +190,7 @@ test('schedule：单日总时长不超日上限', () => {
   });
   const dayTotal = res.blocks.reduce((a, b) => a + b.durMin, 0);
   assert.ok(dayTotal <= 300, '单日总时长 ' + dayTotal + ' 超过上限');
-  assert.equal(res.loadByDay['一'], dayTotal);
   assert.ok(res.unplanned.length >= 1);
-  assert.equal(res.truncated, true);
 });
 
 test('schedule：返回结构完整且版本固定', () => {
@@ -203,10 +200,7 @@ test('schedule：返回结构完整且版本固定', () => {
     params: { dailyCapMin: 300, bufferRatio: 0.15, maxContiguousMin: 150 }
   });
   assert.equal(res.version, 'planner-1.0.0');
-  assert.deepEqual(Object.keys(res).sort(), [
-    'blocks', 'bufferUsedRatio', 'loadByDay', 'softScore', 'truncated', 'unplanned', 'version'
-  ]);
-  assert.equal(typeof res.softScore, 'number');
+  assert.deepEqual(Object.keys(res).sort(), ['blocks', 'unplanned', 'version']);
   assert.ok(res.blocks[0].reason.length > 0);
 });
 
@@ -261,9 +255,9 @@ test('replan：满载周按容量溢出触发 L2（saved ≥ overflow，增幅�
   }
   const res = replan({
     tasks: [
-      { id: 'done1', subject: '数学', estMin: 300, weight: 0.9, done: true },
-      { id: 'p1', subject: '数学', estMin: 100, weight: 0.9 },
-      { id: 'p2', subject: '英语', estMin: 40, weight: 0.2 }
+      { id: 'done1', subject: '数学', est: 300, weight: 0.9, done: true },
+      { id: 'p1', subject: '数学', est: 100, weight: 0.9 },
+      { id: 'p2', subject: '英语', est: 40, weight: 0.2 }
     ],
     week: week,
     params: REPLAN_PARAMS,
@@ -282,13 +276,13 @@ test('replan：满载周按容量溢出触发 L2（saved ≥ overflow，增幅�
   assert.ok(saved >= 35, '压缩节省量必须覆盖容量溢出：' + saved);
   assert.ok(res.nextWeek.reduce((a, d) => a + d.minutes, 0) <= 805);
   /* 低权重的 p2 先压到下限 24，再由 p1 补足溢出 */
-  assert.equal(res.nextTasks.find((t) => t.id === 'p2').estMin, 24);
-  assert.equal(res.nextTasks.find((t) => t.id === 'p1').estMin, 81);
+  assert.equal(res.nextTasks.find((t) => t.id === 'p2').est, 24);
+  assert.equal(res.nextTasks.find((t) => t.id === 'p1').est, 81);
 });
 
 test('replan：L1 通过时不再进入后续级别（不追求排满）', () => {
   const res = replan({
-    tasks: [{ id: 'p1', subject: '数学', estMin: 100, weight: 0.7 }],
+    tasks: [{ id: 'p1', subject: '数学', est: 100, weight: 0.7 }],
     week: baseWeek(100),
     params: REPLAN_PARAMS,
     history: { consecutiveNoImprove: 0 },
@@ -304,9 +298,9 @@ test('replan：L1 通过时不再进入后续级别（不追求排满）', () =>
 
 test('replan：快照可逆（撤销后逐条还原，不重算）', () => {
   const tasks = [
-    { id: 'done1', subject: '数学', estMin: 300, weight: 0.9, done: true },
-    { id: 'p1', subject: '数学', estMin: 100, weight: 0.7 },
-    { id: 'p2', subject: '英语', estMin: 100, weight: 0.5 }
+    { id: 'done1', subject: '数学', est: 300, weight: 0.9, done: true },
+    { id: 'p1', subject: '数学', est: 100, weight: 0.7 },
+    { id: 'p2', subject: '英语', est: 100, weight: 0.5 }
   ];
   const week = baseWeek(100);
   const res = replan({
@@ -334,7 +328,7 @@ test('replan：snapshot 时间戳由调用方注入（引擎不读时钟）', ()
 
 test('replan：弹性位永不清空', () => {
   const res = replan({
-    tasks: [{ id: 'p1', subject: '数学', estMin: 100, weight: 0.7 }],
+    tasks: [{ id: 'p1', subject: '数学', est: 100, weight: 0.7 }],
     week: baseWeek(100),
     params: REPLAN_PARAMS,
     history: { consecutiveNoImprove: 0 },
@@ -348,7 +342,7 @@ test('replan：弹性位永不清空', () => {
 
 test('replan：会侵占弹性位的计划一律被阻断', () => {
   const res = replan({
-    tasks: [{ id: 'p1', subject: '数学', estMin: 100, weight: 0.7 }],
+    tasks: [{ id: 'p1', subject: '数学', est: 100, weight: 0.7 }],
     week: [{ date: 'D1', minutes: 400, buffer: 60 }],
     params: REPLAN_PARAMS,
     history: { consecutiveNoImprove: 0 },
@@ -379,9 +373,9 @@ test('replan：连续 3 次未改善即停转校准', () => {
 test('replan：L3 替代只在同知识域内做高频高权重替换', () => {
   const res = replan({
     tasks: [
-      { id: 'a', subject: '数学', estMin: 100, weight: 0.3, domain: '高数', freq: 0.2 },
-      { id: 'b', subject: '数学', estMin: 40, weight: 0.9, domain: '高数', freq: 0.8 },
-      { id: 'c', subject: '线代', estMin: 90, weight: 0.5, domain: '线代', freq: 0.5 }
+      { id: 'a', subject: '数学', est: 100, weight: 0.3, domain: '高数', freq: 0.2 },
+      { id: 'b', subject: '数学', est: 40, weight: 0.9, domain: '高数', freq: 0.8 },
+      { id: 'c', subject: '线代', est: 90, weight: 0.5, domain: '线代', freq: 0.5 }
     ],
     week: baseWeek(100),
     params: Object.assign({}, REPLAN_PARAMS, { compressedShareCap: 0.05 }),
@@ -405,9 +399,9 @@ test('replan：L3 替代只在同知识域内做高频高权重替换', () => {
 test('replan：L4 放弃需确认，confirmReplan 之后才接受', () => {
   const res = replan({
     tasks: [
-      { id: 'p1', subject: '政治', estMin: 100, weight: 0.2 },
-      { id: 'p2', subject: '英语', estMin: 100, weight: 0.4 },
-      { id: 'p3', subject: '数学', estMin: 100, weight: 0.9 }
+      { id: 'p1', subject: '政治', est: 100, weight: 0.2 },
+      { id: 'p2', subject: '英语', est: 100, weight: 0.4 },
+      { id: 'p3', subject: '数学', est: 100, weight: 0.9 }
     ],
     week: baseWeek(100),
     params: REPLAN_PARAMS,
@@ -437,9 +431,9 @@ test('replan：L4 放弃需确认，confirmReplan 之后才接受', () => {
 
 test('replan：替代后原任务退出待办，第二次重排不会重复替换', () => {
   const tasks = [
-    { id: 'a', subject: '数学', estMin: 100, weight: 0.3, domain: '高数', freq: 0.2 },
-    { id: 'b', subject: '数学', estMin: 40, weight: 0.9, domain: '高数', freq: 0.8 },
-    { id: 'c', subject: '线代', estMin: 90, weight: 0.5, domain: '线代', freq: 0.5 }
+    { id: 'a', subject: '数学', est: 100, weight: 0.3, domain: '高数', freq: 0.2 },
+    { id: 'b', subject: '数学', est: 40, weight: 0.9, domain: '高数', freq: 0.8 },
+    { id: 'c', subject: '线代', est: 90, weight: 0.5, domain: '线代', freq: 0.5 }
   ];
   const params = REPLAN_PARAMS;
   const res1 = replan({
@@ -468,8 +462,8 @@ test('replan：锁定任务是硬约束（不压缩 / 不放弃，且不进入 d
   }
   const res = replan({
     tasks: [
-      { id: 'p1', subject: '数学', estMin: 140, weight: 0.9 },
-      { id: 'p2', subject: '政治', estMin: 40, weight: 0.1 }
+      { id: 'p1', subject: '数学', est: 140, weight: 0.9 },
+      { id: 'p2', subject: '政治', est: 40, weight: 0.1 }
     ],
     week: week,
     locks: { p2: true },
@@ -480,9 +474,9 @@ test('replan：锁定任务是硬约束（不压缩 / 不放弃，且不进入 d
   /* 溢出 35 min 全部由未锁定的 p1 承担 */
   assert.equal(res.strategies[1].applied, true);
   assert.equal(res.diff.some((d) => d.taskId === 'p2'), false);
-  assert.equal(res.nextTasks.find((t) => t.id === 'p2').estMin, 40);
+  assert.equal(res.nextTasks.find((t) => t.id === 'p2').est, 40);
   assert.equal(res.nextTasks.find((t) => t.id === 'p2').abandoned, undefined);
-  assert.equal(res.nextTasks.find((t) => t.id === 'p1').estMin, 105);
+  assert.equal(res.nextTasks.find((t) => t.id === 'p1').est, 105);
 });
 
 test('replan：结构完整（strategies / diff / guards / snapshot）', () => {

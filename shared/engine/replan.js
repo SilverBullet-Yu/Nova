@@ -9,11 +9,12 @@
  * ── 模型说明（契约未展开处的显式裁决）────────────────────────────────────────
  * · 「未来 7 天负载」= week 中各日 minutes 之和；顺延把未完成项放进未来 7 天的空闲时段，
  *   因此负载 = 原负载 + 顺延分钟数；负载增幅 = (新负载 − 原负载) / 原负载。
- * · week 元素兼容三种写法：{ date, minutes } / { d, total } / { date, minutes, buf, capacity }。
+ * · week 元素统一格式：{ date, minutes, buffer, capacity? }（capacity 缺省取 dailyCapMin）。
  *   输入顺序即周内顺序（不做字典序排序，避免 '一' '二' '三' 被重排）。
  * · capacity = 该日刚性学习分钟上限（默认 params.dailyCapMin = 300）；
- *   buffer = 该日弹性池（默认 round(capacity × bufferRatio)，或 week 里的 buf）。
+ *   buffer = 该日弹性池（必填，前端由 state.weekInput 给出）。
  *   弹性池在容量之外，重排只占用 capacity 以内的空闲分钟，绝不侵占弹性池。
+ * · 任务工时统一读 est（与前端 state.tasks 同格式；schedule 引擎用 estMin，各自钉死）。
  * · compressedShareCap 解释为「被压缩掉的分钟数 / 输入全部任务的总分钟数」的上限。
  * · L1 顺延：按权重从高到低把未完成项填入未来 7 天 capacity 以内的空闲分钟。
  *   不按 task.date 改变装载顺序，也不占用 buffer——弹性池是保留余量，任何级别都不得侵占。
@@ -56,17 +57,14 @@
     return (v * 100).toFixed(1) + '%';
   }
 
+  /* 任务工时统一读 est（唯一生产者 = 前端 state.tasks，同格式；
+     schedule 引擎用 estMin，两个引擎各自钉死单一格式，不做双写兼容） */
   function taskMinutes(t) {
-    if (!t) return 0;
-    if (t.estMin !== undefined && t.estMin !== null) return num(t.estMin, 0);
-    if (t.est !== undefined && t.est !== null) return num(t.est, 0);
-    return 0;
+    return t ? num(t.est, 0) : 0;
   }
 
   function setMinutes(t, v) {
-    if (t.estMin !== undefined && t.estMin !== null) t.estMin = v;
-    else if (t.est !== undefined && t.est !== null) t.est = v;
-    else t.estMin = v;
+    t.est = v;
     return t;
   }
 
@@ -86,19 +84,19 @@
     };
   }
 
+  /* 周负载统一格式 { date, minutes, buffer, capacity? }（capacity 缺省取 dailyCapMin），
+     不再兼容 d / total / buf 等别名写法 */
   function normalizeDays(week, P) {
     var days = [];
     var seen = {};
     (week || []).forEach(function (w) {
       var src = w || {};
-      var date = String(src.date !== undefined && src.date !== null ? src.date
-        : (src.d !== undefined && src.d !== null ? src.d : ''));
+      var date = String(src.date !== undefined && src.date !== null ? src.date : '');
       if (!date || seen[date]) return;
       seen[date] = true;
       var capacity = num(src.capacity, P.dailyCapMin);
-      var buf = src.buffer !== undefined && src.buffer !== null ? num(src.buffer, 0)
-        : (src.buf !== undefined && src.buf !== null ? num(src.buf, 0) : Math.round(capacity * P.bufferRatio));
-      var minutes = num(src.minutes !== undefined && src.minutes !== null ? src.minutes : src.total, 0);
+      var buf = num(src.buffer, 0);
+      var minutes = num(src.minutes, 0);
       days.push({ date: date, minutes: minutes, buffer: buf, capacity: capacity });
     });
     return days;

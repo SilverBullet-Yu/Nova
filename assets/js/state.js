@@ -221,7 +221,7 @@ window.ZX = window.ZX || {};
   /* 渲染路径：同步本地确定性纯函数（与后端同语义，不产生 UI 抖动） */
   state.feasibility = function () { return ZX.engine.feasibilityNow(state.feasInput()); };
   state.weekInput = function () {
-    return state.week.map(function (d) { return { date: d.d, minutes: U.num(d.total, 0), buf: U.num(d.buf, 0) }; });
+    return state.week.map(function (d) { return { date: d.d, minutes: U.num(d.total, 0), buffer: U.num(d.buf, 0) }; });
   };
   /* 「连续未改善」真算：从最近一次重排往回数，连续「被撤销」或「增幅触顶」的次数。
      这是防雪崩断言 3（连续 3 次未改善 → 转目标校准）的数据源，替换原硬编码 0。 */

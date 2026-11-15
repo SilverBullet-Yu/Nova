@@ -85,13 +85,12 @@ feasibility({
 
 ```js
 schedule({
-  tasks: [{ id, subject, estMin, weight, date?, startMin? }],
+  tasks: [{ id, subject, estMin, weight, date?, startMin? }],   // 工时统一 estMin
   slots: [{ date, startMin, durMin, available, isBuffer }],
   params: {
-    slotMinutes: 30,
-    bufferRatio: 0.15,
-    maxContiguousMin: 150,
-    deadlineMs: 200
+    bufferRatio: 0.15,        // 每日弹性余量比例
+    maxContiguousMin: 150,    // 单科目连续上限
+    dailyCapMin: 300          // 单日总上限（含弹性位）
   }
 }) -> {
   blocks: [{
@@ -99,13 +98,11 @@ schedule({
     isBuffer: boolean, locked: boolean, reason: string
   }],
   unplanned: [{ taskId, reason }],
-  softScore: number,
-  truncated: boolean,
-  version: 'planner-1.0.0',
-  loadByDay: { [date]: minutes },
-  bufferUsedRatio: number   // 0..1，已占弹性位 / 全部弹性位
+  version: 'planner-1.0.0'
 }
 ```
+
+> 2026-11-15 简化批：任务工时钉死 `estMin`（不做 est/s 别名兼容）；删除 `slotMinutes` / `deadlineMs` 死参数（纯函数以固定轮次上界体现时间预算）；删除 `softScore` / `truncated` / `loadByDay` / `bufferUsedRatio` 无消费输出。
 
 硬约束（违反即不得排入）：
 1. 不可用时段不得排入
@@ -119,8 +116,8 @@ schedule({
 
 ```js
 replan({
-  tasks: [...],       // 未完成 + 已完成（用于计算负载）；substituted / abandoned 由引擎排除待办
-  week: [...],        // 未来 7 天负载 [{ date, minutes, capacity, buffer }]
+  tasks: [...],       // 任务工时统一读 est（唯一生产者 = 前端 state.tasks）
+  week: [...],        // 未来 7 天负载，统一格式 [{ date, minutes, buffer, capacity? }]
   locks: { taskId: true }, // 硬约束：锁定任务不参与顺延 / 压缩 / 替代 / 放弃
   params: {
     loadGrowthCap: 0.20,     // 单次重排后未来 7 天负载增幅上限

@@ -96,7 +96,7 @@ test('POST /api/schedule 返回排程结果', async () => {
       { date: '一', startMin: 660, durMin: 30, available: true, isBuffer: false },
       { date: '一', startMin: 690, durMin: 30, available: true, isBuffer: false }
     ],
-    params: { slotMinutes: 30, bufferRatio: 0.15, maxContiguousMin: 150, deadlineMs: 200 }
+    params: { bufferRatio: 0.15, maxContiguousMin: 150 }
   }, userA.token);
   assert.equal(r.status, 200);
   assert.equal(r.body.version, 'planner-1.0.0');
@@ -105,8 +105,6 @@ test('POST /api/schedule 返回排程结果', async () => {
   assert.equal(r.body.blocks[0].taskId, 't2');
   assert.equal(r.body.blocks[0].durMin, 30);
   assert.equal(r.body.blocks[2].startMin, 690);
-  assert.ok(typeof r.body.softScore === 'number');
-  assert.equal(r.body.truncated, false);
 });
 
 test('POST /api/replan 返回四级策略与快照（L4 需确认，不落库）', async () => {

@@ -15,9 +15,10 @@
  *    —— 即弹性位优先给非弹性（刚性）任务。
  * 5. params.bufferRatio：每日按 bufferRatio 预留弹性余量，
  *    非弹性任务当日占用 ≤ dailyCapMin − round(dailyCapMin × bufferRatio)。
- * 6. params.deadlineMs：时间预算。纯函数不读时钟，改以「固定轮次上界」体现
- *    （非弹性轮 + 弹性位兜底轮，共 2 轮），结果与时间无关。
- * 7. params.slotMinutes：仅作为校验用的粒度参考（排程以 slot 自身 durMin 为准）。
+ * 6. 任务工时统一读 estMin（唯一生产者 = 目标 flow 的拆解草案，同格式）；
+ *    排程以 slot 自身 durMin 为准，粒度由调用方构造 slots 时决定。
+ * 7. 输出钉死为 { blocks, unplanned, version }：时间预算（原 deadlineMs）在纯函数里
+ *    以「固定轮次上界」体现（非弹性轮 + 弹性位兜底轮），不引入时间参数与评分输出。
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -34,20 +35,19 @@
   function normalizeParams(params) {
     var p = params || {};
     return {
-      slotMinutes: num(p.slotMinutes, 30),
       bufferRatio: num(p.bufferRatio, 0.15),
       maxContiguousMin: num(p.maxContiguousMin, 150),
-      deadlineMs: num(p.deadlineMs, 200),
       dailyCapMin: num(p.dailyCapMin, 300)
     };
   }
 
+  /* 任务统一格式：estMin + subject（不做 est / s 别名兼容） */
   function normalizeTask(t, idx) {
     var src = t || {};
     return {
       id: String(src.id !== undefined ? src.id : ('t' + (idx + 1))),
-      subject: String(src.subject !== undefined ? src.subject : (src.s !== undefined ? src.s : '未分类')),
-      estMin: num(src.estMin !== undefined ? src.estMin : src.est, 0),
+      subject: String(src.subject !== undefined ? src.subject : '未分类'),
+      estMin: num(src.estMin, 0),
       weight: num(src.weight, 0),
       date: src.date !== undefined && src.date !== null ? String(src.date) : null,
       startMin: src.startMin !== undefined && src.startMin !== null ? num(src.startMin, null) : null,
@@ -229,7 +229,6 @@
       return '单科目连续上限 ' + P.maxContiguousMin + ' min 限制，剩余 ' + remaining + ' min 未排入';
     }
     if (cause.dayFull) return '日上限 ' + P.dailyCapMin + ' min 已满，剩余 ' + remaining + ' min 未排入';
-    if (cause.noTail) return '无可用时段，剩余 ' + remaining + ' min 未排入';
     return '无可用时段，剩余 ' + remaining + ' min 未排入';
   }
 
@@ -367,34 +366,11 @@
       }
     });
 
-    /* ── 汇总 ── */
-    var loadByDay = {};
-    blocks.forEach(function (b) {
-      loadByDay[b.date] = (loadByDay[b.date] || 0) + b.durMin;
-    });
-
-    var bufferCap = 0;
-    slots.forEach(function (s) { if (s.isBuffer && s.available) bufferCap += s.durMin; });
-    var bufferUsed = 0;
-    blocks.forEach(function (b) { if (b.isBuffer) bufferUsed += b.durMin; });
-
-    var softScore = 0;
-    var placedByTask = {};
-    blocks.forEach(function (b) { placedByTask[b.taskId] = (placedByTask[b.taskId] || 0) + b.durMin; });
-    tasks.forEach(function (t) {
-      if (t.estMin <= 0) return;
-      var cov = Math.min(1, (placedByTask[t.id] || 0) / t.estMin);
-      softScore += t.weight * cov * 100;
-    });
-
+    /* ── 汇总：输出钉死为 { blocks, unplanned, version }，不附评分 / 统计字段 ── */
     return {
       blocks: blocks,
       unplanned: unplanned,
-      softScore: Math.round(softScore * 100) / 100,
-      truncated: unplanned.length > 0,
-      version: VERSION,
-      loadByDay: loadByDay,
-      bufferUsedRatio: bufferCap > 0 ? Math.round((bufferUsed / bufferCap) * 10000) / 10000 : 0
+      version: VERSION
     };
   }
 

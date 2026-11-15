@@ -222,10 +222,6 @@ function getLatestReplan(userId) {
   return p.replanRecords.length ? clone(p.replanRecords[p.replanRecords.length - 1]) : null;
 }
 
-function getReplanRecords(userId) {
-  return clone(partitionOf(userId).replanRecords);
-}
-
 function recordReplan(userId, result) {
   const p = partitionOf(userId);
   p.replanSeq += 1;
@@ -300,7 +296,6 @@ module.exports = {
   },
   getNotifications: getNotifications,
   getLatestReplan: getLatestReplan,
-  getReplanRecords: getReplanRecords,
   recordReplan: recordReplan,
   applyOps: applyOps,
   mergeField: mergeField,

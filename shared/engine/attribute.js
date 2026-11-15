@@ -95,7 +95,6 @@
     }
 
     evidence.matched = matched;
-    evidence.rule = matched;
 
     return {
       type: type,
