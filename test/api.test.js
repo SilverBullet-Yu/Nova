@@ -8,6 +8,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { start } = require('../server/main.js');
+const auth = require('../server/auth.js');
 const memory = require('../server/store/memory.js');
 const { seed } = require('../shared/data/seed.js');
 
@@ -435,6 +436,39 @@ test('限流：同一身份 60 秒内第 13 次 replan 返回 429 / E4290', asyn
   /* 限流按身份隔离：A 不受 B 的窗口影响 */
   const aStillOk = await call('POST', '/api/replan', payload, userA.token);
   assert.equal(aStillOk.status, 200);
+});
+
+/* ── 限流来源标识：clientIp（单元级，不依赖网络） ─────────────────────── */
+
+test('clientIp：默认不信任 X-Forwarded-For（可伪造，按 TCP 对端隔离）', () => {
+  const saved = process.env.NOVA_TRUST_PROXY;
+  delete process.env.NOVA_TRUST_PROXY;
+  try {
+    const req = { socket: { remoteAddress: '203.0.113.7' },
+      headers: { 'x-forwarded-for': '198.51.100.9, 10.0.0.2' } };
+    assert.equal(auth.clientIp(req), '203.0.113.7');
+  } finally {
+    if (saved === undefined) delete process.env.NOVA_TRUST_PROXY;
+    else process.env.NOVA_TRUST_PROXY = saved;
+  }
+});
+
+test('clientIp：TRUST_PROXY=1 取 XFF 最后一跳；无头 / 空跳回落 socket 地址', () => {
+  const saved = process.env.NOVA_TRUST_PROXY;
+  process.env.NOVA_TRUST_PROXY = '1';
+  try {
+    const req = { socket: { remoteAddress: '10.0.0.2' },
+      headers: { 'x-forwarded-for': '198.51.100.9, 203.0.113.7' } };
+    assert.equal(auth.clientIp(req), '203.0.113.7');
+    const noXff = { socket: { remoteAddress: '10.0.0.2' }, headers: {} };
+    assert.equal(auth.clientIp(noXff), '10.0.0.2');
+    const blank = { socket: { remoteAddress: '10.0.0.2' },
+      headers: { 'x-forwarded-for': ' , ,' } };
+    assert.equal(auth.clientIp(blank), '10.0.0.2');
+  } finally {
+    if (saved === undefined) delete process.env.NOVA_TRUST_PROXY;
+    else process.env.NOVA_TRUST_PROXY = saved;
+  }
 });
 
 /* ── 静态托管 ─────────────────────────────────────────────────────────── */

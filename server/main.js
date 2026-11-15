@@ -219,7 +219,7 @@ function createServer() {
     if (rule) {
       const who = userId
         ? 'user:' + userId
-        : 'ip:' + ((req.socket && req.socket.remoteAddress) || 'unknown');
+        : 'ip:' + auth.clientIp(req);
       const limit = auth.hitLimit(who + ' ' + routeKey, rule);
       if (!limit.allowed) {
         sendError(res, 'E4290',

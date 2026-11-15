@@ -98,7 +98,7 @@ npm run build:cloudbase   # 产出 .deploy/cloudbase-functions/nova
 
 1. **`server/main.js` 新增 `CORS_MODE=off`**：云函数经 HTTP 网关暴露时，网关会按环境安全域名自行回填 `Access-Control-Allow-Origin`，函数再写一次会得到 `<origin>,*` 这种非法多值头，浏览器直接判为 CORS 失败。`scf_bootstrap` 里默认关闭；本地 `npm start` 不受影响。
 2. **入口与引导脚本**：`deploy/cloudbase/function/index.js` 复用 `server/main.js` 导出的 `start()` 并绑定 `9000`；`scf_bootstrap` 使用 `/var/lang/node20/bin/node`，与 `Nodejs20.19` 运行时严格对应。
-3. **鉴权环境变量**：云函数环境变量必须配置 `NOVA_AUTH_SECRET`（≥32 字节随机串）——生产环境（`NODE_ENV=production`）缺该变量时 `server/auth.js` 直接拒绝启动；网关需放行 `Authorization` 请求头并强制 HTTPS（Bearer 明文传输）。本地 `npm start` 未设密钥时自动用进程级随机密钥，无感。
+3. **鉴权环境变量**：云函数环境变量必须配置 `NOVA_AUTH_SECRET`（≥32 字节随机串）——生产环境（`NODE_ENV=production`）缺该变量时 `server/auth.js` 直接拒绝启动；网关需放行 `Authorization` 请求头并强制 HTTPS（Bearer 明文传输）。本地 `npm start` 未设密钥时自动用进程级随机密钥，无感。另：网关 / 反代场景建议设 `NOVA_TRUST_PROXY=1`，限流改按 `X-Forwarded-For` 最后一跳（网关追加的真实客户端 IP）隔离，避免全部访客共享同一限流桶；未设置时按 TCP 对端地址——宁可共享桶，也不信任客户端可伪造的头。
 
 ### 已知的线上限制
 

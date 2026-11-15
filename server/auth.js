@@ -112,7 +112,8 @@ function readBearer(req) {
  * ----------------------------------------------------------------------- */
 const WRITE_LIMITS = {
   /* 签发凭证按来源 IP 限制，避免匿名刷身份。
-     经反向代理/网关转发时所有请求可能同源 IP，阈值按「入口整体」估算，不宜压得过低。 */
+     来源 IP 由 clientIp() 解析：默认取 TCP 对端地址；部署在网关后设 NOVA_TRUST_PROXY=1
+     采信 X-Forwarded-For 最后一跳（网关追加的真实客户端 IP），避免全部访客共享同一桶。 */
   'POST /api/auth/session': { limit: 60, windowMs: 60000 },
   'POST /api/sync/ops': { limit: 60, windowMs: 60000 },
   'POST /api/sessions': { limit: 60, windowMs: 60000 },
@@ -157,11 +158,29 @@ function hitLimit(key, rule) {
   return { allowed: true };
 }
 
+/**
+ * 限流用来源标识：默认取 TCP 对端地址（不可伪造）。
+ * 仅在显式设置 NOVA_TRUST_PROXY=1 时采信 X-Forwarded-For 的最后一跳——
+ * 该头可被客户端伪造，前置值不可信；只有网关追加的最后一跳才是真实来源。
+ * 无该头或全部为空跳时回落 socket 地址，行为与未开代理模式一致。
+ * @param {{socket?: {remoteAddress?: string}, headers?: Object<string,string>}} req
+ * @returns {string}
+ */
+function clientIp(req) {
+  const socketAddr = (req && req.socket && req.socket.remoteAddress) || 'unknown';
+  if (process.env.NOVA_TRUST_PROXY !== '1') return socketAddr;
+  const xff = req && req.headers ? String(req.headers['x-forwarded-for'] || '') : '';
+  if (!xff) return socketAddr;
+  const hops = xff.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+  return hops.length ? hops[hops.length - 1] : socketAddr;
+}
+
 module.exports = {
   TOKEN_TTL_MS: TOKEN_TTL_MS,
   issueSession: issueSession,
   verifyToken: verifyToken,
   readBearer: readBearer,
   WRITE_LIMITS: WRITE_LIMITS,
-  hitLimit: hitLimit
+  hitLimit: hitLimit,
+  clientIp: clientIp
 };

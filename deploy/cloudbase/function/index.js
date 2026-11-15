@@ -22,6 +22,8 @@
  *    密钥不一致——部署清单需同时设置 NODE_ENV=production 与该密钥，缺一不可。
  * 2. HTTP 网关需放行 Authorization 请求头，并强制 HTTPS——凭证是 Bearer 明文传输。
  * 3. 所有业务接口都由同一个 server/main.js 处理鉴权与限流，网关层不要再暴露其他入口。
+ * 4. 网关会追加 X-Forwarded-For 时建议设 NOVA_TRUST_PROXY=1，
+ *    限流按 XFF 最后一跳隔离（见 server/auth.js 的 clientIp）；不设则按 TCP 对端。
  */
 
 const { start } = require('./server/main.js');
