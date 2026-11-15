@@ -234,10 +234,9 @@ seed = {
 | POST | `/api/replan/confirm` | `{ result }` | `confirmReplan(result)` 的返回 — L4「放弃」项经确认后才生效 |
 | POST | `/api/replan/undo` | `{ snapshot }` | `{ tasks, week }` |
 | POST | `/api/attribute` | `{ ...attribute 输入 }` | `attribute()` 的返回 |
-| POST | `/api/sessions` | `{ opId, taskId, durationMin, completion }` | `{ ok: true, serverSeq }` — 幂等：同 `opId` 重复提交返回同一 `serverSeq` |
-| GET | `/api/sync?since=N` | query | `{ ops: [...], serverSeq, hasMore }` — seq 升序 |
 | POST | `/api/sync/ops` | `{ ops: [{ opId, entity, entityId, field, value, clientTs, baseSeq }] }` | `{ accepted: [opId], serverSeq }` — 单批 ≤ 200 |
-| GET | `/api/reports/weekly` | — | `{ week, achievement, effectiveHours, subjectMix, attribution, actions }` |
+
+> **已下线端点（2026-11-15 简化批）**：`POST /api/sessions`（打卡改走 `/api/sync/ops` 的 session op，见 flows/exec.record）、`GET /api/sync?since=N`（op 日志在本产品中只写不读，增量拉取协议撤除，幂等由 `opIndex` 保留）、`GET /api/reports/weekly`（周报由前端基于本地状态渲染）。三者现在返回 404 / E2001。
 
 **错误码表**（Demo 实现口径，定义见 `server/api/routes.js` 的 `ERRORS`；架构文档附录 B 是生产形态设计稿的独立口径，语义不同，**不是**本契约的取值来源）：
 
@@ -274,15 +273,11 @@ ZX.api.schedule(p)     -> Promise<result>
 ZX.api.replan(p)       -> Promise<result>
 ZX.api.confirmReplan(result) -> Promise<result>   /* 确认采纳含「放弃」项的重排 */
 ZX.api.undo(snapshot)  -> Promise<{tasks, week}>
-ZX.api.attribute(p)    -> Promise<result>
-ZX.api.postSession(p)  -> Promise<{ok, serverSeq}>
 ZX.api.syncOps(ops)    -> Promise<{accepted, serverSeq}>
-ZX.api.syncSince(n)    -> Promise<{ops, serverSeq, hasMore}>
-ZX.api.reportsWeekly() -> Promise<report>
 ZX.api.health()        -> Promise<{ok, version}>
 ```
 
-> 其中 `schedule` / `postSession` / `syncSince` / `reportsWeekly` 为**契约预留面**：后端端点已实现且有测试覆盖（对应 §5 路由表），前端 UI 暂未接线。属于有意保留的接口面，不是死代码——裁剪前先同步本节与 §5。
+> 引擎侧另有本地产物同步入口：`ZX.engine.feasibilityNow` / `ZX.engine.attributeNow`（渲染路径用，与后端同语义）。归因（attribute）由前端在执行记录后直接调本地产物，不经后端。
 
 **降级要求（架构文档 C1 / C4）**：
 1. 请求超时 **3000ms**，超时或网络失败 → 抛错

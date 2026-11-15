@@ -9,8 +9,7 @@ window.ZX = window.ZX || {};
   'use strict';
 
   var U = ZX.util;
-  var FALLBACK_WEEKS = [52, 61, 58, 66, 71, 74, 72, 68];   /* weekStats.WEEKS 异常时的兜底（与 seed 同源） */
-  var NORTH_STAR = 70;                                      /* 北极星口径：达成率 ≥ 70% 计为有效周（与页面说明一致） */
+  var NORTH_STAR = 70;   /* 北极星口径：达成率 ≥ 70% 计为有效周（与页面说明一致） */
   var MIX_COLOR = { '数学': 'var(--m-math)', '专业课': 'var(--m-408)', '英语': 'var(--m-en)', '政治': 'var(--m-pol)' };
   var ATTR_META = {
     '计划过载': ['var(--warn)', '下调密度，提高弹性位比例'],
@@ -24,7 +23,7 @@ window.ZX = window.ZX || {};
 
   function weeks() {
     var w = stats().WEEKS;
-    return (Array.isArray(w) && w.length) ? w : FALLBACK_WEEKS;
+    return Array.isArray(w) ? w : [];
   }
 
   /* 当前 ISO 周的周一至周日（MM.DD – MM.DD） */
@@ -78,6 +77,7 @@ window.ZX = window.ZX || {};
   function lineChart() {
     var W = 640, H = 168, L = 30, R = 12, T = 14, B = 26;
     var data = weeks();
+    if (!data.length) return '<div class="empty">暂无趋势数据</div>';
     var iw = W - L - R, ih = H - T - B;
     var y = function (v) { return T + ih - (v - 40) / 50 * ih; };
     var span = Math.max(1, data.length - 1);   /* 单元素数据时避免除零产生 NaN */

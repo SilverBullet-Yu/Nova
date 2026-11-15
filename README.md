@@ -219,10 +219,9 @@ npm run build:cloudbase   # 产出 .deploy/cloudbase-functions/nova
 | POST | `/api/replan/confirm` | 确认采纳含「放弃」项的重排（`{ result }`，L4 经确认才生效） |
 | POST | `/api/replan/undo` | 撤销重排 |
 | POST | `/api/attribute` | 偏差归因 |
-| POST | `/api/sessions` | 打卡上报（按 `opId` 幂等） |
-| GET | `/api/sync?since=N` | 增量拉取 |
-| POST | `/api/sync/ops` | 批量上行（单批 ≤ 200） |
-| GET | `/api/reports/weekly` | 周报 |
+| POST | `/api/sync/ops` | 批量上行（单批 ≤ 200；打卡 / 执行记录也经此上行） |
+
+> 2026-11-15 简化批下线：`POST /api/sessions`（打卡统一走 `/api/sync/ops`）、`GET /api/sync?since=N`（op 日志只写不读，增量拉取撤除）、`GET /api/reports/weekly`（周报由前端本地渲染）。三者返回 404。
 
 错误统一返回 `{ error: { code, message } }`。
 

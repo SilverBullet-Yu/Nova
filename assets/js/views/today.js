@@ -26,22 +26,13 @@ window.ZX = window.ZX || {};
   }
 
   /* Stage C-1：计划 / 已投入 / 达成率改为视图层口径（过滤 skipped），
-     核心派生函数留在 state.js 不动；exec.js 未加载时退回原口径。 */
+     统一取自 flows/exec 的 metrics（与对话页 KPI 同一来源） */
   function metrics() {
-    var S = ZX.state;
-    if (ZX.flows && ZX.flows.exec && ZX.flows.exec.metrics) return ZX.flows.exec.metrics();
-    return {
-      planned: S.plannedMin(), worked: S.workedMin(), remain: S.remainMin(),
-      rate: S.rate(),
-      done: S.tasks.filter(function (t) { return t.done; }).length,
-      total: S.tasks.length, skipped: 0, backfill: 0
-    };
+    return ZX.flows.exec.metrics();
   }
 
   function activeTasks() {
-    var S = ZX.state;
-    if (ZX.flows && ZX.flows.exec && ZX.flows.exec.activeTasks) return ZX.flows.exec.activeTasks();
-    return S.tasks.filter(function (t) { return !t.skipped; });
+    return ZX.flows.exec.activeTasks();
   }
 
   function today() {

@@ -38,7 +38,6 @@ window.ZX = window.ZX || {};
   function okFeas(r) { return !!(r && typeof r.R === 'number' && typeof r.T === 'number' && r.verdict); }
   function okReplan(r) { return !!(r && Array.isArray(r.strategies) && Array.isArray(r.diff)); }
   function okUndo(r) { return !!(r && Array.isArray(r.tasks)); }
-  function okAttr(r) { return !!(r && typeof r.type === 'string'); }
   function okSched(r) { return !!(r && Array.isArray(r.blocks)); }
 
   ZX.engine = {
@@ -84,16 +83,6 @@ window.ZX = window.ZX || {};
         return localUndo(snapshot);
       });
     },
-    attribute: function (input) {
-      return ZX.api.attribute(input).then(function (r) {
-        if (!okAttr(r)) { ZX.engine.source = 'local'; return localAttribute(input); }
-        ZX.engine.source = 'backend';
-        return r;
-      }, function () {
-        ZX.engine.source = 'local';
-        return localAttribute(input);
-      });
-    },
     schedule: function (input) {
       return ZX.api.schedule(input).then(function (r) {
         if (!okSched(r)) { ZX.engine.source = 'local'; return localSchedule(input); }
@@ -105,12 +94,11 @@ window.ZX = window.ZX || {};
       });
     },
 
-    /* 同步入口：本地确定性纯函数，与后端同语义（渲染路径使用，避免 UI 抖动） */
+    /* 同步入口：本地确定性纯函数，与后端同语义（渲染路径使用，避免 UI 抖动）。
+       attribute / schedule 的消费面（执行记录后的归因、目标生效后的排程）
+       都由前端在动作当下调用：归因走本地产物即时出结果，排程走后端优先。 */
     feasibilityNow: function (input) { return localFeasibility(input); },
-    replanNow: function (input) { return localReplan(input); },
-    undoNow: function (snapshot) { return localUndo(snapshot); },
     attributeNow: function (input) { return localAttribute(input); },
-    scheduleNow: function (input) { return localSchedule(input); },
 
     source: 'local'
   };

@@ -144,9 +144,7 @@ window.ZX = window.ZX || {};
        与演示日期（如 11.14 周六）无关，直接消费会造成高亮与日期眉标矛盾 */
     var dow = U.todayDow();
     data.forEach(function (d) { d.today = d.d === dow; });
-    var P = ZX.flows && ZX.flows.planedit;
-    if (!P || !P.weekDeltas) return data;
-    var deltas = P.weekDeltas() || {};
+    var deltas = ZX.flows.planedit.weekDeltas() || {};
     return data.map(function (d) {
       var delta = U.num(deltas[d.d], 0);
       if (!delta) return d;
@@ -159,18 +157,15 @@ window.ZX = window.ZX || {};
     });
   }
 
-  /* 本周日程块（Stage C-2）：flows/planedit.js 未加载时静默省略 */
+  /* 本周日程块（Stage C-2） */
   function boardHtml() {
-    var P = ZX.flows && ZX.flows.planedit;
-    return (P && P.board) ? P.board() : '';
+    return ZX.flows.planedit.board();
   }
 
   function chartNote() {
-    var P = ZX.flows && ZX.flows.planedit;
-    if (!P || !P.movedCount) return '';
-    var n = P.movedCount();
+    var n = ZX.flows.planedit.movedCount();
     if (!n) return '';
-    var lk = P.lockedCount ? P.lockedCount() : 0;
+    var lk = ZX.flows.planedit.lockedCount ? ZX.flows.planedit.lockedCount() : 0;
     return '<div class="sc2-chart-note"><span>含手工改期 ' + n + ' 项</span>' +
       (lk ? '<span>已锁定 ' + lk + ' 项</span>' : '') + '</div>';
   }

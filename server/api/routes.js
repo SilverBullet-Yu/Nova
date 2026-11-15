@@ -197,16 +197,6 @@ function createRouter(store, auth) {
     });
   }
 
-  /* ── POST /api/sessions ── */
-  function sessionsRoute(body, userId) {
-    const b = needObject(body);
-    needString(b.opId, 'opId');
-    needString(b.taskId, 'taskId');
-    needNumber(b.durationMin, 'durationMin', { min: 0 });
-    needNumber(b.completion, 'completion', { min: 0, max: 1 });
-    return store.recordSession(userId, b);
-  }
-
   /* ── POST /api/sync/ops ── */
   function syncOpsRoute(body, userId) {
     const b = needObject(body);
@@ -232,58 +222,16 @@ function createRouter(store, auth) {
     return store.applyOps(userId, ops);
   }
 
-  /* ── GET /api/sync?since=N ── */
-  function syncRoute(query, userId) {
-    const raw = query.get('since');
-    let since = 0;
-    if (raw !== null && raw !== undefined && raw !== '') {
-      if (!/^-?\d+$/.test(String(raw))) throw new ApiError('E1001', 'since 必须是非负整数');
-      since = parseInt(String(raw), 10);
-      if (since < 0) throw new ApiError('E1001', 'since 必须是非负整数');
-    }
-    const limitRaw = query.get('limit');
-    let limit = store.MAX_SYNC_PAGE;
-    if (limitRaw !== null && limitRaw !== undefined && limitRaw !== '') {
-      if (!/^\d+$/.test(String(limitRaw))) throw new ApiError('E1001', 'limit 必须是非负整数');
-      limit = Math.min(parseInt(String(limitRaw), 10), store.MAX_SYNC_PAGE);
-    }
-    return store.getOpsSince(userId, since, limit);
-  }
-
-  /* ── GET /api/reports/weekly ── */
-  function weeklyReport(userId) {
-    const s = store.getModel(userId);
-    const ws = s.weekStats || {};
-    const kpis = ws.kpis || {};
-    return {
-      week: (s.week || []).map((d) => ({
-        d: d.d,
-        segs: d.segs,
-        buf: d.buf,
-        total: d.total,
-        today: d.today === true
-      })),
-      achievement: kpis.achievementRate,
-      effectiveHours: kpis.effectiveHours,
-      subjectMix: ws.subjectMix || {},
-      attribution: ws.attribution || {},
-      actions: ws.actions || []
-    };
-  }
-
   const routes = {
     'GET /api/health': function () { return health(); },
     'POST /api/auth/session': function () { return authSessionRoute(); },
     'GET /api/state': function (ctx) { return state(ctx.userId); },
-    'GET /api/sync': function (ctx) { return syncRoute(ctx.query, ctx.userId); },
-    'GET /api/reports/weekly': function (ctx) { return weeklyReport(ctx.userId); },
     'POST /api/feasibility': function (ctx) { return feasibilityRoute(ctx.body); },
     'POST /api/schedule': function (ctx) { return scheduleRoute(ctx.body); },
     'POST /api/replan': function (ctx) { return replanRoute(ctx.body, ctx.userId); },
     'POST /api/replan/confirm': function (ctx) { return replanConfirmRoute(ctx.body, ctx.userId); },
     'POST /api/replan/undo': function (ctx) { return undoRoute(ctx.body); },
     'POST /api/attribute': function (ctx) { return attributeRoute(ctx.body); },
-    'POST /api/sessions': function (ctx) { return sessionsRoute(ctx.body, ctx.userId); },
     'POST /api/sync/ops': function (ctx) { return syncOpsRoute(ctx.body, ctx.userId); }
   };
 

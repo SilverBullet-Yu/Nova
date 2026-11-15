@@ -10,17 +10,13 @@ window.ZX = window.ZX || {};
 
   var DAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
   var SLOTS = ['08–12', '12–18', '18–22', '22–24'];
-  var DEF_GRID = [
-    [1, 1, 1, 0], [1, 0, 1, 0], [1, 1, 1, 0], [0, 0, 1, 0],
-    [1, 0, 1, 0], [1, 1, 1, 0], [1, 1, 1, 0]
-  ];
 
   function me() {
     var S = ZX.state;
-    var SET = ZX.flows && ZX.flows.settings;
-    var grid = SET ? SET.grid() : DEF_GRID;
-    var sum = SET ? SET.summaryHtml() : '已选 17 段 · 可用窗口 76 h';
-    var trash = SET ? SET.restoreInfo() : null;
+    var SET = ZX.flows.settings;
+    var grid = SET.grid();
+    var sum = SET.summaryHtml();
+    var trash = SET.restoreInfo();
 
     return '<div class="wrap">' +
       '<div class="vhead"><div>' +
@@ -66,7 +62,7 @@ window.ZX = window.ZX || {};
         swRow('每日提醒', '19:00 · 今日 ' + S.tasks.filter(function (t) { return !t.done && !t.skipped; }).length + ' 项', 'daily') +
         swRow('周报', '周日 20:00 · 最少打扰', 'weekly') +
         swRow('进度预警', '必须附带补救方案', 'alert') +
-        swRow('中断挽救', '连续 ' + (ZX.flows && ZX.flows.rescue && ZX.flows.rescue.THRESHOLD ? ZX.flows.rescue.THRESHOLD : 3) + ' 天无记录时触发', 'rescue') +
+        swRow('中断挽救', '连续 ' + ZX.flows.rescue.THRESHOLD + ' 天无记录时触发', 'rescue') +
         '<div class="sw"><div><span class="n">夜间静默</span><small>22:00–08:00 · 服务端裁决</small></div><span class="spacer"></span><span class="tg on lock" aria-hidden="true"></span></div>' +
       '</div></div>' +
 

@@ -158,11 +158,7 @@ window.ZX = window.ZX || {};
     /* Stage D */
     if (act === 'avail') { ZX.flows.settings.toggle(b.dataset.day, b.dataset.slot); return; }
     if (act === 'avail-bulk') { ZX.flows.settings.bulk(b.dataset.kind); return; }
-    if (act === 'export') {
-      if (ZX.flows && ZX.flows.settings) ZX.flows.settings.exportCsv();
-      else ZX.assistant.exportPlan();
-      return;
-    }
+    if (act === 'export') { ZX.flows.settings.exportCsv(); return; }
     if (act === 'wipe') { ZX.flows.settings.confirmWipe(); return; }
     if (act === 'trash-restore') { ZX.flows.settings.restore(); return; }
     if (act === 'font') { ZX.flows.settings.setFont(b.dataset.v); return; }
@@ -241,13 +237,13 @@ window.ZX = window.ZX || {};
     var greet = h < 11 ? '上午好' : h < 18 ? '下午好' : '晚上好';
     var done = S.tasks.filter(function (t) { return t.done; });
     var todo = S.tasks.filter(function (t) { return !t.done && !t.skipped; });
-    /* 剩余量口径与今日页 KPI 同源（exec.metrics 过滤跳过项）；flows 未加载时退回原派生函数 */
-    var m = (ZX.flows.exec && ZX.flows.exec.metrics) ? ZX.flows.exec.metrics() : null;
+    /* 剩余量口径与今日页 KPI 同源（exec.metrics 过滤跳过项） */
+    var m = ZX.flows.exec.metrics();
     var p1 = greet + '，' + U.esc(S.user.name) + '。';
     if (done.length) {
       p1 += U.esc(done[0].s) + '「' + U.esc(done[0].title) + '」已记录 <b>' + U.hm(done[0].actual || done[0].est) + '</b>。';
     }
-    p1 += '今天还剩 <b>' + todo.length + '</b> 项、<b>' + U.hm(m ? m.remain : S.remainMin()) + '</b>' +
+    p1 += '今天还剩 <b>' + todo.length + '</b> 项、<b>' + U.hm(m.remain) + '</b>' +
       (S.buffer && S.buffer.time ? '，' + U.esc(S.buffer.time) + ' 留了一个弹性位' : '') + '。';
     var heavy = null;
     todo.forEach(function (t) { if (!heavy || U.num(t.weight, 0) > U.num(heavy.weight, 0)) heavy = t; });

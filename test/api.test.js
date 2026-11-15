@@ -183,31 +183,22 @@ test('POST /api/attribute 返回归因结果', async () => {
   assert.equal(typeof r.body.evidence, 'object');
 });
 
-test('GET /api/reports/weekly 返回周报', async () => {
-  const r = await call('GET', '/api/reports/weekly', undefined, userA.token);
-  assert.equal(r.status, 200);
-  assert.deepEqual(Object.keys(r.body).sort(), [
-    'achievement', 'actions', 'attribution', 'effectiveHours', 'subjectMix', 'week'
-  ]);
-  assert.equal(r.body.week.length, 7);
-  assert.equal(r.body.achievement, 68);
-  assert.equal(r.body.effectiveHours, 11.2);
+/* ── 下线端点（简化批撤除）：一律 404 / E2001 ─────────────────────────── */
+
+test('下线端点：sessions / sync 拉取 / weekly 周报返回 404', async () => {
+  const cases = [
+    ['POST', '/api/sessions', { opId: 'x', taskId: 't1', durationMin: 1, completion: 1 }],
+    ['GET', '/api/sync?since=0', undefined],
+    ['GET', '/api/reports/weekly', undefined]
+  ];
+  for (const c of cases) {
+    const r = await call(c[0], c[1], c[2], userA.token);
+    assert.equal(r.status, 404, c[0] + ' ' + c[1]);
+    assert.equal(r.body.error.code, 'E2001');
+  }
 });
 
 /* ── 幂等 ─────────────────────────────────────────────────────────────── */
-
-test('POST /api/sessions 幂等：同 opId 重复提交返回首次 serverSeq', async () => {
-  const payload = { opId: 'op-session-1', taskId: 't2', durationMin: 90, completion: 1 };
-  const a = await call('POST', '/api/sessions', payload, userA.token);
-  assert.equal(a.status, 200);
-  assert.equal(a.body.ok, true);
-  assert.equal(typeof a.body.serverSeq, 'number');
-
-  const b = await call('POST', '/api/sessions', payload, userA.token);
-  assert.equal(b.status, 200);
-  assert.equal(b.body.ok, true);
-  assert.equal(b.body.serverSeq, a.body.serverSeq);
-});
 
 test('GET /api/state 回读 session：sync 上行的记录以完整会话对象返回', async () => {
   const sess = { id: 's_readback_1', taskId: 't2', startAt: 1000, endAt: 2000, minutes: 30, completion: 100, status: 'backfill', feel: null, isBackfill: true };
@@ -238,40 +229,6 @@ test('POST /api/sync/ops 幂等：同 opId 重复提交不产生新 seq', async 
   assert.equal(b.status, 200);
   assert.deepEqual(b.body.accepted, ['op-sync-1']);
   assert.equal(b.body.serverSeq, seqA);
-
-  /* 同一 opId 只在同步流里出现一次 */
-  const s = await call('GET', '/api/sync?since=0', undefined, userA.token);
-  const hits = s.body.ops.filter((o) => o.opId === 'op-sync-1');
-  assert.equal(hits.length, 1);
-});
-
-test('GET /api/sync?since=N 按 seq 升序返回且 hasMore 正确', async () => {
-  const ops = [
-    { opId: 'op-seq-1', entity: 'task', entityId: 't4', field: 'status', value: 'scheduled', clientTs: 200 },
-    { opId: 'op-seq-2', entity: 'task', entityId: 't4', field: 'status', value: 'running', clientTs: 201 },
-    { opId: 'op-seq-3', entity: 'task', entityId: 't4', field: 'status', value: 'done', clientTs: 202 }
-  ];
-  const a = await call('POST', '/api/sync/ops', { ops: ops }, userA.token);
-  assert.equal(a.status, 200);
-  assert.deepEqual(a.body.accepted, ['op-seq-1', 'op-seq-2', 'op-seq-3']);
-
-  const all = await call('GET', '/api/sync?since=0', undefined, userA.token);
-  assert.equal(all.status, 200);
-  const seqs = all.body.ops.map((o) => o.serverSeq);
-  assert.deepEqual(seqs, seqs.slice().sort((x, y) => x - y));
-  assert.equal(all.body.hasMore, false);
-
-  /* since 之后只返回更新的 */
-  const tail = await call('GET', '/api/sync?since=' + seqs[seqs.length - 2], undefined, userA.token);
-  assert.equal(tail.body.ops.length, 1);
-  assert.equal(tail.body.ops[0].opId, 'op-seq-3');
-  assert.equal(tail.body.serverSeq, seqs[seqs.length - 1]);
-  assert.equal(tail.body.hasMore, false);
-
-  /* 分页 */
-  const page = await call('GET', '/api/sync?since=0&limit=2', undefined, userA.token);
-  assert.equal(page.body.ops.length, 2);
-  assert.equal(page.body.hasMore, true);
 });
 
 /* ── 字段级合并规则 ───────────────────────────────────────────────────── */
@@ -342,18 +299,11 @@ test('错误：单批上行超过 200 条返回 E4002 / 400', async () => {
   assert.equal(r.body.error.code, 'E4002');
 });
 
-test('错误：非法 since 返回 E1001', async () => {
-  const r = await call('GET', '/api/sync?since=abc', undefined, userA.token);
-  assert.equal(r.status, 400);
-  assert.equal(r.body.error.code, 'E1001');
-});
-
 /* ── 鉴权：未带凭证 / 伪造凭证 ───────────────────────────────────────── */
 
 test('鉴权：未带凭证访问业务接口返回 401 / E4010', async () => {
   const cases = [
     ['GET', '/api/state', undefined],
-    ['GET', '/api/sync?since=0', undefined],
     ['POST', '/api/replan', { tasks: [], week: [] }],
     ['POST', '/api/sync/ops', { ops: [] }]
   ];
@@ -388,12 +338,7 @@ test('越权：只能读写自己的分区，伪造 userId 被拒', async () => 
   }, userA.token);
   assert.equal(w.status, 200);
 
-  /* 读：A 能看到，B 看不到 */
-  const aOps = await call('GET', '/api/sync?since=0', undefined, userA.token);
-  const bOps = await call('GET', '/api/sync?since=0', undefined, userB.token);
-  assert.ok(aOps.body.ops.some((o) => o.opId === 'iso-a-1'));
-  assert.ok(!bOps.body.ops.some((o) => o.opId === 'iso-a-1'));
-
+  /* 读：A 的分区可见该写入，B 的分区保持种子原值 */
   const aState = await call('GET', '/api/state', undefined, userA.token);
   const bState = await call('GET', '/api/state', undefined, userB.token);
   assert.equal(aState.body.seed.tasks.find((t) => t.id === 't2').title, 'A 专属标题');

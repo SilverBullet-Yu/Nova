@@ -85,39 +85,22 @@ window.ZX = window.ZX || {};
     var S = ZX.state;
     var t = S.tasks.filter(function (x) { return x.id === id; })[0];
     if (!t) return;
-    var exec = ZX.flows && ZX.flows.exec;
+    var exec = ZX.flows.exec;
 
     /* 结束（有计时）→ 记录弹层：完成度 / 状态；按预估记录 → 直接 100% */
     if (!useEst && S.running === id) {
-      if (exec && exec.openRecord) { exec.openRecord(id); return; }
+      exec.openRecord(id);
+      return;
     }
 
     var mins = t.est;
     var startAt = null;
     if (S.running === id && !useEst) {
-      mins = exec && exec.elapsedMin ? exec.elapsedMin() : Math.max(1, Math.floor(elapsedMs() / 60000));
+      mins = exec.elapsedMin();
       startAt = S.timerStart;
     }
 
-    if (exec && exec.commitRecord) {
-      exec.commitRecord(id, mins, 100, '', startAt || (Date.now() - mins * 60000), Date.now());
-      return;
-    }
-
-    /* 兜底：flows/exec.js 未加载时保持既有行为 */
-    t.done = true;
-    t.actual = mins;
-    S.running = null;
-    S.timerStart = null;
-    ZX.render();
-    ZX.api.queueOp({
-      entity: 'task', entityId: t.id, field: 'done',
-      value: { done: true, actual: mins, est: t.est }
-    });
-    var left = S.tasks.filter(function (x) { return !x.done; }).length;
-    say('<img class="msg-state state-done" src="assets/img/mascot-v4-done.svg" width="32" height="28" alt="" />' +
-      '<p>已记录：' + U.esc(t.title) + '，' + U.hm(mins) + '。今日达成率 <b class="ac">' + S.rate() + '%</b>' +
-      (left ? '，还剩 ' + left + ' 项。' : '。') + '</p>', '执行 · 12ms');
+    exec.commitRecord(id, mins, 100, '', startAt || (Date.now() - mins * 60000), Date.now());
   }
 
   function bufferWarn() {
@@ -231,110 +214,77 @@ window.ZX = window.ZX || {};
     var appliedLevel = 0;
     strategies.forEach(function (s) { if (s.applied && s.level > appliedLevel) appliedLevel = s.level; });
 
-    var box = say('<p>收到。先归因，再走四级流水线；任何一级通过防雪崩校验就停，不追求把计划排满。</p>' +
-      '<div class="steps" id="rps">' +
-        [['拉取未完成项与未来 7 天排程'], ['归因判定'], ['L1 顺延'], ['校验负载与弹性位'], ['L2 压缩 · 复核']]
-          .map(function (s, i) { return '<div class="step" data-i="' + i + '"><span class="sk"></span><span class="st">' + s[0] + '</span><span class="sv"></span></div>'; }).join('') +
-      '</div>', '规划引擎 v1.4 · 30ms');
+    /* L4 只出建议：未确认前不落本地、不入队同步；确认入口见 confirmAbandonFlow */
+    if (!needsConfirm) {
+      S.replanned = true;
+      /* 快照：契约形状 { tasks, week, timestamp }，撤销时反向应用、不重算 */
+      S.snapshot = {
+        tasks: U.clone(S.tasks),
+        week: U.clone(S.week),
+        timestamp: Date.now()
+      };
+      /* 压缩项按引擎 diff 落到本地任务上（仅压缩类改工时；顺延不改本地任务） */
+      S.tasks = S.tasks.map(function (t) {
+        var hit = compressed.find(function (d) { return d.taskId === t.id; });
+        if (hit && !t.done) {
+          return Object.assign({}, t, { est: parseInt(hit.to, 10) || t.est, compressed: true });
+        }
+        return t;
+      });
 
-    var step = function (i, val, bad) {
-      var el = box.querySelector('.step[data-i="' + i + '"]');
-      if (!el) return;
-      el.classList.add(bad ? 'bad' : 'done');
-      el.querySelector('.sv').textContent = val;
-      chatEl().scrollTop = chatEl().scrollHeight;
-    };
+      ZX.api.queueOp({
+        entity: 'plan', entityId: 'replan', field: 'applied',
+        value: { loadDelta: loadDelta, appliedLevel: appliedLevel, diff: diff }
+      });
+    } else {
+      /* 暂存待确认结果，避免用户确认时重算导致结果漂移 */
+      S.pendingReplan = res;
+    }
 
-    var undoCount = deferred.length;
-    var cmpCount = compressed.length;
-    var abnCount = abandoned.length;
-    /* 步骤文案口径与今日页 KPI 同源（exec.metrics 过滤跳过项），flows 未加载时退回原派生函数 */
-    var m0 = (ZX.flows.exec && ZX.flows.exec.metrics) ? ZX.flows.exec.metrics()
-      : { total: S.tasks.filter(function (t) { return !t.done; }).length, remain: S.remainMin() };
+    var tagText = needsConfirm ? 'L4 需确认'
+      : appliedLevel === 2 ? 'L1 回退 → L2 生效'
+      : appliedLevel === 1 ? 'L1 顺延生效'
+      : '未通过校验';
+    var tagCls = (appliedLevel && !needsConfirm) ? 'ac' : 'warn';
 
-    (async function () {
-      await U.sleep(300); step(0, m0.total + ' 项 · ' + U.hm(m0.remain));
-      await U.sleep(320); step(1, '计划过载 40%');
-      await U.sleep(340);
-      step(2, undoCount + ' 项 → 未来 7 天空闲时段');
-      await U.sleep(320);
-      /* L1 校验：增幅由引擎给出，超限即回退 */
-      if (l1Growth !== null && !sL1.applied) step(3, '+' + l1Growth + '% ✕ 超 20%', true);
-      else step(3, '+' + (l1Growth === null ? '0' : l1Growth) + '% ✓');
-      await U.sleep(340);
-      step(4, sL2 ? (sL2.applied ? '+' + (l2Growth === null ? U.pct(loadDelta) : l2Growth) + '% ✓' : '未通过') : '未评估（L1 已生效）');
+    /* Stage C-2：顺延 / 压缩行右侧挂「否决」，逐条回滚；放弃行不提供（需整单确认） */
+    var diffHtml = diff.map(function (d, idx) {
+      var cls = d.op === 'compress' ? 'cp' : 'mv';
+      var label = d.op === 'compress' ? '压缩' : d.op === 'defer' ? '顺延' : d.op === 'abandon' ? '放弃' : d.op;
+      var detail = d.op === 'compress'
+        ? d.from + ' → ' + d.to + ' min · degraded'
+        : (d.detail || (d.from + ' → ' + d.to));
+      var veto = (d.op === 'compress' || d.op === 'defer')
+        ? '<button type="button" class="btn sc2-veto" data-veto="' + U.esc(d.taskId) + '" data-vop="' + d.op + '"' +
+          ' aria-label="否决：' + U.esc(label + ' ' + (d.subject || '')) + '">否决</button>'
+        : '';
+      return '<div class="diff-line sc2-diff" data-diff="' + idx + '"><span class="s ' + cls + '">' + label + '</span>' +
+        '<span class="n">' + U.esc(d.subject || '') + '</span>' +
+        '<span class="d">' + U.esc(detail) + '</span>' + veto + '</div>';
+    }).join('');
 
-      /* L4 只出建议：未确认前不落本地、不入队同步；确认入口见 confirmAbandonFlow */
-      if (!needsConfirm) {
-        S.replanned = true;
-        /* 快照：契约形状 { tasks, week, timestamp }，撤销时反向应用、不重算 */
-        S.snapshot = {
-          tasks: U.clone(S.tasks),
-          week: U.clone(S.week),
-          timestamp: Date.now()
-        };
-        /* 压缩项按引擎 diff 落到本地任务上（仅压缩类改工时；顺延不改本地任务） */
-        S.tasks = S.tasks.map(function (t) {
-          var hit = compressed.find(function (d) { return d.taskId === t.id; });
-          if (hit && !t.done) {
-            return Object.assign({}, t, { est: parseInt(hit.to, 10) || t.est, compressed: true });
-          }
-          return t;
-        });
+    var guardNote = [];
+    if (sL1 && sL1.applied) guardNote.push('L1 顺延到未来 7 天容量内的空闲时段，负载 +' + (l1Growth === null ? U.pct(loadDelta) : l1Growth) + '%，未超单次上限 20%，直接生效');
+    else guardNote.push('L1 顺延后负载 +' + (l1Growth === null ? U.pct(loadDelta) : l1Growth) + '%，超过单次上限 20%，已回退该级');
+    if (sL2 && sL2.applied) guardNote.push('L2 按容量溢出压缩低权重项后复核通过（+' + (l2Growth === null ? U.pct(loadDelta) : l2Growth) + '%），因此未进入替代与放弃');
+    else if (sL2) guardNote.push('L2 压缩后复核未通过，已进入后续级别');
+    if (needsConfirm) guardNote.push('L4 放弃只是建议，确认后才会落库');
 
-        ZX.api.queueOp({
-          entity: 'plan', entityId: 'replan', field: 'applied',
-          value: { loadDelta: loadDelta, appliedLevel: appliedLevel, diff: diff }
-        });
-      } else {
-        /* 暂存待确认结果，避免用户确认时重算导致结果漂移 */
-        S.pendingReplan = res;
-      }
+    say('<p>收到。先归因，再走四级流水线；任何一级通过防雪崩校验就停，不追求把计划排满。</p>' +
+      '<div class="ecard">' +
+      '<div class="ecard-h"><b>' + (needsConfirm ? '重排待确认' : '重排完成') + '</b><span class="tag ' + tagCls + '">' + tagText + '</span></div>' +
+      '<div class="ecard-b">' +
+        '<div class="erow"><span class="k">变更</span><span class="why">延期 ' + deferred.length + ' · 压缩 ' + compressed.length + ' · 放弃 ' + abandoned.length + '</span><span class="v">未来 7 天 ' + (loadDelta >= 0 ? '+' : '') + U.pct(loadDelta) + '</span></div>' +
+        (lockCount ? '<div class="erow"><span class="k">锁定</span><span class="why">锁定任务是硬约束，不参与顺延 / 压缩 / 替代 / 放弃</span><span class="v ac">' + lockCount + ' 个锁定块保持原样</span></div>' : '') +
+        '<div class="erow"><span class="k">弹性位</span><span class="why">每日 60 min 未被清空</span><span class="v ac">' + (guards.bufferPreserved === false ? '已侵占' : '1 / 1 保留') + '</span></div>' +
+        diffHtml +
+        '<div class="ecard-f"><span class="note">' + guardNote.join('；') + '。' + (lockCount ? '锁定的 ' + lockCount + ' 块保持原工时与原落点。' : '') + '</span></div>' +
+        (needsConfirm
+          ? '<div class="ecard-f"><span class="note">本轮未落库：回复「确认放弃」后才会应用并同步。</span></div>'
+          : '<div class="ecard-f"><button class="btn" data-act="undo">撤销本次重排</button><span class="note mono">snapshot 已留存</span></div>') +
+      '</div></div>', '重排 · 412ms');
 
-      var tagText = needsConfirm ? 'L4 需确认'
-        : appliedLevel === 2 ? 'L1 回退 → L2 生效'
-        : appliedLevel === 1 ? 'L1 顺延生效'
-        : '未通过校验';
-      var tagCls = (appliedLevel && !needsConfirm) ? 'ac' : 'warn';
-
-      /* Stage C-2：顺延 / 压缩行右侧挂「否决」，逐条回滚；放弃行不提供（需整单确认） */
-      var diffHtml = diff.map(function (d, idx) {
-        var cls = d.op === 'compress' ? 'cp' : 'mv';
-        var label = d.op === 'compress' ? '压缩' : d.op === 'defer' ? '顺延' : d.op === 'abandon' ? '放弃' : d.op;
-        var detail = d.op === 'compress'
-          ? d.from + ' → ' + d.to + ' min · degraded'
-          : (d.detail || (d.from + ' → ' + d.to));
-        var veto = (d.op === 'compress' || d.op === 'defer')
-          ? '<button type="button" class="btn sc2-veto" data-veto="' + U.esc(d.taskId) + '" data-vop="' + d.op + '"' +
-            ' aria-label="否决：' + U.esc(label + ' ' + (d.subject || '')) + '">否决</button>'
-          : '';
-        return '<div class="diff-line sc2-diff" data-diff="' + idx + '"><span class="s ' + cls + '">' + label + '</span>' +
-          '<span class="n">' + U.esc(d.subject || '') + '</span>' +
-          '<span class="d">' + U.esc(detail) + '</span>' + veto + '</div>';
-      }).join('');
-
-      var guardNote = [];
-      if (sL1 && sL1.applied) guardNote.push('L1 顺延到未来 7 天容量内的空闲时段，负载 +' + (l1Growth === null ? U.pct(loadDelta) : l1Growth) + '%，未超单次上限 20%，直接生效');
-      else guardNote.push('L1 顺延后负载 +' + (l1Growth === null ? U.pct(loadDelta) : l1Growth) + '%，超过单次上限 20%，已回退该级');
-      if (sL2 && sL2.applied) guardNote.push('L2 按容量溢出压缩低权重项后复核通过（+' + (l2Growth === null ? U.pct(loadDelta) : l2Growth) + '%），因此未进入替代与放弃');
-      else if (sL2) guardNote.push('L2 压缩后复核未通过，已进入后续级别');
-      if (needsConfirm) guardNote.push('L4 放弃只是建议，确认后才会落库');
-
-      say('<div class="ecard">' +
-        '<div class="ecard-h"><b>' + (needsConfirm ? '重排待确认' : '重排完成') + '</b><span class="tag ' + tagCls + '">' + tagText + '</span></div>' +
-        '<div class="ecard-b">' +
-          '<div class="erow"><span class="k">变更</span><span class="why">延期 ' + deferred.length + ' · 压缩 ' + compressed.length + ' · 放弃 ' + abandoned.length + '</span><span class="v">未来 7 天 ' + (loadDelta >= 0 ? '+' : '') + U.pct(loadDelta) + '</span></div>' +
-          (lockCount ? '<div class="erow"><span class="k">锁定</span><span class="why">锁定任务是硬约束，不参与顺延 / 压缩 / 替代 / 放弃</span><span class="v ac">' + lockCount + ' 个锁定块保持原样</span></div>' : '') +
-          '<div class="erow"><span class="k">弹性位</span><span class="why">每日 60 min 未被清空</span><span class="v ac">' + (guards.bufferPreserved === false ? '已侵占' : '1 / 1 保留') + '</span></div>' +
-          diffHtml +
-          '<div class="ecard-f"><span class="note">' + guardNote.join('；') + '。' + (lockCount ? '锁定的 ' + lockCount + ' 块保持原工时与原落点。' : '') + '</span></div>' +
-          (needsConfirm
-            ? '<div class="ecard-f"><span class="note">本轮未落库：回复「确认放弃」后才会应用并同步。</span></div>'
-            : '<div class="ecard-f"><button class="btn" data-act="undo">撤销本次重排</button><span class="note mono">snapshot 已留存</span></div>') +
-        '</div></div>', '重排 · 412ms');
-
-      ZX.setTab('plan');
-    })();
+    ZX.setTab('plan');
   }
 
   /* ---------- flow：确认 L4 放弃（确认后才落库） ---------- */
@@ -468,7 +418,6 @@ window.ZX = window.ZX || {};
   function weeklyFlow() {
     say('<p>第 ' + U.isoWeek() + ' 周周报已生成。按「结论 / 依据 / 已执行的动作」三段式，最后一条不是建议，是已经排进下周的 block。</p>', '洞察 · 周报');
     ZX.setTab('data');
-    return U.sleep(120);
   }
 
   /* ---------- flow：降载建议 ----------
@@ -486,9 +435,8 @@ window.ZX = window.ZX || {};
     var S = ZX.state;
     var pick = lowestWeightTask();
     var est = pick ? U.num(pick.est, 0) : 0;
-    /* 计划口径与今日页 KPI 同源（exec.metrics 过滤跳过项），flows 未加载时退回原派生函数 */
-    var mT = (ZX.flows.exec && ZX.flows.exec.metrics) ? ZX.flows.exec.metrics() : { planned: S.plannedMin() };
-    var before = mT.planned;
+    /* 计划口径与今日页 KPI 同源（exec.metrics 过滤跳过项） */
+    var before = ZX.flows.exec.metrics().planned;
     var after = before - est;
     var keepN = S.tasks.filter(function (x) { return !x.done && !x.skipped && (!pick || x.id !== pick.id); }).length;
     say('<p>今天不追加任务。状态的波动是可预期的，系统不该用计划去对抗它。</p>' +
@@ -507,8 +455,8 @@ window.ZX = window.ZX || {};
   function todayFlow() {
     var S = ZX.state;
     var todo = S.tasks.filter(function (t) { return !t.done && !t.skipped; });
-    /* 剩余量口径与今日页 KPI 同源（exec.metrics 过滤跳过项），flows 未加载时退回原派生函数 */
-    var mD = (ZX.flows.exec && ZX.flows.exec.metrics) ? ZX.flows.exec.metrics() : { remain: S.remainMin() };
+    /* 剩余量口径与今日页 KPI 同源（exec.metrics 过滤跳过项） */
+    var mD = ZX.flows.exec.metrics();
     var rows = todo.map(function (t) {
       return '<div class="erow"><span class="k">' + t.time.split('–')[0] + '</span><span class="why" style="flex:1;color:var(--txt2)">' + t.s + ' · ' + U.esc(t.title) + '</span><span class="v">' + U.hm(t.est) + '</span></div>';
     }).join('');
@@ -533,7 +481,7 @@ window.ZX = window.ZX || {};
   /* ---------- flow：兜底 ---------- */
   function fallback() {
     say('<img class="msg-state state-unknown" src="assets/img/mascot-v4-unknown.svg" width="32" height="28" alt="" />' +
-      '<p>这句话我还没接住。当前 demo 的意图识别是关键词匹配，覆盖以下六类动作：</p>' +
+      '<p>这句话我还没接住。当前 demo 的意图识别是关键词匹配，覆盖以下几类动作：</p>' +
       '<div class="ecard"><div class="ecard-b">' +
         '<div class="erow"><span class="k">查看</span><span class="why">「今天学什么」</span><span class="v">今日</span></div>' +
         '<div class="erow"><span class="k">重排</span><span class="why">「这周落下了，帮我重排」</span><span class="v">L1–L4</span></div>' +
@@ -583,13 +531,6 @@ window.ZX = window.ZX || {};
     });
   }
 
-  function exportPlan() {
-    say('<p>导出任务已提交。计划与执行记录会打包为表格，24 小时内发送到账号邮箱。</p><p style="color:var(--txt3);font-size:11px">导出是异步的：生成 zip → 对象存储 → 邮件下发，避免阻塞主链路。</p>', '导出 · 已排队');
-    ZX.api.queueOp({
-      entity: 'export', entityId: 'plan_and_records', field: 'requested', value: true
-    });
-  }
-
   ZX.assistant = {
     pushMsg: pushMsg, say: say, me: me, typing: typing,
     startTask: startTask, tickTimer: tickTimer, elapsedMs: elapsedMs, finishTask: finishTask, bufferWarn: bufferWarn,
@@ -599,7 +540,7 @@ window.ZX = window.ZX || {};
     replanFlow: replanFlow, undoReplan: undoReplan, feasibilityFlow: feasibilityFlow,
     adjustMath: adjustMath, weeklyFlow: weeklyFlow, tiredFlow: tiredFlow,
     todayFlow: todayFlow, startFlow: startFlow, fallback: fallback,
-    adoptTired: adoptTired, togglePreset: togglePreset, toggleNotif: toggleNotif, exportPlan: exportPlan
+    adoptTired: adoptTired, togglePreset: togglePreset, toggleNotif: toggleNotif
   };
 
 })(window.ZX);

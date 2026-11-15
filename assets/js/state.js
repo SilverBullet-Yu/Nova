@@ -1,8 +1,7 @@
 /* =========================================================
    诺瓦 Nova · 应用状态与派生计算
-   初始值来自 shared/data/seed.js（全局 Rhythm.seed）；
-   shared/ 尚未就位时使用下方 FALLBACK_SEED（与契约同构的本地镜像），
-   保证 file:// 双击打开时行为与视觉完全一致。
+   初始值来自 shared/data/seed.js（全局 Rhythm.seed，index.html 最先加载）。
+   种子缺失属于装配错误（文件被删或路径不对），直接抛错，不做静默替换。
    ========================================================= */
 window.ZX = window.ZX || {};
 
@@ -18,74 +17,18 @@ window.ZX = window.ZX || {};
     '政治': { c: 'var(--m-pol)' }
   };
 
-  /* 与 shared/data/seed.js 契约一致的本地镜像（仅在共享种子缺失时启用） */
-  var FALLBACK_SEED = {
-    user: { id: 'u_demo', name: '林清', tz: 'Asia/Shanghai', dailyCapMin: 300, weeklyH: 20 },
-    goal: { id: 'g_2027', name: '2027 考研 · 计算机', target: '380 分', deadline: '2027-12-25', weeks: 58 },
-    feas: { weeklyH: 20, weeks: 58, discount: 0.85, demand: 913 },
-    tasks: [
-      { id: 't1', subject: '英语', title: '阅读真题 2019 Text 3–4 精读', est: 60, time: '09:00–10:00', weight: 0.78, done: true, actual: 60 },
-      { id: 't2', subject: '数学', title: '高数 · 第 3 章 极限 40 题', est: 90, time: '10:30–12:00', weight: 0.92, done: false, why: '考频权重 0.92 · 匹配历史高效时段' },
-      { id: 't3', subject: '408', title: '数据结构 · 树与二叉树 应用', est: 75, time: '14:00–15:15', weight: 0.86, done: false },
-      { id: 't4', subject: '政治', title: '马原 第 2 章 多选 60 题', est: 45, time: '17:00–17:45', weight: 0.41, done: false }
-    ],
-    buffer: { time: '20:30–21:30', free: true },
-    week: [
-      { d: '一', segs: [['数学', 60], ['408', 45]], buf: 60, total: 105 },
-      { d: '二', segs: [['英语', 60], ['政治', 30]], buf: 60, total: 90 },
-      { d: '三', segs: [['数学', 90], ['408', 60]], buf: 60, total: 150 },
-      { d: '四', segs: [['英语', 45]], buf: 60, total: 45 },
-      { d: '五', segs: [['数学', 60], ['政治', 45]], buf: 60, total: 105 },
-      { d: '六', segs: [['408', 90], ['数学', 60]], buf: 60, total: 150 },
-      { d: '日', segs: [['数学', 90], ['408', 75], ['政治', 45], ['英语', 60]], buf: 60, total: 270, today: true }
-    ],
-    weekShift: [
-      { d: '一', segs: [['数学', 60], ['408', 45]], buf: 60, total: 105 },
-      { d: '二', segs: [['英语', 60], ['政治', 30], ['数学', 30]], buf: 60, total: 120 },
-      { d: '三', segs: [['数学', 90], ['408', 60]], buf: 60, total: 150 },
-      { d: '四', segs: [['英语', 45], ['408', 45]], buf: 60, total: 90 },
-      { d: '五', segs: [['数学', 60], ['政治', 30]], buf: 60, total: 90 },
-      { d: '六', segs: [['408', 90], ['数学', 60], ['数学', 45]], buf: 60, total: 195 },
-      { d: '日', segs: [['数学', 90], ['408', 75], ['英语', 60]], buf: 60, total: 225, today: true }
-    ],
-    notif: { daily: true, weekly: true, alert: true, rescue: true },
-    weekStats: {
-      WEEKS: [52, 61, 58, 66, 71, 74, 72, 68],
-      kpis: {
-        effectiveHours: 11.2,
-        targetHours: 15,
-        achievementRate: 68,
-        achievementDeltaPt: -6,
-        replanAdopted: 3,
-        replanTotal: 4,
-        replanRate: 75,
-        recordedDays: 5,
-        totalDays: 7
-      },
-      subjectMix: { '数学': 45, '专业课': 30, '英语': 20, '政治': 5 },
-      attribution: { '计划过载': 40, '执行中断': 35, '效率不足': 25 },
-      actions: [
-        '周日上午 08:00–10:00 固定为政治时段',
-        '周三晚弹性位扩容 30 分钟'
-      ]
-    },
-    subjectColors: {
-      '数学': 'var(--m-math)',
-      '英语': 'var(--m-en)',
-      '408': 'var(--m-408)',
-      '政治': 'var(--m-pol)'
-    }
-  };
-
-  /* shared/data/seed.js 采用 UMD 命名空间形态：Rhythm.seed = { seed: {...} }
-     同时兼容直接挂对象的老写法 */
+  /* shared/data/seed.js 采用 UMD 命名空间形态：Rhythm.seed = { seed: {...} } */
   function rawSeed() {
     var R = window.Rhythm;
-    if (!R || !R.seed) return FALLBACK_SEED;
     var cand = null;
-    if (R.seed.seed && typeof R.seed.seed === 'object') cand = R.seed.seed;
-    else if (Array.isArray(R.seed.tasks)) cand = R.seed;
-    return (cand && Array.isArray(cand.tasks)) ? cand : FALLBACK_SEED;
+    if (R && R.seed) {
+      if (R.seed.seed && typeof R.seed.seed === 'object') cand = R.seed.seed;
+      else if (Array.isArray(R.seed.tasks)) cand = R.seed;
+    }
+    if (!cand || !Array.isArray(cand.tasks)) {
+      throw new Error('种子数据缺失：shared/data/seed.js 未能加载');
+    }
+    return cand;
   }
 
   /* 任务归一：契约用 subject，视图用 s —— 两者同时保留 */
@@ -141,30 +84,25 @@ window.ZX = window.ZX || {};
 
   function normSeed(raw) {
     var r = raw || {};
+    var feas = r.feas || {};
+    var disc = (feas.discount !== undefined && feas.discount !== null) ? feas.discount : feas.disc;
     var s = {
-      user: Object.assign({}, FALLBACK_SEED.user, r.user || {}),
-      goal: Object.assign({}, FALLBACK_SEED.goal, r.goal || {}),
-      feas: Object.assign({}, FALLBACK_SEED.feas, r.feas || {}),
-      tasks: Array.isArray(r.tasks) ? r.tasks.map(normTask) : FALLBACK_SEED.tasks.map(normTask),
-      buffer: Object.assign({}, FALLBACK_SEED.buffer, r.buffer || {}),
-      week: Array.isArray(r.week) ? normWeek(r.week) : normWeek(FALLBACK_SEED.week),
-      weekShift: Array.isArray(r.weekShift) ? normWeek(r.weekShift) : normWeek(FALLBACK_SEED.weekShift),
+      user: Object.assign({}, r.user || {}),
+      goal: Object.assign({}, r.goal || {}),
+      feas: {
+        weeklyH: U.num(feas.weeklyH, 0),
+        weeks: U.num(feas.weeks, 0),
+        discount: U.num(disc, 0),
+        demand: U.num(feas.demand, 0)
+      },
+      tasks: (Array.isArray(r.tasks) ? r.tasks : []).map(normTask),
+      buffer: Object.assign({}, r.buffer || {}),
+      week: normWeek(r.week),
+      weekShift: normWeek(r.weekShift),
       notif: normNotif(r.notif),
-      weekStats: Object.assign({}, FALLBACK_SEED.weekStats, r.weekStats || {}),
-      subjectColors: Object.assign({}, FALLBACK_SEED.subjectColors, r.subjectColors || {})
+      weekStats: Object.assign({}, r.weekStats || {}),
+      subjectColors: Object.assign({}, r.subjectColors || {})
     };
-    if (r.feas) {
-      var disc = (r.feas.discount !== undefined && r.feas.discount !== null) ? r.feas.discount : r.feas.disc;
-      s.feas = {
-        weeklyH: U.num(r.feas.weeklyH, FALLBACK_SEED.feas.weeklyH),
-        weeks: U.num(r.feas.weeks, FALLBACK_SEED.feas.weeks),
-        discount: U.num(disc, FALLBACK_SEED.feas.discount),
-        demand: U.num(r.feas.demand, FALLBACK_SEED.feas.demand)
-      };
-    }
-    if (r.weekStats && !Array.isArray(r.weekStats.WEEKS)) {
-      s.weekStats.WEEKS = FALLBACK_SEED.weekStats.WEEKS;
-    }
     return s;
   }
 
@@ -249,18 +187,12 @@ window.ZX = window.ZX || {};
   /* 启动恢复：种子之上叠加本地 overlay（新目标 / 记录 / 跳过 / 补录跨刷新存活） */
   applyOverlay();
 
-  /* ---------- 派生计算 ---------- */
-  state.plannedMin = function () {
-    return state.tasks.reduce(function (a, t) { return a + U.num(t.est, 0); }, 0);
-  };
+  /* ---------- 派生计算 ----------
+     计划 / 已投入 / 剩余 / 达成率的统一口径在 flows/exec.metrics（过滤 skipped）；
+     这里只保留与视图无关的 workedMin（挽救流程的缺口推演用）。 */
   state.workedMin = function () {
     return state.tasks.filter(function (t) { return t.done; })
       .reduce(function (a, t) { return a + U.num(t.actual || t.est, 0); }, 0);
-  };
-  state.remainMin = function () { return state.plannedMin() - state.workedMin(); };
-  state.rate = function () {
-    var p = state.plannedMin();
-    return p ? Math.round(state.workedMin() / p * 100) : 0;
   };
   state.feasInput = function () {
     return {
@@ -323,8 +255,6 @@ window.ZX = window.ZX || {};
   ZX.state.saveOverlay = saveOverlay;
   ZX.state.dropOverlay = dropOverlay;
   ZX.state.applyOverlay = applyOverlay;
-  ZX.state.seedSource = (window.Rhythm && window.Rhythm.seed && rawSeed() !== FALLBACK_SEED) ? 'shared' : 'fallback';
   ZX.state.normTask = normTask;
-  ZX.state.normNotif = normNotif;
 
 })(window.ZX);

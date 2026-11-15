@@ -257,12 +257,8 @@ window.ZX = window.ZX || {};
   function replan(p) { return call('POST', '/api/replan', p || {}); }
   function confirmReplan(result) { return call('POST', '/api/replan/confirm', { result: result }); }
   function undo(snapshot) { return call('POST', '/api/replan/undo', { snapshot: snapshot }); }
-  function attribute(p) { return call('POST', '/api/attribute', p || {}); }
-  function postSession(p) { return call('POST', '/api/sessions', p || {}); }
   function syncOps(ops) { return call('POST', '/api/sync/ops', { ops: ops || [] }); }
   function health() { return call('GET', '/api/health'); }
-  function syncSince(n) { return call('GET', '/api/sync?since=' + (n || 0)); }
-  function reportsWeekly() { return call('GET', '/api/reports/weekly'); }
 
   ZX.api = {
     TIMEOUT: TIMEOUT,
@@ -276,12 +272,8 @@ window.ZX = window.ZX || {};
     replan: replan,
     confirmReplan: confirmReplan,
     undo: undo,
-    attribute: attribute,
-    postSession: postSession,
     syncOps: syncOps,
     health: health,
-    syncSince: syncSince,
-    reportsWeekly: reportsWeekly,
 
     /* op 队列 */
     queueOp: queueOp,

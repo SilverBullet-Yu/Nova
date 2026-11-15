@@ -2,7 +2,7 @@
 /* 诺瓦 Nova · 内存存储（按用户分区，无数据库）
  *
  * 契约：docs/HANDOFF.md §5（同步协议 / 幂等 / 字段级合并）
- * 职责：每个用户一份 seed 副本 + sync_op 序列表 + replan_record 快照
+ * 职责：每个用户一份 seed 副本 + opId 幂等索引 + replan_record 快照
  *
  * 身份：userId 只由 server/auth.js 从凭证解析后传入；本模块不读取请求体里的 userId。
  * 分区：所有读写都落在 partitions.get(userId) 上，用户之间不共享 state / ops / seq。
@@ -16,9 +16,6 @@ const BASE_SEQ = 88123;
 
 /** 单批上行上限（契约：≤ 200） */
 const MAX_SYNC_BATCH = 200;
-
-/** 增量拉取单页上限 */
-const MAX_SYNC_PAGE = 500;
 
 function clone(v) {
   return v === undefined ? undefined : JSON.parse(JSON.stringify(v));
@@ -65,9 +62,7 @@ function createPartition(userId) {
     seq: BASE_SEQ,
     state: clone(seed),
     entities: {},       // entity → entityId → field → { value, tombstone, clientTs, seq }
-    ops: [],            // sync_op 序列表（serverSeq 升序）
-    opIndex: new Map(), // opId → serverSeq（分区内 op_id 唯一）
-    sessions: new Map(),// opId → { ok, serverSeq }
+    opIndex: new Map(), // opId → serverSeq（分区内 op_id 唯一，幂等兜底）
     replanRecords: [],
     replanSeq: 0
   };
@@ -251,42 +246,6 @@ function recordReplan(userId, result) {
   return clone(rec);
 }
 
-/** 打卡上报：opId 幂等，重复提交返回首次 serverSeq */
-function recordSession(userId, payload) {
-  const p = partitionOf(userId);
-  const opId = String(payload.opId);
-  if (p.sessions.has(opId)) {
-    return { ok: true, serverSeq: p.sessions.get(opId).serverSeq, duplicate: true };
-  }
-  p.seq += 1;
-  const seq = p.seq;
-  p.sessions.set(opId, { ok: true, serverSeq: seq });
-
-  const taskId = String(payload.taskId);
-  const durationMin = num(payload.durationMin, 0);
-  const completion = num(payload.completion, 0);
-  const clientTs = num(payload.clientTs, 0);
-
-  p.ops.push({
-    serverSeq: seq,
-    userId: p.userId,
-    opId: opId,
-    entity: 'session',
-    entityId: taskId,
-    field: 'durationMin',
-    value: durationMin,
-    clientTs: clientTs,
-    baseSeq: num(payload.baseSeq, 0)
-  });
-
-  mergeField(p, { entity: 'task', entityId: taskId, field: 'actual', value: durationMin, clientTs: clientTs, serverSeq: seq });
-  mergeField(p, { entity: 'task', entityId: taskId, field: 'completion', value: completion, clientTs: clientTs, serverSeq: seq });
-  mergeField(p, { entity: 'task', entityId: taskId, field: 'done', value: completion >= 0.99, clientTs: clientTs, serverSeq: seq });
-  mergeField(p, { entity: 'task', entityId: taskId, field: 'sessionCount', value: 1, clientTs: clientTs, serverSeq: seq });
-
-  return { ok: true, serverSeq: seq };
-}
-
 /** 批量上行：opId 幂等（分区内 (user_id, op_id) 唯一），身份只取入参 userId */
 function applyOps(userId, ops) {
   const p = partitionOf(userId);
@@ -315,29 +274,11 @@ function applyOps(userId, ops) {
       clientTs: num(op.clientTs, 0),
       baseSeq: num(op.baseSeq, 0)
     };
-    p.ops.push(record);
     mergeField(p, record);
     accepted.push(opId);
     serverSeq = seq;
   });
   return { accepted: accepted, serverSeq: serverSeq };
-}
-
-/** 增量拉取：seq 升序（只在本用户分区内检索） */
-function getOpsSince(userId, since, limit) {
-  const p = partitionOf(userId);
-  const from = num(since, 0);
-  const max = num(limit, MAX_SYNC_PAGE);
-  const out = [];
-  for (let i = 0; i < p.ops.length; i++) {
-    if (p.ops[i].serverSeq > from) {
-      out.push(clone(p.ops[i]));
-      if (out.length >= max) break;
-    }
-  }
-  const last = out.length ? out[out.length - 1].serverSeq : from;
-  const hasMore = p.ops.some((o) => o.serverSeq > last);
-  return { ops: out, serverSeq: last, hasMore: hasMore };
 }
 
 module.exports = {
@@ -361,12 +302,9 @@ module.exports = {
   getLatestReplan: getLatestReplan,
   getReplanRecords: getReplanRecords,
   recordReplan: recordReplan,
-  recordSession: recordSession,
   applyOps: applyOps,
-  getOpsSince: getOpsSince,
   mergeField: mergeField,
   policyOf: policyOf,
   MAX_SYNC_BATCH: MAX_SYNC_BATCH,
-  MAX_SYNC_PAGE: MAX_SYNC_PAGE,
   BASE_SEQ: BASE_SEQ
 };
