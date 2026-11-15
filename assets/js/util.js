@@ -113,10 +113,14 @@ window.ZX = window.ZX || {};
   var FONTS = ['', 'm', 'l'];
 
   function prefs() {
-    var p = { grid: true, glow: true, motion: true, font: '' };
+    /* 动效：显式选择优先于系统提示——只有从未选择过（raw.motion 非布尔）时
+       才跟随 prefers-reduced-motion；产品开关置 on 后系统设置不再拦截 */
+    var reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var p = { grid: true, glow: true, motion: !reduce, font: '' };
     try {
       var raw = JSON.parse(localStorage.getItem(PREF_KEY) || '{}') || {};
       PREF_KEYS.forEach(function (k) { if (raw[k] === false) p[k] = false; });
+      if (raw.motion === true) p.motion = true;
       if (raw.font === 'm' || raw.font === 'l') p.font = raw.font;
     } catch (e) { /* 隐私模式禁用存储时使用默认值 */ }
     return p;

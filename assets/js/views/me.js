@@ -95,7 +95,7 @@ window.ZX = window.ZX || {};
           prefRow('日程底纹', '背景方格纸 · 可关闭', 'grid') +
           prefRow('纸面纹理', '纤维质感 · 静纸模式', 'glow') +
           prefRow('界面动效', '弹层过渡 · 打字指示 · 计时刷新', 'motion') +
-          '<p class="pref-note">偏好写入浏览器本地（localStorage），仅影响本机视觉；系统开启「减少动态效果」时动效始终关闭。</p>'
+          '<p class="pref-note">偏好写入浏览器本地（localStorage），仅影响本机视觉；动效开关优先于系统「减少动态效果」——打开即播放，关闭即全部静止。</p>'
       }) +
     '</div>';
   }

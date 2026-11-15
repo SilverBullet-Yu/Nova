@@ -708,11 +708,12 @@ svg.ch{display:block;width:100%;height:auto}
   .bench-body{padding:22px 20px 40px}
 }
 
-@media (prefers-reduced-motion:reduce){
-  *,*::before,*::after{animation:none!important;transition-duration:.01ms!important}
-  body::before{animation:none!important}
-  .cp-body{scroll-behavior:auto}
-}
+/* 系统级 prefers-reduced-motion 不再单独设闸（2026-11-15）：
+   动效的唯一总闸是 html[data-motion]（见顶部 data-motion="off" 段）。
+   首帧脚本 / prefs() 的裁决：用户在产品内做过显式选择（motion:true/false）
+   以产品开关为准；从未选择过时才跟随系统 reduce-motion 默认关闭。
+   —— 否则系统全局关着「动画效果」（很多用户不知道这项）时，
+   产品内的动效开关会形同虚设（实测踩坑：开关置 on 仍无任何动画）。 */
 
 /* =========================================================
    共享 UI 原语（管理者维护）
@@ -1811,9 +1812,9 @@ h1{font-size:34px;letter-spacing:0}
    诺瓦灵动（IP 形象优化 · 线B；2026-11-15 扩展）
    原则：素材本身保持静态——SVG 经 <img> 引用，读不到页面上的
    data-motion 开关，SVG 内不做动画；动效只加在产品侧 img 元素上。
-   两道既有总闸自动覆盖本区块：
-   · html[data-motion="off"] *{animation:none!important}
-   · @media (prefers-reduced-motion:reduce) *{animation:none!important}
+   总闸：html[data-motion="off"]（animation-duration:0s + transition-duration:0s）
+   是唯一总闸；系统 reduce-motion 只在用户从未做过动效选择时经首帧脚本
+   折算为 data-motion="off"（见 711 行注与 index.html / util.prefs）。
    档位纪律：常驻循环只保留漂浮 / 呼吸两类（低速、小幅）；状态反应
    全部为一次性入场 / 反应动效（盖章 / 弹跳 / 歪头 / 摇头 / 到场），
    均为位移 / 缩放 / 旋转的整图变换，无发光、无渐变，

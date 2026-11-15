@@ -12,14 +12,17 @@
 <title>诺瓦 Nova · 大学生日常助理</title>
 <link rel="icon" href="assets/img/favicon-v4.svg" type="image/svg+xml" />
 <script>
-  /* 首帧前应用本地视觉偏好，避免主题闪烁（与 assets/js/util.js 共用同一存储键） */
+  /* 首帧前应用本地视觉偏好，避免主题闪烁（与 assets/js/util.js 共用同一存储键）。
+     动效裁决：显式选择（true/false）优先；从未选择时才跟随系统 reduce-motion。 */
   (function () {
     try {
       var p = JSON.parse(localStorage.getItem('zx.ui_prefs') || '{}') || {};
       var r = document.documentElement;
       r.dataset.grid = p.grid === false ? 'off' : 'on';
       r.dataset.glow = p.glow === false ? 'off' : 'on';
-      r.dataset.motion = p.motion === false ? 'off' : 'on';
+      r.dataset.motion = p.motion === false ? 'off'
+        : p.motion === true ? 'on'
+        : (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches ? 'off' : 'on');
       r.dataset.font = (p.font === 'm' || p.font === 'l') ? p.font : '';
     } catch (e) { /* 隐私模式禁用 localStorage 时保持默认 */ }
   })();

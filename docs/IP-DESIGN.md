@@ -194,7 +194,7 @@ v4 的做法：**把原设的造型语言整体搬到诺瓦身上，但每一个
 | 逐条过账 `novaDiffIn` | 一次性 | 重排卡片 diff 行（`--d` 序号阶梯 45ms） | translateX −6px→0 + 淡入，.3s；呼应「逐条可见、给理由」 |
 | 依次浮现 | 一次性 | 快捷指令 `#chips .chip`（6 枚 stagger 50ms） | translateY 6px→0 + 淡入，.3s |
 
-受两道既有总闸约束：`html[data-motion="off"]` 与 `prefers-reduced-motion: reduce` 均会 `animation:none!important`（hover 的 transition 也被降级到 .01ms），动效关闭后素材退回静态——与契约「所有动效必须可关闭」一致。预览：`design-preview/mascot/preview-v4.html` §07「灵动」（每式带重播按钮）；聊天流三式（气泡 / 过账 / chips）在真实对话中直接可见。
+总闸唯一：`html[data-motion="off"]`（动画与过渡时长归零，素材退回静态）。裁决（2026-11-15）：用户在产品内对动效的**显式选择优先于系统 `prefers-reduced-motion`**——「我的 → 界面动效」打开即播放；从未选择过的用户才按系统提示默认关闭（首帧脚本 / `util.prefs` 落为 `data-motion`，系统媒体查询不再单独设闸）。预览：`design-preview/mascot/preview-v4.html` §07「灵动」（每式带重播按钮）；聊天流三式（气泡 / 过账 / chips）在真实对话中直接可见。
 
 ## 7. 禁用清单
 

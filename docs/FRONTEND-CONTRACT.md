@@ -77,7 +77,7 @@ ZX.ui.toast('已保存', 'ok' | 'warn' | 'bad')
 - 圆润体系（`--r: 10px`）+ 2px 实墨线全框（2026-11-14 日漫清晰线起；早先「直角 2px + 1px 发丝线」已随换肤退役），数字用 `--mono` / `--display`。
 - 新增选择器统一加阶段前缀：`.sa-`（A）、`.sb-`（B）、`.sc-`（C）、`.sd-`（D），避免与既有类冲突。
 - 新样式**追加**到 `app.css` 末尾对应阶段区块，不重排既有规则。
-- 所有动效必须可被 `html[data-motion="off"]` 与 `prefers-reduced-motion` 关闭。
+- 所有动效必须可被 `html[data-motion="off"]` 关闭（唯一总闸；2026-11-15 起：用户在「我的」里对动效的显式选择优先于系统 `prefers-reduced-motion`，后者仅在从未选择时经首帧脚本折算为 `data-motion="off"`）。
 
 ## 6. 文案规范
 
