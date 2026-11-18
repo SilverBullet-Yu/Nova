@@ -1,710 +1,186 @@
-# 诺瓦 Nova MVP 技术架构设计
+# 诺瓦 Nova 技术架构
 
-> 面向研发：本文档是 MVP 的实现契约，不是技术展望。所有决策以「四周内可上线、可验证」为约束，涉及未来的内容集中在第 10 章，不与当前实现混写。产品侧背景见产品需求文档（PRD），本文只引用其结论。
+> 本档描述仓库当前实现。事实来源：`../package.json`、`../server/`、`../shared/`、`../assets/`、`../scripts/`、`../test/`。
 
 ## 1. 范围与约束
 
-### 1.1 本档范围
+诺瓦 Nova 是面向学生的日程助理 Demo（`../package.json` 的 description）。当前实现的边界：
 
-覆盖 MVP 全部 28 项 P0：目标与可行性评估、自动拆解、日程排程、执行记录、偏差检测、自动重排、周报与预警、中断挽救、多端同步。不含 PRD 中标注 P1/P2 的能力（多目标、社区、教练端、AI 对话）。
+| 约束 | 现状（源码可验证） |
+| --- | --- |
+| 确定性引擎 | `../shared/engine/` 四个引擎均为纯函数：不读时钟、不读随机数、不做 I/O，同一输入必得同一输出 |
+| 不调用大模型 | 全仓无模型调用与外部服务 SDK，推理全部由本地纯函数完成 |
+| 零第三方依赖 | `../package.json` 无 `dependencies`/`devDependencies`；服务端只用 `node:` 内置模块，前端为原生 JS + CSS |
+| 内存态存储 | `../server/store/memory.js` 按 `userId` 分区，进程重启即清空，无数据库 |
+| 演示账户 | 种子 `user.id = 'u_demo'`（林清，`tz: Asia/Shanghai`），`dailyCapMin: 300`，`weeklyH: 20` |
 
-### 1.2 六条硬约束
+## 2. 运行形态与分层
 
-架构形态由这六条倒推，不是由技术偏好决定。
+两条路径共用同一套前端资产。其一是 **file:// 双击**：`../index.html` 以经典 `<script>`（非 ESM）加载 `../shared/data/seed.js` 与 `../assets/js/rhythm.build.js`，资源全为本地相对路径，`../assets/js/api.js` 在 `file://` 下把 API 基址定为 `http://127.0.0.1:8787`。其二是 **Node 服务端托管**：`../server/main.js` 对 `GET /` 返回 `index.html`，`/assets/*` 与 `/shared/*` 直出，前后端同源，`../assets/js/api.js` 取 `location.origin`。
 
-| 编号 | 约束 | 架构含义 |
-| --- | --- | --- |
-| C1 | 弱网可用，离线可写 | 客户端本地库是读取真相源 |
-| C2 | 排程结果可解释、可复现 | 引擎为纯函数，禁止随机与在线学习 |
-| C3 | 重排 2 秒内完成、可撤销 | 产出结构化 diff 并留快照 |
-| C4 | 多端数据零丢失 | 写路径先落本地 op 日志再上行 |
-| C5 | 推送克制、夜间静默 | 频控在服务端统一裁决，客户端不可绕过 |
-| C6 | 中断后零惩罚 | 保留完整历史，不做断更计数 |
-
-C2 与 C4 影响最大：前者决定引擎必须与业务状态解耦，后者决定写路径顺序。
-
-### 1.3 质量属性排序
-
-| 优先级 | 属性 | 目标 |
-| --- | --- | --- |
-| 1 | 数据正确性 | 零丢失、可回溯 |
-| 2 | 可维护性 | 单人可理解单模块 |
-| 3 | 离线可用 | 核心读写在无网时完整可用 |
-| 4 | 性能 | 今日页 P95 ≤ 1.5s，重排 P95 ≤ 2s |
-| 5 | 可用性 | 月度 99.5% |
-| 6 | 成本 | 5 万 MAU 月基础设施 ≤ 1.5 万元 |
-
-**架构非目标**：不为百万并发设计；不做多租户；不做实时协同；不引入 ML 模型；不自研实验平台。
-
-## 2. 技术栈与选型
-
-### 2.1 选型原则
-
-1. 团队可维护优先于技术先进：无专职 SRE，需要专人值守的组件一律否决。
-2. 能托管的不自建：数据库、缓存、对象存储、推送全部用云服务。
-3. 为演进留接口，不为演进付成本：引擎独立进程是留接口，微服务拆分不是。
-
-### 2.2 技术栈总览
-
-| 层次 | 选型 | 版本 | 理由 |
-| --- | --- | --- | --- |
-| iOS / Android | Flutter | 3.24 | 一套代码双端，UI 一致性高 |
-| 微信小程序 | 原生小程序框架 | 基础库 3.x | 仅承担查看与打卡，不引跨端框架 |
-| 客户端存储 | SQLite（drift） | — | 关系结构匹配领域模型，支持事务与离线队列 |
-| 后端 | Go | 1.22 | 单二进制、低内存、引擎计算性能足够 |
-| Web 框架 | Gin | 1.9 | 生态成熟，无框架魔法 |
-| 主库 | PostgreSQL | 16 | 关系模型匹配、jsonb 存模板树、行锁支撑同步 |
-| 缓存 / 队列 | Redis | 7.2 | 缓存、延迟任务（Stream）、分布式锁三合一 |
-| 对象存储 | 云 OSS | — | 导出文件与头像 |
-| 推送 | 厂商通道 + 自建网关 | — | APNs、FCM、华米 OV 统一封装 |
-| 配置 | 托管配置中心 | — | 阈值热更新、灰度分桶 |
-| 埋点 | 自建事件表 + 批量上报 | — | 免 SDK 体积与年费，字段自主 |
-| BI | Metabase 直连只读副本 | — | 运营自助，零开发 |
-| 监控 | Prometheus + Grafana + 云日志 | — | 标准组合，告警进企业微信 |
-| 部署 | 云主机 + Docker Compose | — | 2 台应用机蓝绿，不引 K8s |
-| CI | GitLab CI | — | 与代码托管同源 |
-
-### 2.3 关键选型理由
-
-**Flutter 双端 + 小程序独立实现。** Flutter 无法编译到小程序，这是必须正面处理的矛盾。方案不是跨端统一，而是按职责切分：App 承担完整闭环，小程序只做「看今日、打卡、收订阅消息」，预估 3000–5000 行。跨端框架能复用逻辑层，而小程序缺的恰是 UI 层，强制统一会让 App 受框架约束、小程序受性能拖累。代价是双端维护，但小程序仅随同步协议变更，频率低。
-
-**Go 而非 Java / Python。** 引擎是短时 CPU 密集任务（50–200ms），非常驻重计算。决定因素是部署与内存：单二进制免 JVM 调优，同负载内存约为 Java 的三分之一，2 台 4C8G 可撑 MVP 全部流量。Python 适合算法探索，但类型约束弱，规则代码出错直接影响用户计划。
-
-**PostgreSQL 而非 MySQL / MongoDB。** 其一，领域是强关系的（Goal→Stage→PlanItem→Block→Session），重排要按「未来 7 天、未完成、按优先级」多条件查询，窗口函数直接可用；其二，知识域树深度不定，jsonb 可在不建闭包表的前提下按路径查询；其三，同步需行级锁与部分唯一索引保证幂等，Mongo 需在应用层实现，复杂度转移到更易错的地方。
-
-**规则用代码 + 参数配置，不用规则引擎框架。** Drools 适用于「规则由业务人员频繁编写、彼此独立」的场景。本产品不是：重排四级策略有顺序、有回退、有全局校验，用 DSL 会退化成「用表达力更弱的语言写算法」，同时失去调试与单测。最终方案：**判定逻辑在 Go 代码里，阈值与权重在配置表里**。运营可调「阈值」，不可调「顺序」。代价是改逻辑需发版，用功能开关控制生效范围。
-
-**Redis Stream 而非 Kafka。** 日均事件约 20 万条，Kafka 最小可用集群需三节点与专人维护，收益为零。代价是自行实现重试与死信（约 300 行），Redis 持久化改 AOF everysec 降低丢消息风险。
-
-**同步用 op 日志合并，不用 CRDT / OT。** 实际并发模式是同一用户多设备先后操作，冲突率低但要求零丢失。CRDT 会带来数据膨胀、调试困难、与关系库不兼容三项成本，而收益在此场景为零。
-
-**云主机而非 Kubernetes。** MVP 是单应用进程加两个 Worker，2 台机器蓝绿即可，故障排查路径短。K8s 需要镜像仓库、Ingress、配置管理、监控适配，运维复杂度会吃掉交付能力。升级触发条件见第 10 章。
-
-### 2.4 被否决方案
-
-| 场景 | 候选 | 否决理由 |
-| --- | --- | --- |
-| 三端统一 | Taro / uni-app | 小程序仅占 20% 场景，框架约束成本高于复用收益 |
-| 后端 | Java + Spring Boot | 内存与启动成本高，2 台机器规格下不划算 |
-| 后端 | Python + FastAPI | 类型约束弱，规则代码错误代价高 |
-| 实时协同 | Yjs / Automerge | 并发模型不匹配 |
-| 消息 | Kafka | 日均 20 万事件，运维成本远超收益 |
-| 规则 | Drools / JSON 规则表 | 策略有顺序与回退，DSL 表达力不足 |
-| 搜索 | Elasticsearch | 无全文检索需求 |
-| 调度 | Kubernetes | 无 SRE |
-| 埋点 | 神策 / GrowingIO | 年费与 SDK 体积 |
-| 客服端状态 | Redux 全家桶 | 领域状态由本地库承载，全局容器属过度设计 |
+引擎只有一份实现：`../shared/engine/` 下四个 UMD 双模文件（`module.exports` 或挂 `window.Rhythm.<name>`）。`../scripts/build-engine.js` 把它们拼接为浏览器产物 `../assets/js/rhythm.build.js`；源文件若缺 `root.Rhythm` 挂载则构建失败。该产物禁止手改，`npm start`（`prestart`）与 `npm test`（`pretest`）都会先重建。
 
 ## 3. 系统架构
 
-### 3.1 分层与进程
+### 3.1 前端分层（`../assets/js/`）
 
-| 层 | 组成 | 部署形态 |
+| 层 | 文件 | 职责 |
 | --- | --- | --- |
-| 客户端 | Flutter App、小程序、本地 SQLite | 用户设备 |
-| 接入 | Nginx + 网关（限流、鉴权、版本路由） | 与应用同机 |
-| 应用 | 模块化单体 `api` 进程 | 2 台云主机 |
-| 引擎 | `planner` 进程（拆解、排程、重排、归因、周报） | 独立进程，可水平扩展 |
-| 数据 | PG 主从、Redis、OSS | 云托管 |
-| 支撑 | 配置中心、日志、监控、推送网关 | 托管或轻量自建 |
+| 状态 | `state.js` | 应用状态、种子归一、本机 overlay 存取、派生计算（`feasInput`/`weekInput`/`replanInput`/`noImproveCount`） |
+| 通信 | `api.js` | HTTP 调用（3000 ms 超时）、Bearer 凭证、op 队列、连接状态广播 |
+| 引擎桥接 | `engine.js` | 后端优先、本地产物兜底的调用编排；`feasibilityNow`/`attributeNow` 为同步本地入口 |
+| 原语 | `ui.js`、`util.js` | 提示/弹层/焦点等 UI 原语与通用工具 |
+| 对话 | `assistant.js` | 意图路由，重排/撤销/降载/通知等对话动作 |
+| 流程 | `flows/goal.js`、`flows/rescue.js`、`flows/exec.js`、`flows/planedit.js`、`flows/settings.js` | 目标落地、中断挽救、执行记录、计划编辑、设置与数据清理 |
+| 视图 | `views/today.js`、`views/plan.js`、`views/data.js`、`views/me.js` | 四个子页渲染 |
+| 装配 | `main.js` | 页签（对话/今日/计划/数据/我的，对话为默认）、事件绑定、渲染循环与 overlay 落盘 |
 
-`api` 与 `planner` **同一代码库、两个入口**，共享领域模型与数据库，通过任务表解耦。这样既保留单体事务便利，又让引擎可独立扩容、灰度、降级——「引擎超时降级为模板直出」只有在此隔离下才能干净实现。
+### 3.2 服务端分层（`../server/`）
 
-### 3.2 为什么是模块化单体
+`../server/main.js`（HTTP 入口：静态托管、CORS、鉴权、限流、请求体上限）→ `../server/api/routes.js`（路由表与入参校验，错误统一形状 `{ error: { code, message } }`）→ `../server/auth.js`（凭证签发校验、写接口限流）→ `../server/store/memory.js`（用户分区、op 合并、幂等索引）。
 
-决定性因素是事务：重排需要「读未完成项 → 计算 → 写新 Block → 记 diff」在一个原子操作内完成。跨服务实现会引入用户可见的中间态（计划被改了一半），与 C3 的可撤销承诺直接冲突。
-
-| 维度 | 模块化单体（选定） | 微服务（否决） |
-| --- | --- | --- |
-| 团队匹配 | 6–8 人可维护 | 需平台团队 |
-| 事务 | 本地事务，重排原子性天然满足 | 需 Saga，出现中间态 |
-| 调用开销 | 进程内调用 | 排程链路多 3–5 次往返 |
-| 故障域 | 单点，可整体重启 | 隔离好，排查链路长 |
-
-纪律靠工具强制：每个领域包只暴露 `api.go` 定义的接口，跨包访问内部结构由 `go-arch-lint` 在 CI 拦截。包边界即未来服务边界。
-
-### 3.3 仓库结构与包边界
-
-```
-backend/
-├── cmd/
-│   ├── api/main.go                 # HTTP 入口
-│   └── planner/main.go             # Worker 入口
-├── internal/
-│   ├── identity/                   # 账号、设备、可用时段
-│   │   ├── api.go                  # 唯一对外接口
-│   │   ├── service.go
-│   │   └── store.go
-│   ├── plan/                       # 目标、阶段、计划项
-│   ├── schedule/                   # 日程块、排程调用
-│   ├── execution/                  # 计时、打卡、补录
-│   ├── insight/                    # 偏差、归因、重排、周报
-│   ├── sync/                       # op 上行、增量下行
-│   ├── template/                   # 模板库、知识域树
-│   └── platform/                   # 配置、日志、锁、队列
-├── pkg/engine/                     # 纯函数引擎，不依赖任何 internal 包
-│   ├── feasibility/
-│   ├── decompose/
-│   ├── schedule/
-│   ├── replan/
-│   └── attribute/
-├── migrations/                     # 按日期命名，必须带 down
-└── api/openapi.yaml                # 接口契约，CI 校验
-
-app/                                # Flutter
-├── lib/core/db/                    # drift schema 与 DAO
-├── lib/core/sync/                  # op 队列、冲突处理
-├── lib/feature/today/
-├── lib/feature/plan/
-├── lib/feature/report/
-└── lib/feature/settings/
-
-miniapp/                            # 原生小程序，仅三个页面
-```
-
-关键约束：`pkg/engine` 不得 import 任何 `internal/*`，只能依赖标准库与自身定义的结构体。这条规则让引擎可被独立测试与离线重放，也保证它不会悄悄依赖数据库。
-
-### 3.4 领域模块与依赖方向
-
-| 包 | 覆盖功能 | 核心聚合 | 对外接口 |
-| --- | --- | --- | --- |
-| identity | 账号、设置 | User、Device | 鉴权、时段配置、注销 |
-| plan | 目标、拆解 | Goal（含 Stage、PlanItem） | 创建、评估、拆解、草案编辑 |
-| schedule | 日程 | Block | 排程、改期、锁定、弹性位 |
-| execution | 执行记录 | Session | 计时、打卡、补录 |
-| insight | 分析、重排、周报、挽救 | Deviation、Insight | 偏差检测、重排、周报 |
-| sync | 同步 | Op | 上行、增量拉取 |
-| template | 模板 | Template | 模板查询、节点检索 |
-
-依赖只允许单向：`insight → schedule → plan → identity`；`sync` 与 `template` 被所有包依赖，不反向依赖。
-
-这条规则有一个业务含义：**引擎全挂时，execution 仍可工作**（查看计划、计时、打卡、离线排队），因为 execution 不依赖 insight 与 planner。记录链路的可用性优先级高于任何智能功能。
-
-### 3.5 部署拓扑
-
-| 节点 | 规格 | 内容 | 数量 |
-| --- | --- | --- | --- |
-| app-1 / app-2 | 4C8G | api、planner、Nginx | 2（蓝绿） |
-| pg-primary | 8C32G / 500GB SSD | 主库 | 1 |
-| pg-replica | 同规格 | 只读副本（报表、导出） | 1 |
-| redis | 4G 主从 | 缓存、Stream、锁 | 1 组 |
-| oss | — | 备份、导出文件 | — |
-
-蓝绿由 Nginx upstream 切换，发布先切 5% 观察 10 分钟再全量。DDL 采用两次发布（先加列后用列），禁止不可回滚的变更。
+静态托管白名单仅 `/`、`/index.html`、`/assets/*`、`/shared/*`，并做目录穿越防护；其余路径返回 404 / `E2001`。
 
 ## 4. 数据模型
 
-### 4.1 实体关系
+### 4.1 状态对象（`../shared/data/seed.js`，深度冻结）
 
-- User 1:N Goal，同一时间仅一个 Goal 为 active（MVP 限制，部分唯一索引保证）。
-- Goal 1:N Stage，Stage 的容量工时由拆解引擎写入，是排程输入而非结果。
-- Stage 1:N PlanItem，携带知识节点、预估工时、权重、来源。
-- PlanItem 1:N Block，Block 是时间轴实例，含日期、起止、是否弹性位、锁定标记。
-- Block 1:N Session，一次 Block 可有多条 Session（中断后继续）。
-- PlanItem 1:N Deviation，记录归因类型与触发策略。
-- Goal 1:N Insight，周报、预警、即时反馈。
-- ReplanRecord 记录每次重排的触发、策略序列、diff、快照。
-
-**PlanItem 与 Block 分离是最重要的设计。** 合并成一张表，重排就必须改计划项本身，「原本计划做什么」的信息丢失，既无法撤销，也无法统计「计划被改动多少次」。分离后 PlanItem 表达意图、Block 表达安排，重排只动 Block。
-
-### 4.2 表设计
-
-| 表 | 关键字段 | 约束 / 索引 |
-| --- | --- | --- |
-| user | id、phone_enc、wx_openid、tz、daily_cap_min、energy_profile(jsonb) | uk(phone_hash)、uk(wx_openid) |
-| availability | user_id、weekday、start_min、end_min | idx(user_id, weekday) |
-| goal | id、user_id、type、deadline、target_value、feasibility_r、status | idx(user_id, status)、部分唯一索引保证单 active |
-| stage | id、goal_id、name、start_date、end_date、capacity_min、ratio | idx(goal_id, start_date) |
-| plan_item | id、stage_id、node_id、est_min、weight、status、source、planner_version、degraded | idx(stage_id, status)、idx(status, weight desc) |
-| block | id、item_id、user_id、date、start_min、dur_min、is_buffer、locked、deleted_at | idx(user_id, date)、idx(item_id) |
-| session | id、block_id、user_id、started_at、ended_at、duration_min、completion、state_tag、is_backfill | idx(block_id)、idx(user_id, started_at) |
-| deviation | id、item_id、type、gap_min、strategy、resolved_at | idx(item_id)、idx(type) |
-| insight | id、goal_id、kind、payload(jsonb)、adopted、created_at | idx(goal_id, kind, created_at desc) |
-| replan_record | id、user_id、trigger、strategies(jsonb)、diff(jsonb)、snapshot(jsonb)、undone | idx(user_id, created_at desc) |
-| sync_op | id、user_id、device_id、op_id、entity、entity_id、field、value、client_ts、server_seq | uk(user_id, op_id)、idx(user_id, server_seq) |
-| job | id、type、payload(jsonb)、status、attempts、run_at、locked_until | idx(status, run_at) |
-| template | id、goal_type、version、tree(jsonb)、stage_ratio(jsonb)、status | idx(goal_type, status, version desc) |
-
-三处必须理解的细节：
-
-1. `sync_op` 的 `(user_id, op_id)` 唯一索引是幂等性的唯一保障。客户端重试必然发生，没有这个约束就会出现重复打卡。
-2. `block.deleted_at` 用软删，因为「消失」也需要同步给其他设备，硬删无法在增量拉取中表达。
-3. `plan_item.planner_version` 记录生成该计划项的引擎版本，否则无法回答「这条计划是哪版算法排的」，也无法做新旧参数对比。
-
-### 4.3 状态机
-
-```
-goal:      draft ──评估通过──▶ active ──归档──▶ archived
-             │
-             └──R 低于阈值──▶ calibrating ──调整──▶ draft
-
-plan_item: planned ──排程──▶ scheduled ──┬──▶ done
-                                          ├──▶ partial（完成度 1–99%）
-                                          ├──▶ skipped（用户跳过）
-                                          ├──▶ degraded（被压缩，仍执行）
-                                          └──▶ abandoned（被放弃，需确认）
-
-block:     planned ──用户锁定──▶ locked ──▶ done / expired
-
-session:   running ──▶ finished
-              └──超过预估 3 倍仍无结束──▶ auto_closed（标记异常，不计入效率）
-```
-
-状态迁移只允许在 `store` 层通过具名方法完成，禁止直接 UPDATE status 字段。这样可以保证每次迁移都触发对应的副作用（如 plan_item 变 abandoned 时写 deviation）。
-
-### 4.4 索引与分区
-
-按月对 `session` 与 `sync_op` 做范围分区，分区键为时间。归档用 `DETACH PARTITION` 而非 `DELETE`，避免大表删除造成膨胀与锁表。
-
-高频查询的索引意图：
-
-| 查询 | 索引 |
+| 顶层键 | 关键字段 |
 | --- | --- |
-| 今日任务 | `block(user_id, date)` 覆盖 |
-| 待重排项 | `plan_item(status, weight desc)` |
-| 增量同步 | `sync_op(user_id, server_seq)` |
-| 周报聚合 | `session(user_id, started_at)` |
-| 到期任务扫描 | `job(status, run_at)` |
+| `user` | `id`、`name`、`tz`、`dailyCapMin`、`weeklyH` |
+| `goal` | `id`、`name`、`target`、`deadline`、`weeks` |
+| `feas` | `weeklyH`、`weeks`、`discount`、`demand` |
+| `tasks[]` | `id`、`subject`、`title`、`est`、`time`、`weight`、`done`，可选 `actual`、`why` |
+| `buffer` | `time`、`free` |
+| `week[]` / `weekShift[]` | `d`、`segs`（`[科目, 分钟]`）、`buf`、`total`，`week` 末项带 `today` |
+| `notif` | `daily`、`weekly`、`alert`、`rescue`（布尔） |
+| `weekStats` | `WEEKS[]`、`kpis`（`effectiveHours`、`targetHours`、`achievementRate`、`achievementDeltaPt`、`replanAdopted`、`replanTotal`、`replanRate`、`recordedDays`、`totalDays`）、`subjectMix`、`attribution`、`actions[]` |
+| `subjectColors` | 科目到 CSS 变量名（`var(--m-math)` 等） |
 
-## 5. 同步协议
+### 4.2 前端运行时字段
 
-### 5.1 操作结构
+`../assets/js/state.js` 在种子之上补充：`sessions[]`（执行记录）、`attrCounts`（归因计数）、`replanHistory[]`（重排历史）、`serverSeq`（初值 88123，与服务端 `BASE_SEQ` 一致）、`replanRecord`、`lastFeas`、`snapshot`、`interrupted` 与 `consecutiveZeroDays`。任务归一同时保留契约名 `subject` 与视图名 `s`。
 
-客户端每次写先落本地库（标记 pending），生成 Op 入队。
+### 4.3 服务端分区结构
 
-```json
-{
-  "op_id": "9f1c2e40-7b3a-4d21-9c55-1a2b3c4d5e6f",
-  "device_id": "ios-7F2A",
-  "entity": "session",
-  "entity_id": "s_1024",
-  "field": "duration_min",
-  "value": 30,
-  "client_ts": "2026-11-07T09:12:33+08:00",
-  "base_seq": 88123
-}
-```
+`../server/store/memory.js` 每分区持有 `{ userId, seq, state, entities, opIndex, replanRecords, replanSeq }`：`state` 为种子副本，`entities` 存字段级合并结果，`opIndex` 为 `opId` 到 `serverSeq` 的幂等索引。
 
-`op_id` 为 UUID v4，客户端生成，服务端据此幂等；`base_seq` 为客户端已知的最大服务端序号，用于冲突判定。
+## 5. 引擎实现
 
-### 5.2 上行与下行
+四个引擎均为纯函数，入参异常以 `TypeError`/`RangeError` 抛出，经路由层映射为 `E1001`。
 
-**上行**：批量提交（单批 ≤ 200 条），服务端按到达顺序分配单调递增 `server_seq`，返回已接受的 seq 列表。客户端收到确认后清除 pending 标记。
+### 5.1 可行性 `feasibility`
 
-**下行**：`GET /v1/sync?since=seq&limit=500`，返回该 seq 之后的变更集与 `has_more`，客户端循环拉取直到追平。变更集按 seq 升序，保证应用顺序与产生顺序一致。
+输入 `{ weeklyH, weeks, discount, demand }`；输出 `{ T, D, R, margin, verdict, threshold }`。`T = round(weeklyH × weeks × discount)`，`D = demand`，`R = Number((T / D).toFixed(2))`，`margin = T − D`。四档阈值硬编码、不可随请求变化：`R ≥ 1.2` 充裕、`≥ 0.9` 合理、`≥ 0.7` 偏紧、否则阻断。`demand ≤ 0` 或任一入参非有限数值即抛错。种子输入（`weeklyH 20, weeks 58, discount 0.85, demand 913`）得 `R 1.08`、`T 986`、`margin 73`（`../test/engine.test.js` 断言）。
 
-### 5.3 冲突合并
+### 5.2 排程 `schedule`
 
-不做「谁赢」，做「怎么合」。这是本方案与通用 CRDT 的根本差异。
+输入 `{ tasks[], slots[], params }`；输出 `{ blocks[], unplanned[], version: 'planner-1.0.0' }`，不含评分与统计字段。任务字段为 `estMin`（唯一格式，不兼容 `est`）；槽位字段为 `date`、`startMin`、`durMin`、`available`、`isBuffer`。`params` 默认 `bufferRatio 0.15`、`maxContiguousMin 150`、`dailyCapMin 300`，每日预留 `reserveMin = round(dailyCapMin × bufferRatio) = 45`。
 
-| 字段类型 | 规则 | 理由 |
-| --- | --- | --- |
-| 状态类（block.locked、session.state_tag） | 最后写入优先，以服务端接收时间为序 | 用户最后一次操作代表当前意图 |
-| 计数类（duration_min、completion） | 求和或取最大值，不覆盖 | 两设备各 30 分钟，真实投入 60 分钟；完成度取高避免回退 |
-| 删除类（deleted_at） | 墓碑优先，不可被后续更新翻转 | 删除是不可逆意图，翻转会造成数据诈尸 |
+- 硬约束：`available === false` 不排入；单日总时长不超过 `dailyCapMin`（弹性位占用计入），非弹性占用不超过 `dailyCapMin − reserveMin`；同日期同科目连续占用不超过 `maxContiguousMin`；弹性槽优先级最低，仅在无其他选择时兜底，带 `date` 与 `startMin` 的刚性任务先入箱故可优先占用弹性位。
+- 排序：指定时段的刚性任务优先（`date`、`startMin`、`id`），其余按 `weight` 降序、`estMin` 降序、`id` 升序，保证确定性。
+- `blocks[]` 元素含 `id`、`taskId`、`subject`、`date`、`startMin`、`durMin`、`isBuffer`、`locked`、`reason`；未排入项进 `unplanned[]`，带 `taskId` 与 `reason`。
 
-不用统一时间戳 LWW 处理全部字段，原因有二：客户端时钟不可信（用户会改系统时间、时区错乱）；计数类字段的覆盖语义本身就是错的。合并规则写在业务层虽然不通用，但每条可解释、可测试。
+### 5.3 重排 `replan` / `confirmReplan` / `undoReplan`
 
-**冲突可视化**：同一字段在 5 分钟内被两台设备修改且值不同时，服务端在增量中附 `conflict` 标记，客户端在条目上显示可展开提示，由用户决定保留哪个。
+输入 `{ tasks[], week[], params, history, locks, timestamp }`；输出 `{ strategies[], diff[], loadDelta, accepted, needsConfirmation, verdict, snapshot, guards, nextTasks, nextWeek }`。周元素固定为 `{ date, minutes, buffer, capacity? }`，`capacity` 缺省取 `dailyCapMin`，输入顺序即周内顺序（不排序）；任务工时读 `est`（与排程引擎的 `estMin` 各自钉死）。`params` 默认 `loadGrowthCap 0.20`、`compressFloor 0.60`、`compressedShareCap 0.30`、`consecutiveNoImproveCap 3`、`bufferRatio 0.15`、`dailyCapMin 300`。
 
-### 5.4 幂等与重试
+- 四级顺序执行，首个通过校验即停：L1 顺延（按权重降序填入未来 7 天 `capacity` 内空闲分钟）、L2 压缩（仅当待排分钟超出剩余容量 `overflow > 0` 时触发，按权重升序压缩，下限 `floor(est × compressFloor)`）、L3 替代（同 `domain` 内 `freq` 与 `weight` 双高者替换低者，原任务标 `substituted` 退出待办）、L4 放弃（只给建议，`accepted=false` 且 `needsConfirmation=true`）。
+- 三条防雪崩断言：① 未来 7 天负载增幅不超过 `loadGrowthCap`（`loadGrowthOk`）；② 任何情况下不得侵占弹性位，即任一日负载不得超过该日 `capacity`（`bufferPreserved`）；③ 连续 `consecutiveNoImproveCap` 次未改善即在入口短路，`verdict = 'blocked'` 并转目标校准（`consecutiveOk`）。L2 另有事后守卫 `compressedShareOk`（压缩占比不超过 30%）。
+- `locks`（`{ taskId: true }`）是硬约束：不参与装载、压缩、替代、放弃，也不进入 `diff`。
+- `snapshot = { tasks, week, timestamp }`，`timestamp` 由调用方注入（引擎不读时钟）；`undoReplan` 反向应用快照，不重算；`confirmReplan` 只接受 `needsConfirmation === true` 的结果，确认后置 `accepted=true`、`verdict='ok'` 方可落库。
 
-- 服务端以 `(user_id, op_id)` 唯一索引兜底，重复提交返回 `E4001` 并视为成功。
-- `base_seq` 落后超过 1000 时返回 `E4002`，客户端改走全量重建（拉取最近 30 天快照 + 增量）。
-- 客户端重试采用指数退避：1s、2s、4s、8s、30s，上限 5 次，之后标记失败并在下次启动时重试。
+### 5.4 归因 `attribute`
 
-### 5.5 客户端本地库
+输入 `planLoadRatio`、`consecutiveZeroDays`、`consecutiveTimeoutCount`、`efficiencyRatio`、`completion`、`externalRatio`；输出 `{ type, confidence, actions[], evidence }`，`evidence` 含六项入参与 `matched[]`。判定顺序固定（顺序即优先级，先排除计划问题再归因用户侧）：计划过载（`planLoadRatio > 1.1` 或 `consecutiveTimeoutCount >= 3`）→ 执行中断（`consecutiveZeroDays >= 2`）→ 效率不足（`efficiencyRatio > 1.4` 且 `completion >= 0.6`）→ 外部干扰（`externalRatio > 0.3`）→ 无偏差。
 
-| 表 | 用途 |
+## 6. 数据持久化边界
+
+### 6.1 服务端（内存态）
+
+`../server/store/memory.js` 按 `userId` 分区，`BASE_SEQ = 88123`；`applyOps` 逐条合并并返回 `{ accepted[], serverSeq }`，同 `opId` 重复提交返回首次 `serverSeq` 且不推进序列。字段级合并策略：`deleted`/`isDeleted`/`deletedAt` 走墓碑（置位不可翻转），`count`/`sessionCount`/`sessions`/`times` 求和，`actual`/`durationMin`/`minutes`/`duration` 取最大值，其余最后写入优先（同 `clientTs` 比 `serverSeq`）。进程重启后状态全部丢失。
+
+### 6.2 前端（本机）
+
+| 存储键 | 内容 |
 | --- | --- |
-| local_block / local_session / local_goal | 领域数据，与云端同构 |
-| op_queue | 待上行操作，含重试次数与下次重试时间 |
-| sync_state | 各实体的最大 seq、最后一次同步时间 |
-| conflict_flag | 待用户裁决的冲突 |
+| `zx.overlay` | `tasks`、`sessions`、`goal`、`feas`、`week`、`weekShift`、`dayAssign`、`locks`、`avail`、`notif`、`attrCounts`、`replanHistory`；任何状态变更后由渲染路径统一落盘 |
+| `zx.op_queue` | 待上行 op（`opId`/`entity`/`entityId`/`field`/`value`/`clientTs`/`baseSeq`/`pending`），队列上限 200 条 |
+| `zx.auth_token` | `{ token, userId, expiresAt }`，服务端签发，本地不存任何可自造身份字段 |
+| `zx.ui_prefs` | `grid`、`glow`、`motion`、`font` |
 
-本地库版本迁移与云端解耦，采用 drift 的 schema 版本机制，升级时保留数据。
+### 6.3 上行 op 与只写本机的操作
 
-## 6. 引擎实现
-
-### 6.1 四条工程契约
-
-1. **纯函数**：输入结构体快照，输出结果结构体，不读库、不读时钟、不调外部服务。
-2. **确定性**：同输入必同输出。禁止 `rand`、禁止 map 迭代序参与计算、禁止隐式读取当前时间。
-3. **无副作用**：引擎不写库，只返回「应该写成什么」。
-4. **版本化**：输出携带 `planner_version`，参数变更即升版本；新版本先影子运行（只算不落），与旧版差异率超过 15% 需人工复核。
-
-四条纪律换来两件事：引擎可被完整单测覆盖，历史数据可离线重放验证效果。没有这两点，调参只能拍脑袋。
-
-```go
-type PlanInput struct {
-    GoalID    string
-    Deadline  time.Time
-    Weeks     int
-    WeeklyMin []int          // 每周可用分钟
-    Nodes     []Node         // 知识节点
-    Params    ScheduleParams // 阈值与权重
-}
-
-type PlanResult struct {
-    Items          []PlanItemDraft
-    Unplanned      []string
-    Abandoned      []AbandonedNode
-    SoftScore      float64
-    Truncated      bool
-    PlannerVersion string
-}
-```
-
-### 6.2 可行性评估
-
-1. 总可用时长 `T = Σ每周可用分钟 × 剩余周数 × 0.85`（折扣吸收疾病、加班、情绪低谷）。
-2. 需求时长 `D = Σ节点标准工时 × 基础系数`（零基础 1.30 / 一轮 1.00 / 二轮 0.75 / 多战 0.60）。
-3. `R = T / D`，按四档阈值输出判定：≥1.2 充裕、0.9–1.2 合理、0.7–0.9 偏紧、低于 0.7 阻断。
-
-工程要点：R 写入 goal 并缓存，仅在目标属性、可用时段、模板版本三者之一变化时重算。不在每次打开时重算，既省性能，也避免持续施压。
-
-### 6.3 拆解引擎
-
-三段式：加载骨架 → 填充排序 → 裁剪。
-
-```
-输入: nodes[], weekly_capacity[], stage_ratio[]
-1  按 weight 降序遍历 nodes
-2  FOR each node:
-3      目标阶段 = 推荐阶段映射到对应周区间
-4      若该阶段剩余容量 ≥ node.est_min → 放入并扣减
-5      否则 → 尝试下一阶段
-6      若全部阶段不足 → 加入 abandoned
-7  按 ratio 校验阶段负载，偏差超过 10% 时迁移可迁移节点
-8  输出: plan_items[], abandoned[], total_min, feasibility_r
-```
-
-关键取舍：**裁剪而非等比压缩**。等比压缩会让每个节点都略低于完成阈值，最终全部半途而废；裁剪保证留下的节点可被完整执行。这是产品判断在算法上的直接体现。
-
-复杂度 O(n log n)，n 约 300–500 个知识点，实测 8–15ms，同步返回即可，不需要异步任务。
-
-### 6.4 排程引擎
-
-把「本周做哪些事」映射到「哪天哪个时段」，是带依赖与时间窗的装箱问题，NP 难。不追求最优，追求 200ms 内给出可解释的可行解。
-
-时段模型：一周按 30 分钟切分，共 336 个 Slot。用户可用时段与不可用时段共同决定 Slot 可用性，锁定块占用后从可用集合移除。
-
-```
-输入: tasks[] (est_min, weight, due, deps), slots[] (day, start, available, is_buffer)
-1  对 tasks 拓扑排序，存在环则报依赖冲突并中止
-2  按 (due asc, weight desc) 入优先队列 Q
-3  WHILE Q 非空 AND 已用时 ≤ deadline_ms:
-4      t = Q.pop()
-5      候选 = 满足 deps 与日上限的连续区间
-6      若无候选 → t 进入 unplanned
-7      否则选 soft_score 最高的区间 → 占用并写 block
-8  2-opt 局部优化，受 50ms 截止约束
-9  输出: blocks[], unplanned[], soft_score, truncated, version
-```
-
-软偏好得分 = 精力匹配（高）+ 科目交替（高）+ 任务连贯（中）+ 时段稳定（中）加权和。弹性 Slot 在装箱阶段优先级最低，仅在无其他选择时使用。
-
-硬约束（代码中断言，违反即失败）：不可用时段不得排入；单日总时长不超上限；前置依赖不可倒置；单科目连续不超过 150 分钟。
-
-性能：n ≤ 200，m ≤ 336，候选评估 O(m)，总计约 6.7 万次基本运算，实测 30–80ms。设 200ms 硬截止，超时立即返回当前最优解并置 `truncated=true`，绝不阻塞请求。
-
-**弹性位保障**：装箱后校验已占用弹性 Slot 比例，超过 50% 则回退最后占用的弹性块改排非弹性 Slot；仍无位置则置入 unplanned，交重排处理。宁可计划不满，不可缓冲耗尽。
-
-### 6.5 重排引擎
-
-要解决三个问题：策略有序、代价可见、结果可撤销。
-
-触发：定时扫描（每 10 分钟）与事件（打卡、目标变更）共同驱动，命中五类条件之一进入流程。去重键 `(user_id, trigger_type, date)` 存 Redis，TTL 24 小时。
-
-| 级 | 策略 | 实现 | 回退条件 |
-| --- | --- | --- | --- |
-| 1 | 顺延 | 调用排程引擎插入模式，目标为弹性位与空闲时段 | 未来 7 天负载增幅超 20% |
-| 2 | 压缩 | 按权重从低到高压缩，下限原工时 60%，标记 degraded | 压缩项占比超 30% |
-| 3 | 替代 | 同知识域内用高频高权重节点替换低频节点 | 无可替换节点 |
-| 4 | 放弃 | 标记 abandoned，需用户确认生效 | 用户拒绝 |
-
-每级执行后校验防雪崩约束，通过则停止，不通过则回退该级并进入下一级。
-
-**事务与快照**：整个重排在单事务内完成。开始前把受影响 Block 集合快照写入 `replan_record.snapshot`，结束后把变更以 JSON Patch 写入 `diff`。撤销即反向应用 diff，无需重算，保证撤销后与重排前完全一致。
-
-**三条防雪崩断言**：单次重排后未来 7 天负载增幅 ≤ 20%；连续 3 次重排未改善则停止并转目标校准；任何情况下不得清空弹性位。
-
-### 6.6 归因引擎
-
-判定顺序固定：计划过载 → 执行中断 → 效率不足 → 外部干扰。顺序即优先级，先排除计划问题再归因用户侧。这条顺序是产品价值观的编码实现——把「过载」误判为「执行力不足」，系统就会加压，用户更快崩盘。
-
-| 归因 | 条件 | 动作 |
-| --- | --- | --- |
-| 计划过载 | 排程总量超可用时长 110%，或连续 3 次超时 | 下调密度，提高弹性位 |
-| 执行中断 | 连续 2 天以上零记录 | 转挽救流程，不追加任务 |
-| 效率不足 | 实际 / 预估 超过 1.4 且完成度正常 | 校准标准工时，建议拆分 |
-| 外部干扰 | 「临时有事」占比超 30% | 提高弹性，降低刚性 |
-
-结果双路输出：写 deviation 供周报；作为排程参数修正（效率不足累计 3 次则标准工时上调 20%，上下限 0.8–1.5 倍）。
-
-### 6.7 引擎测试策略
-
-| 层级 | 方法 | 要求 |
-| --- | --- | --- |
-| 单测 | 固定输入断言输出快照 | 引擎包覆盖率 ≥ 85% |
-| 属性测试 | 随机生成合法输入，断言不变量（不越界、不破依赖、弹性位不被清空） | 每个引擎至少 3 条不变量 |
-| 回放 | 用生产脱敏数据重放，对比新旧版本差异率 | 差异超 15% 阻断发布 |
-| 影子 | 新参数只算不落，观察 3 天 | 差异率与用户采纳率双指标 |
+经 `/api/sync/ops` 上行的 op 覆盖：执行记录（`entity: 'session'`）、手工改期与锁定（`entity: 'plan'`）、逐条否决（`field: 'vetoed'`）、重排撤销（`field: 'undone'`）、放弃标记（`entity: 'task'`, `field: 'abandoned'`）、降载顺延（`field: 'deferred'`）、弹性位占用（`entity: 'buffer'`, `field: 'occupied'`）、通知开关（`entity: 'notif'`）、可用时段（`entity: 'avail'`）、预置开关（`entity: 'preset'`）、挽救结果（`entity: 'rescue'`）、数据恢复（`entity: 'data'`）。只写本机 overlay、不发 op 的是：新目标落地及其任务与周表重写（`flows/goal.js`）、排程结果回填、本地视图偏好；`flows/settings.js` 的清空操作会 `dropOverlay()`，避免重载复活已删数据。
 
 ## 7. 关键业务流
 
-### 7.1 首次目标落地
-
-| 步 | 参与方 | 动作 | 失败处理 |
-| --- | --- | --- | --- |
-| 1 | 客户端 | 提交类型、截止日期、科目与基础 | 本地校验必填 |
-| 2 | api | 创建 goal（draft），返回 id | 幂等键防重复 |
-| 3 | api | 同步调用可行性评估（10ms） | 超时返回保守估计并标注 |
-| 4 | api | R 低于阈值返回阻断标记与三种调整路径 | 前端进校准页 |
-| 5 | api | 投递拆解任务 | 投递失败则同步执行 |
-| 6 | planner | 加载模板、填充、裁剪，写 plan_item | 重试 3 次，仍失败降级模板直出 |
-| 7 | api | 推送完成事件 | 客户端骨架屏，超 10s 提示稍后查看 |
-| 8 | 客户端 | 编辑草案（拖动、增删、改工时） | 每次编辑本地重算总时长 |
-| 9 | api | 提交确认，校验修改幅度 | 超 30% 重算 R 并提示影响 |
-| 10 | api | 排程生成首周 block | 超时降级为按日均匀分配 |
-| 11 | 客户端 | 进入今日页 | — |
-
-第 3 步必须同步，因为它的结果决定是否继续，异步会让用户白等。第 6 步虽仅 15ms 仍走异步，原因是需写库，同步会拉长事务，同时为将来更重算法留位置。
-
-### 7.2 每日执行与离线打卡
-
-1. 打开应用直接读本地 SQLite 渲染，不等网络（本地渲染 P95 ≤ 200ms）。
-2. 后台增量同步，拿到后静默刷新，不打断操作。
-3. 开始：本地写 session（pending），启动单调时钟计时器（不用系统时间，用户会改）。
-4. 结束：本地算时长与完成度，写 op 入队，UI 立即反馈。
-5. 联网：队列上行，服务端按 op_id 幂等写入，返回 seq，客户端清 pending。
-6. 服务端写入后同步触发偏差检测（10ms），命中则投递重排任务。
-
-补录数据标记 `is_backfill`，在统计与归因中排除，避免补录污染效率模型。
-
-### 7.3 自动重排
-
-| 步 | 参与方 | 动作 |
+| 流程 | 路径 | 要点 |
 | --- | --- | --- |
-| 1 | 扫描 / 事件 | 命中触发条件，写 Redis 去重键 |
-| 2 | insight | 拉未完成项与未来 7 天排程，调归因引擎 |
-| 3 | planner | 执行四级流水线，产出 diff 与摘要 |
-| 4 | api | 事务内写新 block、replan_record、insight |
-| 5 | 推送 | 发「计划已调整」，附摘要与撤销入口 |
-| 6 | 客户端 | 变更卡片：新增 / 延期 / 压缩 / 放弃 |
-| 7 | api | 否决则反向应用对应 diff 片段，记录原因 |
+| 目标落地→可行性→拆解→排程 | `flows/goal.js` | 折扣 `DISCOUNT 0.85`；基准工时 `{ 考研 913, 考公 660, 项目导学 520 }` 小时；基础系数 `{ 零基础 1.30, 一轮 1.00, 二轮 0.75, 多战 0.60 }`；`R < 0.70` 阻断进入拆解；单计划项 `est` 限 15–240 分钟、步长 15；排程槽位为每天 18:00–22:00 每 30 分钟一格（8 格）加 22:00–23:00 两个 30 分钟弹性位；结果写 `tasks`/`week`/`weekShift`/`buffer` |
+| 重排→逐条否决/撤销 | `assistant.js`、`flows/planedit.js` | 重排走 `ZX.engine.replan`；`verdict='blocked'` 即停止并转目标校准；`needsConfirmation` 需 `confirmReplan` 后才落库；否决 `veto` 中压缩项从快照取回原工时并清 `degraded`，顺延项清 `deferred`；撤销 `undoReplan` 反向应用快照 |
+| 中断挽救 | `flows/rescue.js` | 由 `sessions` 算连续无记录天数，达 3 天（`THRESHOLD 3`）判定中断；剩余天数 = 7 减断更天数（下限 1）；三选一压缩（`COMPRESS_RATE 0.40`，下限 15 分钟）/顺延/降级，两屏完成（缺口与方式→确认摘要），确认前不写状态 |
+| 执行记录→偏差归因 | `flows/exec.js` | 记录 `status` 取 `done`/`partial`/`skip`/`backfill`，感受词独立存 `feel`；完成度 100% 置 `done=true` 且 `actual=minutes`，不足 100% 则累加 `actual` 并按部分完成折算 `est`；记录后立即跑 `attributeNow`，命中结果计入 `attrCounts` |
+| 归因→周报 | `views/data.js`、`flows/exec.js` | 周报与归因的数据源是本地执行记录真算，`attrCounts` 与 `replanHistory` 为卡片真实数据源 |
 
-频控：同类触发 24 小时一次；单日重排提示不超过 2 次；22:00–08:00（本地时区）不推送，改次日首启展示。
+## 8. 非功能与运行时特征
 
-### 7.4 中断挽救
-
-连续 3 天无 session 即标记 `interrupted`，同时**暂停所有常规推送**。
-
-用户回归时首屏不是「已断更 3 天」，而是缺口量化与三个选项：压缩（提高密度，深度下降）、顺延（整体后移，冲刺变短）、降级（下调目标，不可逆）。选择后一键生效，写 replan_record，连续天数重新计算。全流程 3 步内完成，任何一步不要求输入文字——中断后用户耐心极低，多一个输入框就是一次流失。
-
-### 7.5 周报生成
-
-1. 调度器按小时扫描进入 20 点（本地时区）的用户分片，按 user_id 哈希分 16 片。
-2. 每片投递一个 Stream 消息，消费组并发，单消息单用户。
-3. 幂等键 `(user_id, iso_week)`，重复消费跳过。
-4. 内容：达成率、时长分布、科目结构、归因分布、一条建议。
-5. 建议必须预置为下周的一个具体 block，不能只是文字。
-6. 写 insight 并推送；失败进死信，30 分钟后重试，最多 3 次。
-7. 生成后异步触发「建议预置」，用户可在周报中一键撤销。
-
-兜底：22 点前仍未成功的用户，发轻量版（仅达成率与一句结论），保证「每周必有反馈」不落空。
-
-## 8. 非功能与运维
-
-### 8.1 性能预算
-
-| 链路 | 总预算 | 分解 |
-| --- | --- | --- |
-| 今日页首屏 | P95 ≤ 1.5s | 本地查询 200ms + 渲染 300ms + 网络刷新（不阻塞） |
-| 可行性评估 | P95 ≤ 100ms | 计算 15ms + 读写 60ms |
-| 拆解生成 | P95 ≤ 1s，上限 10s | 计算 15ms + 写库 200ms + 队列 500ms |
-| 排程计算 | P95 ≤ 200ms | 算法 80ms + 读写 100ms |
-| 重排全流程 | P95 ≤ 2s | 归因 30ms + 流水线 400ms + 事务 300ms + 推送 1s |
-| 增量同步 | P95 ≤ 300ms（100 条） | 查询 120ms + 序列化 60ms |
-| 周报生成（单用户） | P95 ≤ 800ms | 聚合 500ms + 生成 200ms |
-
-### 8.2 容量估算
-
-| 指标 | 估算 | 推导 |
-| --- | --- | --- |
-| 日均 op | 18 万 | 1.5 万 DAU × 12 次写 |
-| 峰值 QPS | 20 | 早 7–9、晚 21–23 双峰，均值 5 倍 |
-| 单用户年存储 | 约 4MB | 2000 计划项 + 3000 块 + 2000 记录 + 索引 |
-| 年增量 | 200GB | 5 万 MAU × 4MB |
-
-**不分片判据**：单表低于 5000 万行且写入 QPS 低于 500 时，PG 单库配合分区即可。三年后 session 约 3000 万行、峰值 20 QPS，距阈值有数量级余量。提前分片是纯粹浪费。
-
-### 8.3 降级
-
-| 故障 | 降级 | 用户感知 |
-| --- | --- | --- |
-| planner 不可用 | 返回缓存的上版计划，拆解降级模板直出 | 计划不再自动调整，可正常执行 |
-| 主库不可用 | 切只读，客户端本地读写并排队上行 | 可打卡，暂不同步 |
-| Redis 不可用 | 关闭去重与频控，改进程内缓存 | 可能收到重复提醒 |
-| 推送通道不可用 | 降级站内消息 | 延迟感知 |
-| 模板服务不可用 | 使用内置考研基础模板 | 拆解精度下降 |
-
-原则：记录链路永不可用性优先级高于任何智能功能。
-
-### 8.4 安全与合规
-
-| 项 | 措施 |
+| 项 | 现状 |
 | --- | --- |
-| 认证 | 手机验证码 + 微信登录；JWT（access 2h、refresh 30d），refresh 轮换并记录设备指纹 |
-| 传输 | TLS 1.3，客户端证书校验 |
-| 存储 | 手机号等直接标识符 AES-GCM，密钥在 KMS，应用不落盘 |
-| 访问控制 | user_id 由中间件注入，业务代码不得拼接 |
-| 日志 | 不记学习内容、备注、手机号原文；错误日志只记 trace_id |
-| 导出 | 异步生成 zip，24 小时内邮件下发 |
-| 删除 | 软删 7 天可撤回，之后硬删级联，备份 30 天自然过期 |
-| 年龄 | 注册声明需满 16 周岁 |
+| 鉴权 | `Authorization: Bearer <token>`；凭证形态 `nj1.<payloadBase64url>.<sigBase64url>`，HMAC-SHA256 签名，密钥取 `NOVA_AUTH_SECRET`（至少 32 字节），有效期 7 天（`TOKEN_TTL_MS`）；身份只从凭证解析，请求体 `userId` 与凭证不一致返回 `E4030` |
+| 限流 | 固定窗口、单进程内存，按「身份 + 路由」隔离，未认证路由按来源 IP 隔离。阈值：`POST /api/auth/session` 60/60 s（按 IP）、`POST /api/sync/ops` 60/60 s、`POST /api/replan` 与 `/replan/confirm` 与 `/replan/undo` 12/60 s、`POST /api/feasibility` 与 `/schedule` 与 `/attribute` 30/60 s；超限返回 429 与 `Retry-After`，不排队也不自动重试 |
+| CORS | 放行本机来源（`127.0.0.1`/`localhost`/`null`）与同源（`Origin` 的 host 等于请求 `Host`），其余不放行；允许方法 `GET, POST, OPTIONS`，允许头 `Content-Type, Authorization`，`Max-Age 600`，带 `Vary: Origin` |
+| 静态资源 | 白名单 `/`、`/index.html`、`/assets/*`、`/shared/*`；非 GET/HEAD 返回 405 |
+| 请求体 | 上限 1 MiB（`MAX_BODY_BYTES = 1048576`），超限 `E4002`；JSON 非法 `E1001` |
+| 前端降级 | 请求超时 3000 ms；引擎调用失败或结构不合约时回退本地产物（`ZX.engine.source` 记为 `local`）；收到 HTTP 响应即视为在线，仅网络失败或超时判离线 |
+| 体积 | `assets/css/app.css` 101514 字节；`assets/js/rhythm.build.js` 48410 字节；仓内 `js`/`css`/`html`/`svg` 共 46 个文件、607746 字节 |
+| 第三方资源 | 无第三方脚本、字体、CDN 与埋点；`../index.html` 不引用任何外部 URL，图标与插画均为仓内 SVG |
 
-### 8.5 监控与告警
+## 9. 附录
 
-指标三类：请求侧 RED；引擎侧成功率、耗时、降级率、**截断率**（排程性能的早期信号）；同步侧冲突率、op 重试率、队列积压。
+### 9.1 HTTP 接口清单
 
-| 告警 | 阈值 | 级别 |
-| --- | --- | --- |
-| 接口错误率 | 5 分钟超 2% | P1 |
-| P95 延迟 | 超预算 2 倍持续 10 分钟 | P2 |
-| 排程截断率 | 超 5% | P2 |
-| 同步积压 | 队列超 1 万 | P1 |
-| 周报失败率 | 单批超 3% | P2 |
-| 连接池 | 使用率超 85% | P2 |
-| 推送送达率 | 低于 85% | P3 |
-
-P1 电话告警，P2 企业微信，P3 进日报。
-
-## 9. 交付计划
-
-### 9.1 四迭代切分
-
-| 迭代 | 目标 | 交付物 | 验收 |
+| 方法与路径 | 鉴权 | 入参 | 返回 |
 | --- | --- | --- | --- |
-| 1 | 地基 | 数据模型、鉴权、op 同步协议、客户端本地库、任务表与 Worker 骨架 | 双端同时打卡后数据一致，离线 30 条 op 可补传 |
-| 2 | 目标与拆解 | 可行性评估、模板加载、拆解引擎、草案编辑 | 3 分钟内从建目标到拿到草案，R 阻断生效 |
-| 3 | 排程与执行 | 排程引擎、今日/周视图、计时打卡、补录、弹性位 | 200ms 内出排程，弹性位不被占满，离线可打卡 |
-| 4 | 重排与反馈 | 归因、四级重排、diff 撤销、周报、挽救、埋点 | 闭环可连跑四周，重排 2s 内且可撤销 |
+| `GET /api/health` | 否 | 无 | `{ ok, version, uptimeMs }` |
+| `POST /api/auth/session` | 否 | 空对象 | `{ token, userId, expiresAt }` |
+| `GET /api/state` | 是 | 无 | `{ seed, replan, notifications }` |
+| `POST /api/feasibility` | 是 | `weeklyH`/`weeks`/`discount`/`demand` | 可行性结果 |
+| `POST /api/schedule` | 是 | `tasks`/`slots`/`params?` | `{ blocks, unplanned, version }` |
+| `POST /api/replan` | 是 | `tasks`/`week`/`params?`/`history?`/`locks?`/`timestamp?` | 重排结果（`accepted=true` 才落库） |
+| `POST /api/replan/confirm` | 是 | `result` | 确认后的重排结果 |
+| `POST /api/replan/undo` | 是 | `snapshot` | `{ tasks, week }` |
+| `POST /api/attribute` | 是 | 六个归因数值字段 | `{ type, confidence, actions, evidence }` |
+| `POST /api/sync/ops` | 是 | `ops[]`（至多 200 条） | `{ accepted[], serverSeq }` |
 
-迭代 1 不能压缩：同步协议一旦上线就难以改动，它决定了后续所有数据的形态。
+已下线端点（返回 404 / `E2001`，见 `../test/api.test.js`）：`POST /api/sessions`、`GET /api/sync`、`GET /api/reports/weekly`。
 
-### 9.2 CI 门禁
+### 9.2 错误码
 
-1. 静态检查：gofmt、go vet、go-arch-lint（校验包依赖方向）、flutter analyze。
-2. 单测：引擎包 ≥ 85%，其他 ≥ 60%。
-3. 契约测试：openapi.yaml 与客户端模型比对，字段增删必须同步。
-4. 迁移检查：只加不删、新列可空或带默认值，脚本自动检测。
-
-### 9.3 环境与发布
-
-dev（随分支部署，造数脚本）、staging（脱敏样本、真实规模模板）、prod。
-
-主干开发 + 短分支（存活 ≤ 3 天），tag 触发发布，回滚即切回上一 tag 并执行 down 迁移。禁止只写 up 的迁移。
-
-灰度：`bucket = hash(user_id) % 100`，A 组 0–32、B 组 33–65、C 组 66–99。开关粒度到功能与参数级，不是整包。每个实验必须预设指标、样本量、终止条件，避免长期悬挂。
-
-### 9.4 技术风险
-
-| 风险 | 概率 | 影响 | 应对 |
-| --- | --- | --- | --- |
-| 参数调优导致计划质量波动 | 高 | 高 | 影子模式 + 差异率超 15% 阻断 + 参数版本回滚 |
-| 离线冲突致数据错乱 | 中 | 高 | 字段级合并 + 冲突可视化 + 冲突率监控 |
-| 小程序订阅消息额度不足 | 高 | 中 | 提前申请一次性订阅 + 降级站内 + 引导开 App 推送 |
-| 模板冷启动质量不足 | 高 | 高 | 运营手工维护三套 + 用户修改行为回流 |
-| 排程结果「看起来不合理」 | 中 | 高 | 每个决策附一句理由 + 记住手动偏好 |
-| 双端人力不足 | 中 | 中 | 小程序限定三功能并冻结需求，App 优先 |
-
-最需警惕第一项：规则引擎的优势是可解释，劣势是参数敏感——同一套逻辑，阈值差 10% 就可能从「体贴」变成「逼人」。参数变更走影子模式不是流程洁癖，是产品调性的技术保障。
-
-## 10. 演进路线
-
-触发条件是量化指标，不是时间表。
-
-| 阶段 | 触发条件 | 动作 |
+| 码 | HTTP | 含义 |
 | --- | --- | --- |
-| V1.0 | — | 模块化单体 + 独立引擎进程 + 云主机 |
-| V1.1 | 重排采纳率稳定超 60% | 引入 LLM 做「计划解释」与「对话式调参」，只改表述层 |
-| V1.2 | 教练端验证通过 | 加组织与权限模型，plan 拆出 coach 子域 |
-| V2.0 | MAU 超 20 万或引擎 CPU 超 60% | planner 拆为独立服务并水平扩展 |
-| V2.1 | 单表超 5000 万行或写入超 500 QPS | 按 user_id 范围分片，sync 与 session 先行 |
-| V3.0 | 有专职 SRE | 引入 K8s 与多地域 |
+| `E1001` | 400 | 参数非法或缺失 |
+| `E2001` | 404 | 资源不存在 |
+| `E3001` | 409 | 状态冲突 |
+| `E3002` | 409 | 资源已存在 |
+| `E4001` | 200 | 幂等键重复，返回首次结果 |
+| `E4002` | 400 | 请求体过大或单批超过 200 条 |
+| `E4010` | 401 | 未提供或凭证无效 |
+| `E4030` | 403 | 越权访问 |
+| `E4290` | 429 | 请求过于频繁 |
+| `E5001` | 500 | 服务内部错误 |
+| `E9001` | 500 | 未分类异常 |
 
-LLM 只做表述层的原因：排程结果必须可复现、可解释、可回滚。让模型直接生成计划，会把确定性换成不可调试的概率输出；半年使用周期里，用户一旦发现「同样输入给出不同建议」，信任就结束了。模型适合把结构化结果翻译成人话，以及把自然语言调整转成对结构化参数的修改，这两件事都不影响核心算法的确定性。
+### 9.3 配置项（环境变量，样例见 `../.env.example`）
 
-## 附录 A 接口清单
+| 变量 | 作用 |
+| --- | --- |
+| `NOVA_AUTH_SECRET` | HMAC 签名密钥，至少 32 字节；`NODE_ENV=production` 未配置则拒绝启动 |
+| `NODE_ENV` | 设为 `production` 时启用生产约束 |
+| `PORT` | 监听端口，缺省 8787 |
+| `HOST` | 监听地址，缺省 `0.0.0.0` |
+| `NOVA_TRUST_PROXY` | 设为 `1` 时按 `X-Forwarded-For` 最后一跳隔离限流桶，默认按 TCP 对端地址 |
 
-| 方法 | 路径 | 用途 | 约束 |
-| --- | --- | --- | --- |
-| POST | /v1/goals | 创建目标 | 幂等键必传 |
-| POST | /v1/goals/{id}/feasibility | 可行性评估 | 同步，100ms 内 |
-| POST | /v1/goals/{id}/decompose | 触发拆解 | 异步，返回 task_id |
-| GET | /v1/decompose/{task_id} | 查拆解结果 | 10s 内可轮询 |
-| PUT | /v1/goals/{id}/draft | 提交草案 | 幅度超 30% 触发重算 |
-| POST | /v1/goals/{id}/schedule | 生成周排程 | 200ms 预算 |
-| GET | /v1/today | 今日任务 | 支持 If-None-Match |
-| POST | /v1/sessions | 打卡 / 计时上报 | 幂等键 = op_id |
-| POST | /v1/replan | 手动重排 | 2s 预算 |
-| POST | /v1/replan/{id}/undo | 撤销重排 | 反向应用 diff |
-| GET | /v1/sync | 增量拉取 | since 必传，分页 |
-| POST | /v1/sync/ops | 批量上行 | 单批 ≤ 200 |
-| GET | /v1/reports/weekly | 周报 | 缓存 24h |
-| POST | /v1/export | 数据导出 | 异步，24h 内邮件 |
-| DELETE | /v1/account | 注销 | 软删 7 天 |
+### 9.4 命令
 
-## 附录 B 错误码
-
-> **口径说明（2026-11-15）**：本表是**生产形态设计稿**（Go / Flutter / PostgreSQL，§3–§4）的契约口径，与可运行 Demo（`server/api/routes.js` 的 `ERRORS`）**语义不同、互不为取值来源**。Demo 的现行错误码见 `docs/HANDOFF.md` §5 错误码表。
-
-| 码 | 含义 | 客户端处理 |
-| --- | --- | --- |
-| E1001 | 已存在 active 目标 | 提示切换或归档旧目标 |
-| E1002 | 目标状态不允许该操作 | 刷新后重试 |
-| E2001 | R 值不足，禁止拆解 | 进入校准页 |
-| E2002 | 草案修改幅度超限需确认 | 弹影响提示 |
-| E3001 | 无可用时段 | 引导补可用时段或延期 |
-| E3002 | 排程超时截断（非错误） | 正常展示，附「已尽量安排」 |
-| E4001 | op 重复（幂等命中） | 视为成功，清 pending |
-| E4002 | base_seq 过期 | 触发全量重建 |
-| E5001 | 模板版本不存在 | 降级内置模板 |
-| E9001 | 服务降级中 | 展示只读态提示 |
-
-## 附录 C 配置项
-
-| 配置 | 默认 | 作用 |
-| --- | --- | --- |
-| feasibility.discount_factor | 0.85 | 可用时长折扣 |
-| decompose.cut_threshold | 1.0 | 触发裁剪的 R 阈值 |
-| schedule.slot_minutes | 30 | 排程粒度 |
-| schedule.buffer_ratio | 0.15 | 每日弹性位比例 |
-| schedule.max_contiguous_min | 150 | 单科目连续上限 |
-| schedule.deadline_ms | 200 | 排程硬截止 |
-| replan.low_completion_days | 2 | 连续低完成天数 |
-| replan.low_completion_rate | 0.60 | 低完成率阈值 |
-| replan.load_growth_cap | 0.20 | 单次重排负载增幅上限 |
-| replan.compress_floor | 0.60 | 压缩工时下限 |
-| replan.dedup_hours | 24 | 同类触发去重窗口 |
-| notify.daily_cap | 2 | 单日非事务推送上限 |
-| notify.quiet_start | 22:00 | 静默开始（本地时区） |
-| notify.quiet_end | 08:00 | 静默结束 |
-| insight.calibration_after | 3 | 连续无效重排后转校准 |
-
-参数可在配置中心热更新，立即对新增请求生效，已有计划不受影响（引擎输出带版本号，重排时才用新参数）。
-
-## 附录 D 本地开发
-
-```bash
-make up          # docker compose 起 PG + Redis，初始化 schema 与模板
-make seed        # 造一个考研目标 + 12 周可用时段 + 300 个知识节点
-make api         # 起 api，默认 8080
-make planner     # 起 planner worker
-make test        # 全部单测
-make test-engine # 仅引擎包，带 -race
-make lint        # go-arch-lint 校验包依赖
-```
-
-引擎可脱离数据库独立运行：`go run ./pkg/engine/schedule/cmd` 接受一份 JSON 输入，输出排程结果，便于算法调试与问题复现。
+`npm start` 构建引擎产物后启动服务（缺省 `http://0.0.0.0:8787`）；`npm run dev` 执行 `node --watch server/main.js`；`npm test` 构建产物后跑 `node --test "test/*.test.js"`；`npm run build:engine` 单独生成 `assets/js/rhythm.build.js`；`npm run audit` 执行 `scripts/css-audit.mjs`，做 CSS 括号平衡、token 引用完整性、硬编码色值与死类审计。

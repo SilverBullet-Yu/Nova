@@ -1,303 +1,177 @@
 # 诺瓦 Nova · 前后端协作契约（HANDOFF）
 
-> 本文件是 `server/`（后端执行者）与 `assets/`（前端执行者）之间的**唯一接口依据**。
-> 双方并行开发，不得交叉修改对方负责的目录；任何契约变更须先改本文件再改代码。
+> `server/`（后端）与 `assets/`（前端）之间的唯一接口依据。字段名、错误码、限额、默认值一律以源码为准；契约变更顺序：先改本文件，再改代码，最后改测试。
 
-- 架构依据：`docs/ARCHITECTURE.md`（摘编自《MVP 技术架构文档》）
-- 目标运行时：**Node.js 22+**，零第三方运行时依赖（仅用 `node:` 内置模块：`http`、`fs`、`path`、`url`、`crypto`、`node:test`）
-- 明确不引入：数据库、Redis、ORM、Web 框架、构建工具、打包器
+- 运行时：Node.js 22+（验证于 v24.15.0），零第三方依赖，只用 `node:` 内置模块
+- 参考文档：`docs/ARCHITECTURE.md`、`docs/FRONTEND-CONTRACT.md`、`docs/IP-DESIGN.md`
 
----
-
-## 1. 目录所有权（硬边界）
+## 1. 文档定位与硬边界
 
 | 路径 | 所有者 | 说明 |
 |---|---|---|
-| `shared/engine/*.js` | 后端执行者 | 确定性引擎（双模 UMD，前端只读引用） |
-| `shared/data/*.js` | 后端执行者 | 共享种子数据（双模 UMD） |
-| `server/**` | 后端执行者 | HTTP 入口、路由、内存存储 |
-| `test/engine.test.js` | 后端执行者 | 引擎单测 |
-| `test/api.test.js` | 后端执行者 | HTTP 冒烟 |
-| `index.html` | 前端执行者 | 页面骨架（双击可运行） |
-| `assets/**` | 前端执行者 | 样式与脚本 |
-| `package.json` | 后端执行者 | scripts / type |
-| `docs/HANDOFF.md` | 管理者 | 本文件 |
-| `README.md` | 管理者 | — |
+| `shared/engine/*.js` | 后端（前端只读） | 四个纯函数引擎，UMD 双模，唯一实现 |
+| `shared/data/seed.js` | 后端（前端只读） | 共享种子数据，深度冻结 |
+| `server/**` | 后端 | HTTP 入口、路由、鉴权、内存存储 |
+| `assets/**` | 前端 | 页面脚本与样式 |
+| `index.html` | 前端 | 页面骨架与资源引用清单 |
+| `scripts/**` | 后端 | `scripts/build-engine.js`、`scripts/css-audit.mjs`、`scripts/build-mascot-v4.js` |
+| `test/**` | 后端 | `test/engine.test.js`、`test/api.test.js` |
+| `docs/**` | 管理者 | 契约与说明文档 |
 
-前端执行者**只读** `shared/**`，**禁止**创建或修改该目录。若发现契约与实现不符，报回管理者裁决，不得自行改写。
+跨目录改动规则：
 
----
+1. `shared/` 是唯一实现源，前端只读引用，禁止在 `assets/` 内重写引擎逻辑。
+2. 改了 `shared/engine/*.js`，必须运行 `npm run build:engine` 并提交 `assets/js/rhythm.build.js`；只改源文件不回写产物视为未完成。
+3. 改了 `server/api/routes.js` 的路径、请求字段、错误码，必须同步本文件第 5 节与 `test/api.test.js`。
+4. 改了引擎入参或出参结构，必须同步 `server/api/routes.js`、`assets/js/engine.js`、`assets/js/api.js`、`test/engine.test.js`。
+5. 改了 `shared/data/seed.js`，必须同步 `test/engine.test.js` 与 `test/api.test.js` 的断言。
+6. 改了 op 的实体或字段，必须同步 `server/store/memory.js` 的 `applyToState` / `policyOf` 与本文件第 6 节。
+7. 契约与实现冲突时以源码为准并回报裁决，不得在任一目录私自改写契约。
 
-## 2. 双模模块规范（关键约束）
+## 2. 双模模块规范
 
-`shared/` 下的文件必须同时能在浏览器 `<script>` 与 Node `require()` 下工作。统一采用 UMD 形态：
+`shared/` 下每个文件必须同时能在浏览器 `<script>` 与 Node `require()` 下运行，统一 UMD 形态：`typeof module === 'object' && module.exports` 成立时导出工厂返回值，否则挂载 `root.Rhythm.<name>`；工厂体内 `'use strict'`，返回具名导出对象。
 
-```js
-(function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory();
-  else { root.Rhythm = root.Rhythm || {}; root.Rhythm.<name> = factory(); }
-}(typeof self !== 'undefined' ? self : this, function () {
-  'use strict';
-  // ... 纯函数实现
-  return { <导出的函数名> };
-}));
-```
+纯函数纪律（硬约束）：不读时钟（`Date.now()`、`new Date()`）、不读随机数（`Math.random()`）、不读环境变量、不做任何 I/O；不依赖 `shared/` 之外的模块；相同输入必得相同输出，需排序时显式 `.sort()`，不依赖对象键序。引擎不读时钟：`replan` 的 `snapshot.timestamp` 由调用方经 `input.timestamp` 注入，缺省 `null`。
 
-**为什么不用 ESM**：前端需支持 `file://` 双击直接打开（ESM 在 `file://` 下被 CORS 拦截），Node 侧用 CommonJS `require` 最省事。
+产物规则：
 
-**纯函数纪律**（对应架构文档 C2 与 §6.1）：
-- 不读时钟（`Date.now()` / `new Date()`）、不读随机数、不读环境变量、不做 I/O
-- 相同输入必得相同输出；禁止 `Math.random()`、`Object.keys` 迭代序参与计算（需排序时显式 `.sort()`）
-- 不依赖 `shared/` 之外的任何模块
+- `assets/js/rhythm.build.js` 由 `scripts/build-engine.js` 拼接生成，**禁止手改或手工粘贴**。
+- 脚本只收录 `shared/engine/feasibility.js`、`shared/engine/schedule.js`、`shared/engine/replan.js`、`shared/engine/attribute.js`；`shared/data/seed.js` 不进产物，由 `index.html` 单独以 `<script src="shared/data/seed.js">` 引入。
+- 构建不写时间戳等易变内容，同源码多次构建字节一致；构建前校验每个源文件仍保留 `root.Rhythm` 挂载，缺失即报错。
 
----
+## 3. 共享引擎 API
 
-## 3. 共享引擎 API（四个纯函数）
+四个纯函数都在 `shared/engine/`，浏览器侧经 `window.Rhythm.<模块>.<函数>` 调用。
 
-全部位于 `shared/engine/`，导出方式见第 2 节。
+### 3.1 `feasibility(input)`
 
-### 3.1 `shared/engine/feasibility.js` → `feasibility(input)`
+- 入参：`weeklyH`、`weeks`、`discount`、`demand`，均须为有限数值，缺一或非数值抛 `TypeError`；`demand <= 0` 亦抛 `TypeError`。
+- 出参：`T`、`D`、`R`、`margin`、`verdict`、`threshold`。
+- 计算：`T = Math.round(weeklyH * weeks * discount)`；`R = Number((T / D).toFixed(2))`；`margin = T - D`。
+- 四档硬编码：`R >= 1.2` 充裕、`R >= 0.9` 合理、`R >= 0.7` 偏紧、否则阻断；`threshold` 恒为 `{ ample: 1.2, reasonable: 0.9, tight: 0.7 }`。
 
-对齐架构文档 §6.2。
+### 3.2 `schedule(input)`
 
-```js
-feasibility({
-  weeklyH: 20,        // 每周可用小时
-  weeks: 58,          // 剩余周数
-  discount: 0.85,     // 折扣系数
-  demand: 913         // 需求小时 D
-}) -> {
-  T: number,          // 总可用小时，整数
-  D: number,          // 需求小时
-  R: number,          // T/D，保留 2 位小数
-  margin: number,     // T - D，可为负
-  verdict: '充裕' | '合理' | '偏紧' | '阻断',
-  threshold: { ample: 1.2, reasonable: 0.9, tight: 0.7 }
-}
-```
+- 入参：`tasks`、`slots` 必填数组，`params` 可选对象。`tasks[]` 为 `{ id, subject, estMin, weight, date?, startMin?, title? }`，工时**只读** `estMin`；`slots[]` 为 `{ date, startMin, durMin, available, isBuffer }`，仅严格等于 `false` 的 `available` 视为不可用。
+- `params` 默认值：`bufferRatio` `0.15`、`maxContiguousMin` `150`、`dailyCapMin` `300`。
+- 出参恰好三个键：`blocks`、`unplanned`、`version`（恒 `planner-1.0.0`）。`blocks[]` 为 `{ id, taskId, subject, date, startMin, durMin, isBuffer, locked, reason }`，`unplanned[]` 为 `{ taskId, reason }`。
 
-判定：`R >= 1.2` 充裕；`R >= 0.9` 合理；`R >= 0.7` 偏紧；否则阻断。
-`T = round(weeklyH * weeks * discount)`。
+关键不变量：
 
-### 3.2 `shared/engine/schedule.js` → `schedule(input)`
+1. `available === false` 的时段永不排入。
+2. 单日总占用 ≤ `dailyCapMin`（默认 300 min），弹性位占用计入。
+3. 非弹性任务当日占用 ≤ `dailyCapMin − Math.round(dailyCapMin × bufferRatio)`。
+4. 同日期、同科目的连续占用 ≤ `maxContiguousMin`（默认 150 min）。
+5. 弹性 Slot（`isBuffer`）优先级最低，仅在无其他选择时使用；但带 `date` + `startMin` 的刚性任务先入箱，可优先占用弹性位。
+6. 排序确定：刚性按 `date` → `startMin` → `id` 升序；柔性按 `weight` 降 → `estMin` 降 → `id` 升序。
 
-对齐架构文档 §6.4。
+### 3.3 `replan(input)`
 
-```js
-schedule({
-  tasks: [{ id, subject, estMin, weight, date?, startMin? }],   // 工时统一 estMin
-  slots: [{ date, startMin, durMin, available, isBuffer }],
-  params: {
-    bufferRatio: 0.15,        // 每日弹性余量比例
-    maxContiguousMin: 150,    // 单科目连续上限
-    dailyCapMin: 300          // 单日总上限（含弹性位）
-  }
-}) -> {
-  blocks: [{
-    id, taskId, subject, date, startMin, durMin,
-    isBuffer: boolean, locked: boolean, reason: string
-  }],
-  unplanned: [{ taskId, reason }],
-  version: 'planner-1.0.0'
-}
-```
+- 入参：`tasks`、`week` 必填数组；`params`、`history`、`locks` 可选对象；`timestamp` 可选。`tasks[]` 工时读 `est`（与 `schedule` 的 `estMin` 各钉死一种格式，不做别名兼容）；`week[]` 为 `{ date, minutes, buffer, capacity? }`，`capacity` 缺省取 `dailyCapMin`，输入顺序即周内顺序，不排序；`locks` 为 `{ taskId: true }`，只认显式 `true` 的键。
+- `params` 默认值：`loadGrowthCap` `0.20`、`compressFloor` `0.60`、`compressedShareCap` `0.30`、`consecutiveNoImproveCap` `3`、`bufferRatio` `0.15`、`dailyCapMin` `300`。
+- 出参：`strategies`、`diff`、`loadDelta`、`accepted`、`needsConfirmation`、`verdict`、`snapshot`、`guards`、`nextTasks`、`nextWeek`。`strategies[]` 恒 4 条 `{ level, name, applied, growth, reason }`（`name` 依次为顺延/压缩/替代/放弃）；`diff[]` 为 `{ op, taskId, subject, from, to, detail }`，`op` ∈ `defer`/`compress`/`substitute`/`abandon`；`snapshot` 为 `{ tasks, week, timestamp }`；`guards` 为 `{ loadGrowthOk, bufferPreserved, consecutiveOk, compressedShareOk }`；`verdict` ∈ `ok`/`needsConfirmation`/`blocked`。
 
-> 2026-11-15 简化批：任务工时钉死 `estMin`（不做 est/s 别名兼容）；删除 `slotMinutes` / `deadlineMs` 死参数（纯函数以固定轮次上界体现时间预算）；删除 `softScore` / `truncated` / `loadByDay` / `bufferUsedRatio` 无消费输出。
+四级有序执行，首个通过校验即停止，后续级别不进入：
 
-硬约束（违反即不得排入）：
-1. 不可用时段不得排入
-2. 单日总时长不超日上限（默认 300 min）
-3. 单科目连续不超过 `maxContiguousMin`
-4. 弹性 Slot 在装箱阶段优先级最低，仅在无其他选择时使用
-
-### 3.3 `shared/engine/replan.js` → `replan(input)`
-
-对齐架构文档 §6.5。**四级策略有序执行，首个通过防雪崩校验的级别即停止。**
-
-```js
-replan({
-  tasks: [...],       // 任务工时统一读 est（唯一生产者 = 前端 state.tasks）
-  week: [...],        // 未来 7 天负载，统一格式 [{ date, minutes, buffer, capacity? }]
-  locks: { taskId: true }, // 硬约束：锁定任务不参与顺延 / 压缩 / 替代 / 放弃
-  params: {
-    loadGrowthCap: 0.20,     // 单次重排后未来 7 天负载增幅上限
-    compressFloor: 0.60,     // 压缩工时下限（占原工时比例）
-    compressedShareCap: 0.30,// 压缩项占比上限
-    consecutiveNoImproveCap: 3, // 连续 3 次未改善则停止并转校准
-    bufferRatio: 0.15
-  },
-  history: { consecutiveNoImprove: number }
-}) -> {
-  strategies: [{ level: 1..4, name: '顺延'|'压缩'|'替代'|'放弃', applied: boolean, growth: number, reason: string }],   // growth = 该级负载增幅数值（被短路跳过的级别为 0）
-  diff: [{
-    op: 'defer' | 'compress' | 'substitute' | 'abandon',
-    taskId, subject, from: string, to: string, detail: string
-  }],
-  loadDelta: number,     // 未来 7 天负载变化比例（0.05 = +5%）
-  accepted: boolean,     // L4 恒为 false，确认后才为 true
-  needsConfirmation: boolean, // L4 放弃建议为 true
-  verdict: 'ok' | 'needsConfirmation' | 'blocked',
-  snapshot: { tasks, week, timestamp },   // 撤销用快照（不读时钟，时间戳由调用方注入）
-  guards: {
-    loadGrowthOk: boolean,
-    bufferPreserved: boolean,
-    consecutiveOk: boolean,
-    compressedShareOk: boolean
-  }
-}
-```
-
-四级语义：
 | 级 | 名称 | 行为 | 回退条件 |
 |---|---|---|---|
-| 1 | 顺延 | 按权重从高到低填入未来 7 天 capacity 内的空闲分钟；不占用弹性池，不按 task.date 改变顺序 | 7 天负载增幅 > `loadGrowthCap`，或容量装不下 |
-| 2 | 压缩 | **仅容量溢出时触发**：`overflow = max(0, 待排分钟 − 剩余容量)`，按权重从低到高压缩至 `saved ≥ overflow`，下限原工时 `compressFloor`，标记 degraded | 压缩到下限仍装不下 / 压缩占比超限 / 增幅事后守卫不过 |
-| 3 | 替代 | 同知识域内用高频高权重节点替换低频节点；原任务标记 `substituted` 退出待办，B 记录 `replaces` | 无可替换节点，或替换后复核不过 |
-| 4 | 放弃 | 标记 abandoned 并返回 `needsConfirmation: true`，**不自动接受** | 未确认 / 全部锁定 |
+| 1 | 顺延 | 按权重从高到低填入未来 7 天 `capacity` 内的空闲分钟，不侵占弹性池 | 负载增幅超 `loadGrowthCap` 或容量装不下 |
+| 2 | 压缩 | 仅当溢出 `overflow > 0` 触发，按权重从低到高压缩，下限 `est × compressFloor`，目标 `saved >= overflow` | 压到下限仍装不下 / 占比超 `compressedShareCap` / 增幅事后守卫不过 |
+| 3 | 替代 | 同 `domain` 内以更高 `freq` 且更高 `weight` 的节点替换，原任务标 `substituted` 退出待办，新节点记 `replaces` | 同域内无更优节点或替换后复核不过 |
+| 4 | 放弃 | 标 `abandoned` 并只给建议：`accepted=false`、`needsConfirmation=true`、`verdict='needsConfirmation'` | 未确认 |
 
-**三条防雪崩断言（同时成立才算 accepted）**：
-1. 未来 7 天负载增幅 ≤ `loadGrowthCap`
-2. **任何情况下不得清空弹性位**（`bufferPreserved`）
-3. 连续 `consecutiveNoImproveCap` 次重排未改善 → 停止并转目标校准
+三条防雪崩断言（`accepted=true` 须同时成立）：
 
-`replan` **不得自行读时钟**：`snapshot.timestamp` 由调用方注入。
+1. `loadGrowthOk`：未来 7 天负载增幅 ≤ `loadGrowthCap`。
+2. `bufferPreserved`：任一日负载不得超其 `capacity`，**弹性位不可清空或侵占**。
+3. `consecutiveOk`：连续 `consecutiveNoImproveCap` 次未改善即停止并转目标校准，`verdict='blocked'`。
 
-撤销由 `shared/engine/replan.js` 另导出 `undoReplan(snapshot)`，返回还原后的 `{ tasks, week }`，**不重算**。
-L4 确认由 `confirmReplan(result)` 完成：只接受 `needsConfirmation === true` 的结果，返回 `accepted === true` 的新对象（不改入参）；服务端在确认前不落库。
+补充：`locks` 中的锁定任务是硬约束，不参与顺延装载，也不会被压缩、替代或放弃，且不出现在 `diff` 中。`confirmReplan(result)` 只接受 `needsConfirmation === true` 的结果，返回新的 `accepted=true` 对象且不改入参，否则抛 `TypeError`；服务端在确认前不落库。`undoReplan(snapshot)` 返回 `{ tasks, week }`，逐条还原快照，**不重算**。
 
-### 3.4 `shared/engine/attribute.js` → `attribute(input)`
+### 3.4 `attribute(input)`
 
-对齐架构文档 §6.6。**判定顺序固定，顺序即优先级。**
+- 入参：`planLoadRatio`、`consecutiveZeroDays`、`consecutiveTimeoutCount`、`efficiencyRatio`、`completion`、`externalRatio`，缺省分别为 `0`、`0`、`0`、`1`、`0`、`0`。
+- 出参恰好四键：`type`、`confidence`、`actions`、`evidence`；`confidence` 取值 0..1，`actions` 至少 1 条，`evidence` 含入参与命中项 `matched`。
+- 判定顺序固定（顺序即优先级）：计划过载 `planLoadRatio > 1.1` 或 `consecutiveTimeoutCount >= 3` → 执行中断 `consecutiveZeroDays >= 2` → 效率不足 `efficiencyRatio > 1.4` 且 `completion >= 0.6` → 外部干扰 `externalRatio > 0.3` → 无偏差。
 
-```js
-attribute({
-  planLoadRatio: number,     // 排程总量 / 可用时长
-  consecutiveZeroDays: number,
-  consecutiveTimeoutCount: number,
-  efficiencyRatio: number,    // 实际 / 预估
-  completion: number,         // 0..1
-  externalRatio: number       // '临时有事'占比
-}) -> {
-  type: '计划过载' | '执行中断' | '效率不足' | '外部干扰' | '无偏差',
-  confidence: number,         // 0..1
-  actions: [string],
-  evidence: { [key]: value }
-}
-```
+## 4. 种子数据契约
 
-判定顺序（先计划、后用户）：
-1. 计划过载：`planLoadRatio > 1.1` 或 `consecutiveTimeoutCount >= 3`
-2. 执行中断：`consecutiveZeroDays >= 2`
-3. 效率不足：`efficiencyRatio > 1.4` 且 `completion >= 0.6`
-4. 外部干扰：`externalRatio > 0.3`
-5. 都不命中 → `无偏差`
-
----
-
-## 4. 共享种子数据 `shared/data/seed.js`
-
-导出 `seed`（**不可变**，冻结或约定只读），内容对应现有 demo 的初始状态：
-
-```js
-seed = {
-  user: { id: 'u_demo', name: '林清', tz: 'Asia/Shanghai', dailyCapMin: 300, weeklyH: 20 },
-  goal: { id: 'g_2027', name: '2027 考研 · 计算机', target: '380 分', deadline: '2027-12-25', weeks: 58 },
-  feas: { weeklyH: 20, weeks: 58, discount: 0.85, demand: 913 },
-  tasks: [ { id, subject, title, est, time, weight, done, actual?, why? } ],  // 4 条，与现有 demo 一致
-  buffer: { time: '20:30–21:30', free: true },
-  week: [ { d: '一'..'日', segs: [[subject, min], ...], buf: 60, total, today? } ],
-  weekShift: [...],       // 重排后的对照周
-  notif: { daily, weekly, alert, rescue },
-  weekStats: { WEEKS: [52,61,58,66,71,74,72,68], kpis: {...} }
-}
-```
-
-科目色值沿用现有 CSS 变量名：`数学 → var(--m-math)`、`英语 → var(--m-en)`、`408 → var(--m-408)`、`政治 → var(--m-pol)`。
-
----
+- 导出 `{ seed }`，`deepFreeze` 深度冻结：`Object.isFrozen(seed)` 为 `true`，写入抛 `TypeError`；需修改的一方先深拷贝（如 `JSON.parse(JSON.stringify(seed))`）。
+- 顶层键：`user`、`goal`、`feas`、`tasks`、`buffer`、`week`、`weekShift`、`notif`、`weekStats`、`subjectColors`。
+- `tasks[]` 字段：`id`、`subject`、`title`、`est`、`time`、`weight`、`done`，可选 `actual`、`why`；共 4 条。
+- `week[]` 与 `weekShift[]` 元素：`{ d, segs, buf, total }`，末日带 `today: true`。
+- `subjectColors` 沿用现有 CSS 变量名：数学 `var(--m-math)`、英语 `var(--m-en)`、408 `var(--m-408)`、政治 `var(--m-pol)`。
 
 ## 5. HTTP API 契约
 
-基址 `http://127.0.0.1:8787`，前缀 `/api`。全部返回 JSON。
+前缀 `/api`，全部返回 JSON，错误统一形状 `{ error: { code, message } }`。
 
-| 方法 | 路径 | 请求 | 响应 |
+服务监听：`server/main.js` 默认绑定 `0.0.0.0:8787`，`PORT` 与 `HOST` 环境变量可覆盖。前端在 `http`/`https` 下用同源 `location.origin`，仅 `file://` 打开时用 `http://127.0.0.1:8787`。
+
+中间件顺序：解析 URL → `OPTIONS` 直接 204 → 非 `/api/` 走静态（仅 GET/HEAD，其余 405 `E1001`）→ `/api/` 鉴权 → 限流 → 读请求体 → 路由 → 响应 JSON。
+
+静态资源白名单仅 `/`、`/index.html`、`/assets/*`、`/shared/*`，其余 404 `E2001`；请求体上限 1 MiB，超限 `E4002`。跨域策略：仅本机来源（`127.0.0.1`、`localhost`、`file://` 的 `null` origin）与同源（`Origin` 的 host 与请求 `Host` 相同）放行，其余不放行；放行时返回 `Access-Control-Allow-Methods: GET, POST, OPTIONS`、`Access-Control-Allow-Headers: Content-Type, Authorization`、`Access-Control-Max-Age: 600`。
+
+| 方法 | 路径 | 鉴权 | 请求字段 | 响应 | 失败错误码 |
+|---|---|---|---|---|---|
+| GET | `/api/health` | 免 | 无 | `{ ok, version, uptimeMs }` | 无 |
+| POST | `/api/auth/session` | 免 | 无（不接受任何身份字段） | `{ token, userId, expiresAt }` | E4290 |
+| GET | `/api/state` | 需 | 无 | `{ seed, replan, notifications }` | E4010 |
+| POST | `/api/feasibility` | 需 | `weeklyH`、`weeks`、`discount`、`demand` 均必填且须为有限数值 | `feasibility()` 返回 | E4010, E1001, E4290 |
+| POST | `/api/schedule` | 需 | `tasks`、`slots` 必填数组；`params` 可选对象 | `{ blocks, unplanned, version }` | E4010, E1001, E4290 |
+| POST | `/api/replan` | 需 | `tasks`、`week` 必填数组；`params`、`history`、`locks` 可选对象；`timestamp` 可选 | `replan()` 返回 | E4010, E1001, E4290 |
+| POST | `/api/replan/confirm` | 需 | `result` 必填对象 | `confirmReplan()` 返回 | E4010, E1001, E4290 |
+| POST | `/api/replan/undo` | 需 | `snapshot` 必填对象 | `{ tasks, week }` | E4010, E1001, E4290 |
+| POST | `/api/attribute` | 需 | 请求体不得为空；6 个数值字段均可选 | `attribute()` 返回 | E4010, E1001, E4290 |
+| POST | `/api/sync/ops` | 需 | `ops` 必填数组；每条须有非空字符串 `opId`、`entity`、`field` 与非空 `entityId`；`clientTs` 可选有限数值 | `{ accepted: [opId], serverSeq }` | E4010, E1001, E4002, E4030, E4290 |
+
+路径不存在返回 `E2001`；路径存在但方法不符返回 `E1001`。
+
+错误码（定义在 `server/api/routes.js` 的 `ERRORS`）：
+
+| code | HTTP | 含义 | 当前是否抛出 |
 |---|---|---|---|
-| GET | `/api/health` | — | `{ ok: true, version, uptimeMs }`（免鉴权） |
-| POST | `/api/auth/session` | — | 签发 Bearer 演示凭证（7 天有效，免鉴权）；其余接口均需 `Authorization: Bearer <token>`，缺失 / 过期返回 401，写接口另有 429 限流（见 `server/auth.js`） |
-| GET | `/api/state` | — | `{ seed, replan, notifications }` — 前端启动时拉取的初始全量 |
-| POST | `/api/feasibility` | `{ weeklyH, weeks, discount, demand }` | `feasibility()` 的返回 |
-| POST | `/api/schedule` | `{ tasks, slots, params }` | `schedule()` 的返回 |
-| POST | `/api/replan` | `{ tasks, week, params, history }` | `replan()` 的返回（含 snapshot） |
-| POST | `/api/replan/confirm` | `{ result }` | `confirmReplan(result)` 的返回 — L4「放弃」项经确认后才生效 |
-| POST | `/api/replan/undo` | `{ snapshot }` | `{ tasks, week }` |
-| POST | `/api/attribute` | `{ ...attribute 输入 }` | `attribute()` 的返回 |
-| POST | `/api/sync/ops` | `{ ops: [{ opId, entity, entityId, field, value, clientTs, baseSeq }] }` | `{ accepted: [opId], serverSeq }` — 单批 ≤ 200 |
+| E1001 | 400 | 请求参数非法或缺失 | 是 |
+| E2001 | 404 | 资源不存在 | 是 |
+| E3001 | 409 | 状态冲突 | 否，仅保留定义 |
+| E3002 | 409 | 资源已存在 | 否，仅保留定义 |
+| E4001 | 200 | 幂等键重复，已返回首次结果 | 否，幂等命中直接返回 200 |
+| E4002 | 400 | 请求体过大或单批超过上限 200 | 是 |
+| E4010 | 401 | 未提供有效凭证 | 是 |
+| E4030 | 403 | 无权访问该用户数据 | 是 |
+| E4290 | 429 | 请求过于频繁 | 是 |
+| E5001 | 500 | 服务内部错误 | 是 |
+| E9001 | 500 | 未分类异常 | 是 |
 
-> **已下线端点（2026-11-15 简化批）**：`POST /api/sessions`（打卡改走 `/api/sync/ops` 的 session op，见 flows/exec.record）、`GET /api/sync?since=N`（op 日志在本产品中只写不读，增量拉取协议撤除，幂等由 `opIndex` 保留）、`GET /api/reports/weekly`（周报由前端基于本地状态渲染）。三者现在返回 404 / E2001。
+限流（`server/auth.js` 的 `WRITE_LIMITS`，单进程固定窗口，单位 次/60 秒）：`POST /api/auth/session` 60（按来源 IP 隔离）、`POST /api/sync/ops` 60、`POST /api/replan` 与 `POST /api/replan/confirm` 与 `POST /api/replan/undo` 各 12、`POST /api/feasibility` 与 `POST /api/schedule` 与 `POST /api/attribute` 各 30；`GET /api/health` 与 `GET /api/state` 不限流。超限返回 `E4290` 与 `Retry-After` 响应头，不排队、不自动重试。
 
-**错误码表**（Demo 实现口径，定义见 `server/api/routes.js` 的 `ERRORS`；架构文档附录 B 是生产形态设计稿的独立口径，语义不同，**不是**本契约的取值来源）：
+## 6. 前端到后端通信约定
 
-| code | HTTP | 含义 |
-|---|---|---|
-| E1001 | 400 | 请求参数非法或缺失 |
-| E2001 | 404 | 资源不存在 |
-| E3001 | 409 | 状态冲突 |
-| E3002 | 409 | 资源已存在 |
-| E4001 | 200 | 幂等键重复，已返回首次结果 |
-| E4002 | 400 | 请求体过大或单批超过上限 200 |
-| E4010 | 401 | 未提供有效凭证 |
-| E4030 | 403 | 无权访问该用户数据 |
-| E4290 | 429 | 请求过于频繁 |
-| E5001 | 500 | 服务内部错误 |
-| E9001 | 500 | 未分类异常 |
+- 入口 `assets/js/api.js`，超时 `3000` ms（`AbortController` 主动中断）。`BASE` 取 `window.__ZX_API_BASE__`（覆盖时去掉末尾斜杠），否则 `http`/`https` 用同源 `location.origin`，`file://` 用 `http://127.0.0.1:8787`。
+- 凭证：`POST /api/auth/session` 取得 `{ token, userId, expiresAt }`，存 `localStorage['zx.auth_token']`；本地先按 `expiresAt` 预判过期；收到 401 时清空凭证并重新签发一次，不循环重试。仅 `/api/health` 与 `/api/auth/session` 不带凭证，其余请求统一带 `Authorization: Bearer <token>`。
+- 身份只来自凭证：请求体的 `userId` 不参与判定；`POST /api/sync/ops` 中 `op.userId` 若与凭证不一致，直接 `E4030`。
+- 降级：`assets/js/engine.js` 后端优先，响应结构不合约定或请求失败即走本地 `assets/js/rhythm.build.js`，并置 `ZX.engine.source` 为 `local`；产物缺失时抛错提示先跑 `npm run build:engine`，不静默换语义。同步入口 `ZX.engine.feasibilityNow` 与 `ZX.engine.attributeNow` 直接用本地产物。
+- op 队列：写操作先入 `localStorage['zx.op_queue']`；`opId` 形如 `op_<Date.now().toString(36)>_<计数>`，`clientTs` 取 `Date.now()`，`baseSeq` 取 `ZX.state.serverSeq`；队列保存时只保留最后 200 条，故单批上行 ≤ 200，与服务端 `MAX_SYNC_BATCH` 一致，超限服务端返回 `E4002`。
+- 幂等键是 `opId`，分区内唯一；重复提交返回首次的 `serverSeq`（HTTP 200，`accepted` 仍含该 `opId`，不报错）。
+- 字段级合并（`server/store/memory.js` 的 `policyOf`）：墓碑类 `deleted`、`isDeleted`、`deletedAt` 墓碑优先不可翻转；计数类 `count`、`sessionCount`、`sessions`、`times` 求和；`actual`、`durationMin`、`minutes`、`duration` 取最大值；其余字段最后写入优先（同 `clientTs` 时 `serverSeq` 大者为准）。
 
-约定：
-- 鉴权：业务接口一律从 `Authorization: Bearer <token>` 解析身份（实现见 `server/auth.js`）；免鉴权仅 `/api/health` 与 `/api/auth/session` 两条
-- HTTP 错误统一 `{ error: { code, message } }`，`code` 取上方错误码表
-- `POST /api/sync/ops` 的幂等键为 `opId`，重复提交返回**首次的** `serverSeq`（幂等命中不算错误，对应 E4001）；打卡记录以 `entity:'session'` 的 op 上行，同走该幂等键
-- 服务端**不读时钟做业务判断**；需要时间戳时由请求体传入或使用单调计数器
+## 7. 兼容性硬要求
 
----
-
-## 6. 前端 → 后端通信约定
-
-前端 `assets/js/api.js` 暴露统一接口：
-
-```js
-ZX.api.getState()      -> Promise<state>
-ZX.api.feasibility(p)  -> Promise<result>
-ZX.api.schedule(p)     -> Promise<result>
-ZX.api.replan(p)       -> Promise<result>
-ZX.api.confirmReplan(result) -> Promise<result>   /* 确认采纳含「放弃」项的重排 */
-ZX.api.undo(snapshot)  -> Promise<{tasks, week}>
-ZX.api.syncOps(ops)    -> Promise<{accepted, serverSeq}>
-ZX.api.health()        -> Promise<{ok, version}>
-```
-
-> 引擎侧另有本地产物同步入口：`ZX.engine.feasibilityNow` / `ZX.engine.attributeNow`（渲染路径用，与后端同语义）。归因（attribute）由前端在执行记录后直接调本地产物，不经后端。
-
-**降级要求（架构文档 C1 / C4）**：
-1. 请求超时 **3000ms**，超时或网络失败 → 抛错
-2. 前端在捕获错误后**必须**降级到本地引擎产物（`assets/js/rhythm.build.js`，由 `npm run build:engine` 从 `shared/engine/*` 生成），保证离线双击打开时全部功能可用
-3. 本地写操作先入 `localStorage` 的 op 队列（键 `zx.op_queue`），联网成功后清 pending 标记（对应 C4 写路径顺序）
-4. 本地持久化键 `zx.overlay`：种子之上叠加本机增量（新目标 / 打卡记录 / 跳过 / 补录），跨刷新存活；改期与锁定不入 overlay，仅存 op 队列
-5. 顶栏同步指示器需反映三种状态：`已同步` / `离线 · 待上行 N` / `离线 · 本地计算`
-
----
-
-## 7. 兼容性硬要求（前端执行者必守）
-
-1. `index.html` 必须支持 **file:// 双击直接打开**（引擎产物随仓库提交，无需构建步骤；`npm run build:engine` 可重建，不依赖 CDN）
-2. 视觉沿用现行「日漫清晰线」体系（2026-11-14 起，历经暖纸琥珀 → 纸白墨蓝 → 清晰线分格 → 日漫化四轮演进）：奶油纸白底 `#FBF7EF` + 天空蓝为唯一活性色、主容器 2px 实墨线全框、圆润 `--r:10px` 体系、等宽数字、超重黑体标题；全部视觉参数集中在 `assets/css/app.css` 顶部 token 区（设计语言以其头注释为准），新增样式必须复用变量，不得另起一套配色；IP 形象规范见 `docs/IP-DESIGN.md`
-3. 现有**全部交互**必须保留：5 个页签（对话/今日/计划/数据/我的，对话为默认）、对话意图路由、重排流程、撤销、计时器、降载采纳、预置撤销、通知开关、导出；2026-11-15 简化批后挽救弹层为两屏（缺口与方式 → 确认），排程由引擎在目标生效时真跑
-4. 现有文案与数值（如 R 1.08）不得擅自改动；**2026-11-15 简化批放宽**：数据页周报 / 归因 / 趋势末周改由本地执行记录真算渲染，seed.weekStats 的摆拍 KPI（68%、11.2h 等）不再上屏（seed 数值本身不动，引擎测试仍断言）
-5. 不得引入任何第三方库或 CDN 资源
-
----
+1. 改 `shared/engine/*.js` → `npm run build:engine` → 提交 `assets/js/rhythm.build.js` → `npm test`。
+2. 改路由、请求字段、错误码 → 同步本文件第 5 节与 `test/api.test.js`。
+3. 改引擎签名 → 同步 `server/api/routes.js`、`assets/js/engine.js`、`assets/js/api.js`、`test/engine.test.js`。
+4. 改 `shared/data/seed.js` → 同步 `test/engine.test.js` 与 `test/api.test.js` 的断言。
+5. 改 op 实体或字段 → 同步 `server/store/memory.js` 的 `applyToState` / `policyOf` 与本文件第 6 节。
+6. 前端不得内嵌第二份引擎实现；`assets/js/rhythm.build.js` 不得手改。
+7. 不引入第三方库或外部 CDN 资源。
 
 ## 8. 验收口径
 
-- `npm test` 全绿，且引擎单测覆盖四个模块的：确定性快照断言、重排回退与撤销等价、弹性位不被清空、归因顺序不变量
-- `node server/main.js` 启动后 `GET /api/health` 返回 `ok: true`
-- `index.html` 双击打开：5 个页签可切换（对话为默认）、重排/撤销/计时/降载链路可用、顶栏在无后端时显示离线态
-- `git log --oneline` 至少 4 条可独立回滚的提交
+| 检查项 | 命令 | 判定标准 |
+|---|---|---|
+| 引擎单测 + HTTP 冒烟 | `npm test` | 退出码 0，输出 `pass 58 fail 0`（当前 58 项全绿，来自 `test/engine.test.js` 与 `test/api.test.js`） |
+| CSS 审计 | `npm run audit` | 退出码 0；存在 error 时退出码 1，仅 warn 仍为 0 |
+| 引擎产物重建校验 | `npm run build:engine` 后重算 `assets/js/rhythm.build.js` 的 SHA256 | 重建前后哈希一致（构建不写时间戳）；当前值 `0f3206b196acd8d72f220e28acdb1026127ff5139ebd908d96ff6cede7434242` |
+| 资源引用全量扫描 | 提取 `index.html` 中 `src`/`href` 的相对路径并逐个检查文件存在 | 缺失数为 0（当前 21 个引用） |
+| 服务冒烟 | `node server/main.js` 后请求 `GET /api/health` | HTTP 200 且 `ok` 为 `true` |
