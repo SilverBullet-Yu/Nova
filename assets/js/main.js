@@ -209,6 +209,8 @@ window.ZX = window.ZX || {};
     var listening = !sentLock && document.activeElement === inputEl && !!inputEl.value.trim();
     listenEl.src = avatarSrc(listening ? 'listenAvatar' : 'idleAvatar');
     listenEl.alt = listening ? '诺瓦正在聆听' : '诺瓦';
+    /* 聆听态叠一层低速呼吸：24px 下两态静态差异过小，靠动效让状态可辨 */
+    listenEl.className = listening ? 'cp-listen listening' : 'cp-listen';
   }
   if (inputEl) {
     inputEl.addEventListener('input', function () { sentLock = false; updateListen(); });

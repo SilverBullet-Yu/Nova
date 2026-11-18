@@ -164,7 +164,8 @@
 | 检查 | 命令 | 判定标准 |
 |---|---|---|
 | 语法 | `node --check assets/js/<改动文件>.js` | 退出码 0 |
-| 单测与冒烟 | `npm test` | 58 项全过（`test/engine.test.js` + `test/api.test.js`）；`pretest` 先跑 `build:engine` |
+| 单测与冒烟 | `npm test` | 62 项全过（`test/engine.test.js` + `test/api.test.js` + `test/mascot.test.js`）；`pretest` 先跑 `build:engine` |
+| 形象门禁 | `npm test`（`test/mascot.test.js`） | 素材 14 个齐全；内联副本与源素材逐字节一致；生成器幂等——重跑 `build-mascot-v4.js` 不产生差异，不一致时测试失败并自动还原工作区 |
 | 引擎产物同步 | `npm run build:engine` 后确认 `assets/js/rhythm.build.js` 无差异 | 改过 `shared/engine/*.js` 必须重跑；产物与源码字节一致 |
 | CSS 审计 | `npm run audit` | 退出码 0；仅 warn（死 token / 死类候选）可过，存在 error 必须先修 |
 | 服务冒烟 | `npm start`（默认 `127.0.0.1:8787`） | `GET /api/health` 返回 200 且含 `"ok":true`；首页返回 200 |
@@ -172,7 +173,7 @@
 | 离线链路 | 双击 `index.html` 以 `file://` 打开 | 顶栏显示离线褪色形象（`alt` / `title` 为「离线 · 本地计算」），排程 / 记录 / 导出可用，控制台无报错 |
 | 离线指示 | 停服后刷新首页；有待上行 op 时复看 | 顶栏出现 `.sync-offline` 头像且不破图；待上行 N 时 `.sync-pending` 角标显示 N；恢复服务后回到圆点 + 「本地优先 · 已同步」 |
 | 聆听态 | 在输入框输入文字，再清空、再发送 | 输入台 `.cp-listen` 头像换为聆听形象（`alt` 为「诺瓦正在聆听」）；清空或发送后回待机；停服时同样可显示 |
-| 降级与动效 | 停服后重复关键操作；`html[data-motion="off"]` 下复看 | 操作走本地引擎兜底；关动效后不破版 |
+| 降级与动效 | 停服后重复关键操作；`html[data-motion="off"]` 下复看 | 操作走本地引擎兜底；关动效后不破版——聆听态的呼吸动画随之停止，形象切换不变 |
 
 `index.html` 资源引用全量扫描（在仓库根目录执行）：
 

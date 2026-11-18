@@ -171,7 +171,7 @@
 
 | 检查项 | 命令 | 判定标准 |
 |---|---|---|
-| 引擎单测 + HTTP 冒烟 | `npm test` | 退出码 0，输出 `pass 58 fail 0`（当前 58 项全绿，来自 `test/engine.test.js` 与 `test/api.test.js`） |
+| 引擎单测 + HTTP 冒烟 + 形象门禁 | `npm test` | 退出码 0，输出 `pass 62 fail 0`（当前 62 项全绿，来自 `test/engine.test.js`、`test/api.test.js` 与 `test/mascot.test.js`） |
 | CSS 审计 | `npm run audit` | 退出码 0；存在 error 时退出码 1，仅 warn 仍为 0 |
 | 引擎产物重建校验 | `npm run build:engine` 后重算 `assets/js/rhythm.build.js` 的 SHA256 | 重建前后哈希一致（构建不写时间戳）；当前值 `0f3206b196acd8d72f220e28acdb1026127ff5139ebd908d96ff6cede7434242` |
 | 资源引用全量扫描 | 提取 `index.html` 中 `src`/`href` 的相对路径并逐个检查文件存在 | 缺失数为 0（当前 21 个引用） |

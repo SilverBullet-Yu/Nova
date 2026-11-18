@@ -30,7 +30,7 @@ npm test      # 引擎单测 + HTTP 冒烟
 | 命令 | 作用 |
 |---|---|
 | `npm start` | 启动 HTTP 服务（API + 静态托管前端） |
-| `npm test` | 引擎单测 + HTTP 端到端冒烟 |
+| `npm test` | 引擎单测 + HTTP 端到端冒烟 + 形象素材门禁 |
 | `npm run build:engine` | 由 `shared/engine/*.js` 生成浏览器引擎产物（**改过引擎必须重跑**） |
 | `npm run audit` | CSS 审计 |
 

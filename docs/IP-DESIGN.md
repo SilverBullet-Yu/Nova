@@ -168,11 +168,11 @@
 
 ### 5.3 状态图的使用位置
 
-见 §4 表。对应样式类在 `assets/css/app.css`：`.msg-mascot`（132×116）、`.msg-state` / `.msg-state.state-calc`（32×28 / 24×21）、`.tk-mascot`（24×30）、`.sb-mascot`（32×28）、`.warn-flag`（22×19）、`.sync-offline`（24×24，顶栏离线头像）、`.sync-pending`（待上行数字角标）、`.cp-listen`（24×24，输入台聆听头像）。助理消息落款印由 `.seal-no` 渲染（`--cinnabar` 底 + `--ac-ink` 字），不占用独立素材。
+见 §4 表。对应样式类在 `assets/css/app.css`：`.msg-mascot`（132×116）、`.msg-state` / `.msg-state.state-calc`（32×28 / 24×21）、`.tk-mascot`（24×30）、`.sb-mascot`（32×28）、`.warn-flag`（22×19）、`.sync-offline`（24×24，顶栏离线头像）、`.sync-pending`（待上行数字角标）、`.cp-listen` / `.cp-listen.listening`（24×24，输入台聆听头像与聆听态呼吸）。助理消息落款印由 `.seal-no` 渲染（`--cinnabar` 底 + `--ac-ink` 字），不占用独立素材。
 
 ### 5.4 动效归属
 
-SVG 内不含任何动画（经 `<img>` 引用也读不到页面上的 `data-motion` 开关）；动效只加在产品侧的 `img` 元素上：漂浮 `novaFloat`、呼吸 `novaBreathe`、到场 `novaEnter`、盖章 `novaStamp`、弹跳 `novaPop`、歪头 `novaWobble`、摇头 `novaShake`。总闸唯一：`html[data-motion="off"]`（`assets/css/app.css`）。
+SVG 内不含任何动画（经 `<img>` 引用也读不到页面上的 `data-motion` 开关）；动效只加在产品侧的 `img` 元素上：漂浮 `novaFloat`、呼吸 `novaBreathe`、到场 `novaEnter`、盖章 `novaStamp`、弹跳 `novaPop`、歪头 `novaWobble`、摇头 `novaShake`。总闸唯一：`html[data-motion="off"]`（`assets/css/app.css`）。聆听态的输入台头像（`.cp-listen.listening`）复用 `novaBreathe`（2.6s，幅度 1.06）——24px 下两态静态差异仅在眼高，靠这层呼吸让状态可辨；关动效后即停止，不改形象切换。
 
 ## 6. 禁用清单
 
@@ -188,7 +188,7 @@ SVG 内不含任何动画（经 `<img>` 引用也读不到页面上的 `data-mot
 
 | 目标 | 命令 | 判定标准 |
 |---|---|---|
-| 素材与生成脚本一致 | `node scripts/build-mascot-v4.js` 后比对 | `assets/img/` 下 14 个文件与重新生成的结果逐字节一致（SHA256 相同） |
+| 素材、内联副本与门禁 | `node scripts/build-mascot-v4.js` 后比对；`npm test`（`test/mascot.test.js`） | `assets/img/` 下 14 个文件与重新生成的结果逐字节一致；`assets/js/mascot-inline.js` 的三枚 data URI 解码后分别与 `avatar-v4.svg`、`avatar-v4-listen.svg`、`avatar-v4-offline.svg` 逐字节一致；生成器幂等（重跑无差异，不一致则测试失败并自动还原工作区） |
 | 状态素材齐全 | 列出 `assets/img/` | 10 个 `mascot-v4*.svg` + 3 个 `avatar-v4*.svg` + `favicon-v4.svg`，共 14 个 |
 | 画布尺寸正确 | 读 SVG 根元素 | 主立绘 240×210、头像 96×96、图标 16×16，`viewBox` 与宽高一致 |
 | 状态映射与素材一致 | 在 `assets/js/` 与 `index.html` 中检索 `assets/img/` 引用 | 每个被引用的文件名都在 `assets/img/` 中存在；§4 表中 9 行与实际文件逐字一致；接入状态以 §4 表末列为准 |

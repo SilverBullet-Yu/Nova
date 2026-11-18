@@ -133,7 +133,7 @@
 | 静态资源 | 白名单 `/`、`/index.html`、`/assets/*`、`/shared/*`；非 GET/HEAD 返回 405 |
 | 请求体 | 上限 1 MiB（`MAX_BODY_BYTES = 1048576`），超限 `E4002`；JSON 非法 `E1001` |
 | 前端降级 | 请求超时 3000 ms；引擎调用失败或结构不合约时回退本地产物（`ZX.engine.source` 记为 `local`）；收到 HTTP 响应即视为在线，仅网络失败或超时判离线；离线时顶栏同步位换为诺瓦的离线褪色头像，取自 `assets/js/mascot-inline.js` 的内联 data URI（不依赖网络），待上行数量以角标显示；输入台头像在用户输入时切聆听形象，同样取自内联副本 |
-| 体积 | `assets/css/app.css` 100138 字节；`assets/js/rhythm.build.js` 48410 字节；`assets/js/mascot-inline.js` 3247 字节；仓内 `js`/`css`/`html`/`svg` 共 47 个文件、612967 字节 |
+| 体积 | `assets/css/app.css` 100352 字节；`assets/js/rhythm.build.js` 48410 字节；`assets/js/mascot-inline.js` 3247 字节；仓内 `js`/`css`/`html`/`svg` 共 48 个文件、617661 字节 |
 | 第三方资源 | 无第三方脚本、字体、CDN 与埋点；`../index.html` 不引用任何外部 URL，图标与插画均为仓内 SVG |
 
 ## 9. 附录
