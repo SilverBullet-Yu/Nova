@@ -127,7 +127,7 @@
 
 整体褪为低饱和暖灰：机身 `#EAEDF2`、面罩 `#333B47`、描边与眼 `#A9B2BE`、眼亮芯 `#C8CFD8`、耳杆 `rgba(18,26,40,.10)` 与 `.06`、耳根透镜 `rgba(18,26,40,.22)`、关节盘 `#DDE2EA`、纸条纸底 `#F4F6F9`、地面投影 `rgba(18,26,40,.08)`。
 
-## 4. 状态系统（9 态 = 9 个产品场景）
+## 4. 状态系统（9 态素材 = 9 个场景设定）
 
 | # | 状态 | 视觉变化 | 素材文件 | 触发场景 | 前端接入点 |
 |---|---|---|---|---|---|
@@ -140,6 +140,8 @@
 | ⑦ | 提醒 warn | 紧张眼「><」+ 耳变深墨蓝 + 耳尖闪线 | `mascot-v4-warn.svg` | 数据页「偏差归因」面板；重排后未来 7 天负载增幅 ≥ 20% 的预警旗标 | `assets/js/views/data.js`、`assets/js/views/plan.js`（22×19） |
 | ⑧ | 离线 offline | 横条眼 + 整体褪色 | `mascot-v4-offline.svg`、`avatar-v4-offline.svg` | 素材在库，当前产品未接入；离线状态由顶栏「离线 · 本地计算 / 离线 · 待上行 N」承担 | — |
 | ⑨ | 兜底 unknown | 单眼 + 「?」 + o 嘴 | `mascot-v4-unknown.svg` | 关键词未命中的兜底回复 | `assets/js/assistant.js` `fallback()`（32×28） |
+
+表中 ② 聆听 与 ⑧ 离线 的素材已生成但**当前未接入产品**（离线态由顶栏「离线 · 本地计算 / 离线 · 待上行 N」承担）；其余 7 态均已接入，接入点见末列。`mascot-v4-classic.svg` 为原味涂装，按 §3.3 不进产品 UI。
 
 情绪上限为「平静—关切—欣喜」三档：⑧是状态性褪色而非情绪，⑦是紧张但克制（只改眼形与耳色，无红色、无尖角）。
 
@@ -186,7 +188,7 @@ SVG 内不含任何动画（经 `<img>` 引用也读不到页面上的 `data-mot
 | 素材与生成脚本一致 | `node scripts/build-mascot-v4.js` 后比对 | `assets/img/` 下 14 个文件与重新生成的结果逐字节一致（SHA256 相同） |
 | 状态素材齐全 | 列出 `assets/img/` | 10 个 `mascot-v4*.svg` + 3 个 `avatar-v4*.svg` + `favicon-v4.svg`，共 14 个 |
 | 画布尺寸正确 | 读 SVG 根元素 | 主立绘 240×210、头像 96×96、图标 16×16，`viewBox` 与宽高一致 |
-| 9 态映射正确 | 在 `assets/js/` 与 `index.html` 中检索 `assets/img/` 引用 | 每个被引用的文件名都在 `assets/img/` 中存在；§4 表中 9 行与实际文件逐字一致 |
+| 状态映射与素材一致 | 在 `assets/js/` 与 `index.html` 中检索 `assets/img/` 引用 | 每个被引用的文件名都在 `assets/img/` 中存在；§4 表中 9 行与实际文件逐字一致；接入状态以 §4 表末列为准 |
 | 主题色一致 | 读 `assets/css/app.css` 的 `:root` | `--bg #FBF7EF`、`--ac #3161C1`、`--cinnabar #A03B2C`、`--warn #8A5A1E` 等与 §3.1 表一致 |
 | 接入无报错 | `npm start` 后打开首页 | 控制台无错误；首屏出现 `mascot-v4.svg`，顶栏出现 `avatar-v4.svg`，标签页出现 `favicon-v4.svg` |
 | 回归 | `npm test` | 引擎单测与 HTTP 冒烟全绿 |

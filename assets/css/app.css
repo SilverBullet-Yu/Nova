@@ -180,7 +180,7 @@ button{font-family:inherit;color:inherit}
 }
 
 .brand{display:flex;align-items:center;gap:11px;min-width:200px}
-/* 品牌标记：诺瓦 v4 章式头像（墨底方章 + 斜耳 + 双眼 + 朱砂印） */
+/* 品牌标记：诺瓦 v4 脸形头像（透明底 + 深色面罩 + 主色竖眼 + 双耳尖） */
 .seal{
   width:26px;height:26px;flex:0 0 26px;display:grid;place-items:center;
   background:transparent;overflow:hidden;
