@@ -290,10 +290,7 @@ if (require.main === module) {
     process.stdout.write('  POST /api/replan/undo   撤销重排\n');
     process.stdout.write('  POST /api/replan/confirm 确认放弃并落库\n');
     process.stdout.write('  POST /api/attribute     偏差归因\n');
-    process.stdout.write('  POST /api/sessions      打卡上报（幂等）\n');
-    process.stdout.write('  GET  /api/sync?since=N  增量拉取\n');
     process.stdout.write('  POST /api/sync/ops      批量上行（≤200）\n');
-    process.stdout.write('  GET  /api/reports/weekly 周报\n');
   }).catch((e) => {
     process.stderr.write('启动失败：' + (e && e.message ? e.message : String(e)) + '\n');
     process.exit(1);

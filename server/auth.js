@@ -116,7 +116,6 @@ const WRITE_LIMITS = {
      采信 X-Forwarded-For 最后一跳（网关追加的真实客户端 IP），避免全部访客共享同一桶。 */
   'POST /api/auth/session': { limit: 60, windowMs: 60000 },
   'POST /api/sync/ops': { limit: 60, windowMs: 60000 },
-  'POST /api/sessions': { limit: 60, windowMs: 60000 },
   'POST /api/replan': { limit: 12, windowMs: 60000 },
   'POST /api/replan/confirm': { limit: 12, windowMs: 60000 },
   'POST /api/replan/undo': { limit: 12, windowMs: 60000 },

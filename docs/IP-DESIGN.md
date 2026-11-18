@@ -1,6 +1,6 @@
 # 诺瓦 · IP 形象设定
 
-> 诺瓦 Nova 助理人格「诺瓦」的视觉 IP 规范。**本文件是唯一设定来源**；素材由 [`scripts/build-mascot-v4.js`](../scripts/build-mascot-v4.js) 生成到 [`assets/img/`](../assets/img/)，预览见 [`design-preview/mascot/preview-v4.html`](../design-preview/mascot/preview-v4.html)。
+> 「诺瓦 Nova」的视觉 IP 规范。**本文件是唯一设定来源**；素材由 [`scripts/build-mascot-v4.js`](../scripts/build-mascot-v4.js) 生成到 [`assets/img/`](../assets/img/)，预览见 [`design-preview/mascot/preview-v4.html`](../design-preview/mascot/preview-v4.html)。
 > 当前为 **v4（向官方版图造型语言对齐的重绘）**。历史方案归档：v1 方盒 / v2 球形 + 细棒耳在 [`design-preview/mascot/`](../design-preview/mascot/)，v3 球形 + 兔子耳在 [`design-preview/mascot/archive-v3/`](../design-preview/mascot/archive-v3/)。
 > **2026-11-14 协调性微调**（几何与色板，不改造型语言）：耳根扎入球体、透镜沿杆轴、关节盘落球面（消除耳根悬空断裂）；耳杆三段透明度阶梯放缓（.94/.55/.28）；飞溅碎片按漂离方向分组统一倾角；旧主题色残留统一（classic 朱砂印、专注态朱砂 → `#A03B2C`，提醒态耳 → 现行深墨蓝 `#274B94`，闪线 → 警示金 `#B98A3C`，favicon 底 → 奶油纸 `#FBF7EF`）；warn/calc 右眼抬高 2px 对齐待机态脸部语言；新增产品侧「灵动」动效（见 §6）。
 >
@@ -18,7 +18,7 @@
 | 一砖一瓦 | 30 分钟粒度把日程垒起来；日常屋瓦，遮风挡雨（陪伴感、反焦虑） |
 | 新星 | Nova 拉丁语义为「新」：每天重新开始，不评判昨天，只排今天 |
 
-与产品名同源：诺瓦 Nova 的「纳」与「诺」同音，助理即品牌的人格化。
+与产品名同源：产品名「诺瓦 Nova」与助理同名，助理即品牌的人格化。
 
 **人格即产品**：确定性、可解释、零惩罚。人格关键词——
 

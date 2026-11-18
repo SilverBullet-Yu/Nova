@@ -61,8 +61,9 @@ const warns = [];
   const extRefs = sources.join('\n');
   for (const m of extRefs.matchAll(/var\(\s*(--[a-zA-Z0-9-]+)/g)) used.add(m[1]);
 
-  // 行内样式注入（JS 模板拼 style="--c:..."）的 token 不在 CSS 中定义
-  const EXEMPT_UNDEFINED = new Set(['--c']);
+  // 行内样式注入（JS 模板拼 style="--c:..." / style="--d:..."）的 token 不在 CSS 中定义
+  // --c：科目色；--d：diff 逐条过账的序号（assistant.js 的 .diff-line 行内注入）
+  const EXEMPT_UNDEFINED = new Set(['--c', '--d']);
   for (const t of used) {
     if (!defined.has(t) && !EXEMPT_UNDEFINED.has(t)) errors.push(`var(${t}) 未定义`);
   }
@@ -123,10 +124,41 @@ const warns = [];
   sources.push(readFileSync(join(ROOT, 'index.html'), 'utf8'));
   const refs = sources.join('\n');
 
+  // 精确收集「真正出现在 DOM 上的 class token」：
+  //   1) class="..." 属性值按空白切分（class="a b" / class="x ' + y + '"）
+  //   2) classList.add/remove/toggle/contains('...')
+  // 用词边界搜索整个源码会产生假阴性（flow.step 让 .step 被判为在用）、
+  // 也会有假阳性（子串命中），故改为 token 精确比对。
+  const usedTokens = new Set();
+  // 1) class="..." 属性字面量
+  for (const m of refs.matchAll(/class\s*=\s*["']([^"']*)["']/g)) {
+    for (const t of m[1].split(/\s+/)) if (t) usedTokens.add(t);
+  }
+  // 2) el.className = 'a b' 赋值
+  for (const m of refs.matchAll(/className\s*=\s*["']([^"']*)["']/g)) {
+    for (const t of m[1].split(/\s+/)) if (t) usedTokens.add(t);
+  }
+  // 3) classList.add/remove/toggle/contains('...')
+  for (const m of refs.matchAll(/classList\.(?:add|remove|toggle|contains)\s*\(([^)]*)\)/g)) {
+    for (const q of m[1].matchAll(/["'`]([^"'`]*)["'`]/g)) {
+      for (const t of q[1].split(/\s+/)) if (t) usedTokens.add(t);
+    }
+  }
+  // 4) 拼接字面量中的类名：' silent'、' tt-sub'、' gap' + ' zero'、' is-locked' 等。
+  //    这些以空格开头的片段挂在既有 class 后面。JS 源码里的 \" 转义引号会破坏字面量配对，
+  //    故不做引号配对解析，直接在全量文本中按「类名形态」取词元
+  //    （小写字母开头，可含数字与连字符），可覆盖变量拼接与三元表达式。
+  for (const t of (refs.match(/[a-z][a-z0-9]*(?:-[a-z0-9]+)*/g) || [])) usedTokens.add(t);
+
+  // 类选择器：先剥离 CSS 注释，避免把「统一 .sa- 前缀」这类说明文字当成类名。
+  // 剥离后仍需剔除「命名空间前缀」残留（如 .sa- 单独出现），只保留真实类名形态。
+  const cssNoComment = css.replace(/\/\*[\s\S]*?\*\//g, '');
   const classes = new Set();
   // 类选择器（排除 var/属性值场景）：.name 出现在选择器位置（行首或 { 前/逗号后/组合符后）
-  for (const m of css.matchAll(/\.([a-zA-Z][a-zA-Z0-9_-]*)/g)) classes.add(m[1]);
-  const dead = [...classes].filter(c => !new RegExp(`\\b${c.replace(/[-]/g, '\\-')}\\b`).test(refs)).sort();
+  for (const m of cssNoComment.matchAll(/\.([a-zA-Z][a-zA-Z0-9_-]*)/g)) classes.add(m[1]);
+  // 去掉末尾连字符的前缀碎片（.sa- / .sc2- 之类，无实际元素挂载）
+  for (const c of [...classes]) if (c.endsWith('-')) classes.delete(c);
+  const dead = [...classes].filter(c => !usedTokens.has(c)).sort();
   for (const c of dead) warns.push(`死类候选 .${c}（JS/HTML 零引用，确认后删除）`);
 }
 

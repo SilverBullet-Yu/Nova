@@ -64,21 +64,32 @@ npm test      # 引擎单测 + HTTP 冒烟
 PORT=8080 HOST=127.0.0.1 node server/main.js
 ```
 
+### 环境变量清单
+
+完整清单与生成方式见 [`.env.example`](.env.example)。本项目不自动读取 `.env`（零第三方依赖），请通过 shell 或部署平台的环境变量注入。
+
+| 变量 | 缺省 | 说明 |
+|---|---|---|
+| `NOVA_AUTH_SECRET` | 本地随机 / 生产必填 | 凭证签名的 HMAC 密钥，需 ≥32 字节随机串。生产环境（`NODE_ENV=production`）未配置将直接拒绝启动 |
+| `NOVA_TRUST_PROXY` | 未设置 | 置于网关/反代之后时设为 `1`，按 `X-Forwarded-For` 最后一跳隔离限流桶；不设则按不可伪造的 TCP 对端地址 |
+| `CORS_MODE` | 未设置 | 云函数经 HTTP 网关暴露时设为 `off`，避免与网关回填的 `Access-Control-Allow-Origin` 冲突 |
+| `NODE_ENV` | 未设置 | 设为 `production` 启用生产约束（鉴权密钥必填等） |
+
+> 密钥类变量一律不写入仓库；`.env` 已被 `.gitignore` 忽略，`.env.example` 仅含变量名与说明，不含任何真实值。
+
 ---
 
 ## 部署到腾讯云 CloudBase
 
-线上环境已部署，前后端同源，一个地址即可访问完整功能：
-
-**https://demo-d1gyqshti9179e9bb-1359241594.ap-shanghai.app.tcloudbase.com/**
+本项目可打包为 CloudBase HTTP 云函数部署，函数包由构建脚本生成，零第三方依赖。
 
 | 项目 | 值 |
 |---|---|
-| 环境 ID | `demo-d1gyqshti9179e9bb`（地域 ap-shanghai） |
 | 部署形态 | HTTP 云函数 `nova`（运行时常驻监听 `9000`，由 `scf_bootstrap` 拉起） |
 | 运行时 | `Nodejs20.19` |
-| 访问入口 | HTTP 网关默认域名，路由 `/` → `nova`（`WEB_SCF`，已开启路径透传） |
-| 函数包 | `.deploy/cloudbase-functions/nova`（约 509 KB / 45 个文件，零依赖） |
+| 函数包 | `.deploy/cloudbase-functions/nova`（约 529 KB / 45 个文件，零依赖） |
+
+> 环境 ID、访问域名等云资源标识由部署方在自己的 CloudBase 环境中确定，不在本仓库固化。
 
 ### 为什么是云函数而不是云托管
 
@@ -162,6 +173,7 @@ npm run build:cloudbase   # 产出 .deploy/cloudbase-functions/nova
 ```
 .
 ├── index.html                # 前端入口，支持 file:// 双击打开
+├── .env.example              # 环境变量模板（仅变量名与说明，无真实值）
 ├── assets/
 │   ├── css/app.css           # 样式（单一来源，CSS 变量驱动）
 │   ├── img/                  # 诺瓦 v4 形象素材（由 scripts/build-mascot-v4.js 生成）

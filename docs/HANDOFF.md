@@ -254,7 +254,7 @@ seed = {
 约定：
 - 鉴权：业务接口一律从 `Authorization: Bearer <token>` 解析身份（实现见 `server/auth.js`）；免鉴权仅 `/api/health` 与 `/api/auth/session` 两条
 - HTTP 错误统一 `{ error: { code, message } }`，`code` 取上方错误码表
-- `POST /api/sessions` 与 `/api/sync/ops` 的幂等键为 `opId`，重复提交返回**首次的** `serverSeq`（幂等命中不算错误，对应 E4001）
+- `POST /api/sync/ops` 的幂等键为 `opId`，重复提交返回**首次的** `serverSeq`（幂等命中不算错误，对应 E4001）；打卡记录以 `entity:'session'` 的 op 上行，同走该幂等键
 - 服务端**不读时钟做业务判断**；需要时间戳时由请求体传入或使用单调计数器
 
 ---

@@ -95,7 +95,7 @@ npm test
 - 浏览器：`PORT=8788 HOST=127.0.0.1 node server/main.js`，Playwright 截图 1440×900；
   新增移动端布局的阶段需补 390×844。
 - 检查项：无横向溢出、无文字截断、无 console 报错、`file://` 可打开、关闭动效后不破版。
-- 验收截图存放 `.tmp/ui/`，不入库（后续轮次的对外留档截图改存 `过程产物/UI验证截图/`，见 §8 交接日志）。
+- 验收截图不入库：临时轮次存 `.tmp/ui/`（本地临时区，已于 2026-11-18 回收）；对外留档的截图存**归档区**（工作区平级目录 `../归档/` 下与本项目同名的产品线目录）的 `过程产物/UI验证截图/<形象迭代轮次>/`，见 §8 交接日志。§8 中标注为 `.tmp/ui/` 的历史轮次截图随临时区回收已不存在，对外留档以归档区实际目录为准。
 
 ## 8. 交接日志
 
@@ -130,7 +130,7 @@ npm test
 **验证**
 
 - `node --check` 三个 JS 文件通过；`npm test` 50/50 通过
-- 1440×900 截图（`.tmp/ui/`）：`sa-1-form`、`sa-2-calibrate`（周 5 h → R 0.27，按钮禁用）、`sa-3-draft`、`sa-4-plan-after`；补充 `sa-0-plan-head`、`sa-1b-errors`、`sa-2b-pass`、`sa-2c-demand`、`sa-2d-cap`、`sa-3-overload`、`sa-3-compressed`、`sa-3-rows-zoom`、`sa-4b-today`、`sa-5-motion-off`、`sa-6-file-protocol`、`sa-7-mobile-form`
+- 1440×900 截图（历史轮次，原存 `.tmp/ui/`，该临时区已回收、截图不再存在）：`sa-1-form`、`sa-2-calibrate`（周 5 h → R 0.27，按钮禁用）、`sa-3-draft`、`sa-4-plan-after`；补充 `sa-0-plan-head`、`sa-1b-errors`、`sa-2b-pass`、`sa-2c-demand`、`sa-2d-cap`、`sa-3-overload`、`sa-3-compressed`、`sa-3-rows-zoom`、`sa-4b-today`、`sa-5-motion-off`、`sa-6-file-protocol`、`sa-7-mobile-form`
 - 溢出审计：`documentElement` / `.sheet` / `.sheet-b` 的 `scrollWidth-clientWidth` 均为 0，无文本截断
 - console 0 报错；`file://` 下仅 `/api` 探测 `ERR_CONNECTION_REFUSED`（离线降级预期），流程可用
 - R < 0.70 时 ESC 关闭：`goalDraft/planDraft` 归 null，`goal` / `tasks` 未变
@@ -187,7 +187,7 @@ npm test
 **验证**
 
 - `node --check` rescue.js / assistant.js / today.js 通过；`npm test` 50/50 通过
-- 1440×900 截图（`.tmp/ui/`）：`sb-1-banner`、`sb-2-gap`、`sb-3-options`、`sb-4-confirm-compress`、`sb-4-confirm-defer`、`sb-4-confirm-downgrade`、`sb-5-today-after-compress`、`sb-5-today-after-defer`、`sb-5-today-after-downgrade`、`sb-6-mobile-banner`、`sb-7-mobile-gap`、`sb-7-mobile-options`、`sb-8-motion-off-banner`、`sb-8-motion-off-sheet`、`sb-9-file-banner`、`sb-9-file-options`、`sb-9-file-after`
+- 1440×900 截图（历史轮次，原存 `.tmp/ui/`，该临时区已回收、截图不再存在）：`sb-1-banner`、`sb-2-gap`、`sb-3-options`、`sb-4-confirm-compress`、`sb-4-confirm-defer`、`sb-4-confirm-downgrade`、`sb-5-today-after-compress`、`sb-5-today-after-defer`、`sb-5-today-after-downgrade`、`sb-6-mobile-banner`、`sb-7-mobile-gap`、`sb-7-mobile-options`、`sb-8-motion-off-banner`、`sb-8-motion-off-sheet`、`sb-9-file-banner`、`sb-9-file-options`、`sb-9-file-after`
 - 关键数值（seed 状态）：周计划 915 min、已投入 60、剩余可用 514、缺口 341；压缩后 `plannedMin 270 → 159`（t2 54 / t3 45，t4 放弃），降级后 `plannedMin 150`、`target 350 分`，顺延后 `feas.weeks / goal.weeks 59`、`deadline 2028-01-01`；三者 `gapAfter = 0`、`deltaMin = 341`
 - 溢出审计：`.sheet-b` / `.sb-opts` / `.sb-banner` 的 `scrollWidth − clientWidth` 均为 0（1440 与 390 弹层内均为 0）
 - 关闭动效：`html[data-motion="off"]` 下弹层 840×507、`opacity 1`、banner 宽 925 且溢出 0，不破版
@@ -241,7 +241,7 @@ npm test
 
 - `node --check` exec.js / today.js / assistant.js 通过；`npm test` 50/50 通过
 - 服务：`PORT=8791 HOST=127.0.0.1 node server/main.js`，1440×900 全流程 Playwright 实测
-- 截图（`.tmp/ui/`）：`sc-1-running`、`sc-2-paused`、`sc-3-record-sheet`、`sc-3b-record-50`、`sc-4-partial`、`sc-5-skip-sheet`、`sc-5b-skip-reason`、`sc-6-skipped-collapsed`、`sc-7-skipped-open`、`sc-8-backfill-sheet`、`sc-9-backfill-stat`、`sc-10-mobile`、`sc-11-mobile-skip`、`sc-12-motion-off-paused`、`sc-13-motion-off-sheet`、`sc-14-restored`、`sc-15-file-paused`、`sc-16-file-sheet`、`sc-17-file-partial`、`sc-18-record-100`、`sc-19-est-record`、`sc-20-backfill-filled`、`sc-21-feel-selected`
+- 截图（历史轮次，原存 `.tmp/ui/`，该临时区已回收、截图不再存在）：`sc-1-running`、`sc-2-paused`、`sc-3-record-sheet`、`sc-3b-record-50`、`sc-4-partial`、`sc-5-skip-sheet`、`sc-5b-skip-reason`、`sc-6-skipped-collapsed`、`sc-7-skipped-open`、`sc-8-backfill-sheet`、`sc-9-backfill-stat`、`sc-10-mobile`、`sc-11-mobile-skip`、`sc-12-motion-off-paused`、`sc-13-motion-off-sheet`、`sc-14-restored`、`sc-15-file-paused`、`sc-16-file-sheet`、`sc-17-file-partial`、`sc-18-record-100`、`sc-19-est-record`、`sc-20-backfill-filled`、`sc-21-feel-selected`
 - 计时：开始 → 1.4s → 暂停 `00:04` → 等 2s 仍 `00:04` → 继续 `pausedTotal=8447`、`00:06` → 结束（分钟 = floor，最小 1）
 - 部分完成：t2 90 min 记 50% → `est 45`、`actual 1`、`partial 50`、`planned 270→225`、`rate 22%→27%`，行内 `已完成 50% · 余 45m`
 - 跳过：t3 75 min → `planned 225→150`、`rate 27%→40%`、`skipped:['t3']`，折叠区标题 `已跳过 1 项 · 恢复`，恢复后 `skipped:[]`、`planned` 回到 225
@@ -271,7 +271,7 @@ npm test
 - 部分完成后任务 `time`（如 `10:30–12:00`）未重排，只改 `est`，行内会出现「时段 90 分钟、预估 45m」的不一致；rescue.js 有 `retime` 但为私有实现，本阶段不复制
 - 部分完成的 `actual` 不计入 `workedMin`（`done=false`），达成率按「完成项 / 剩余计划」计，未完成的那部分投入在数字上不可见（设计取舍，避免部分完成被重复计分）
 - 跳过的任务仍留在 `state.tasks` 且 `est` 不变：`state.plannedMin()` / `state.rate()` / `state.replanInput()` 仍会算上它；今日页已在视图层过滤，计划页与数据页（C-2 / 后续）需自行过滤
-- 记录统一走 op 队列（`entity:'session'`），不再额外 `POST /api/sessions`；后端该接口目前只被服务端测试覆盖
+- 记录统一走 op 队列（`entity:'session'`），不再额外 `POST /api/sessions`；该端点已于 2026-11-15 简化批下线（返回 404 / E2001），后端仅存下线断言测试
 - 补录只写本地 `sessions`，刷新后回落 seed（未持久化）；后端无 `session` 实体的回读接口
 - 同一时刻只支持一个任务计时；开始新任务会重置 `pausedAt/pausedTotal`，旧任务不计暂停
 
@@ -310,7 +310,7 @@ npm test
 
 - `node --check` planedit.js / plan.js / assistant.js 通过；`npm test` 50/50 通过
 - 服务：`PORT=8792 HOST=127.0.0.1 node server/main.js`，1440×900 Playwright 实测（`open/resize/eval/screenshot` 同一条命令内完成）
-- 截图（`.tmp/ui/`）：`sc2-0-baseline`、`sc2-0b-baseline-board`、`sc2-1-drag`、`sc2-1b-board`、`sc2-1c-chart`、`sc2-2-reject`、`sc2-2b-board`、`sc2-3-lock`、`sc2-3b-locked-board`、`sc2-4-replan-locked`、`sc2-4-replan-locked-card`、`sc2-5-veto`、`sc2-5-veto-card`、`sc2-5b-plan-items`、`sc2-5c-veto-all`、`sc2-6-mobile`、`sc2-6b-mobile-board`、`sc2-7-narrow`、`sc2-7b-narrow-board`、`sc2-8-motion-off`、`sc2-8-motion-off-board`、`sc2-9-file-board`、`sc2-9-file-card`
+- 截图（历史轮次，原存 `.tmp/ui/`，该临时区已回收、截图不再存在）：`sc2-0-baseline`、`sc2-0b-baseline-board`、`sc2-1-drag`、`sc2-1b-board`、`sc2-1c-chart`、`sc2-2-reject`、`sc2-2b-board`、`sc2-3-lock`、`sc2-3b-locked-board`、`sc2-4-replan-locked`、`sc2-4-replan-locked-card`、`sc2-5-veto`、`sc2-5-veto-card`、`sc2-5b-plan-items`、`sc2-5c-veto-all`、`sc2-6-mobile`、`sc2-6b-mobile-board`、`sc2-7-narrow`、`sc2-7b-narrow-board`、`sc2-8-motion-off`、`sc2-8-motion-off-board`、`sc2-9-file-board`、`sc2-9-file-card`
 - 改期：t2（数学 90）日→三，`dayAssign {t2:'三'}`，三 `150→240`、日 `270→180`，toast「已移到周三 · 当日 240 / 300 分钟」，说明行「含手工改期 1 项」；`state.week` 前后完全一致（`一:105,二:90,三:150,四:45,五:105,六:150,日:270`）
 - 拒绝：t2 已在周三后再拖 t3（75），预测 315 > 300 → toast「周三将达 315 分钟，超过日上限 300」，`dayAssign` 不变、t3 仍在「日」
 - 锁定：t4 点击 → `locks {t4:true}`、块显示「已锁定」、toast「已锁定 · 重排不会改动」；`aria-pressed=true`
@@ -373,7 +373,7 @@ npm test
 
 - `node --check` settings.js / me.js / main.js / util.js 通过；`npm test` 50/50 通过
 - 服务：`PORT=8793 HOST=127.0.0.1 node server/main.js`，Playwright 实测（同一 bash 命令内 `open` + `run-code`）
-- 截图（`.tmp/ui/`）：`sd-1-me`、`sd-2-avail-edit`、`sd-3-export`、`sd-4-delete-confirm`、`sd-5-font-l`、`sd-6-mobile-today`、`sd-7-mobile-me`、`sd-7b-grid-zoom`、`sd-8-mobile-copilot`、`sd-9-mobile-sheet`、`sd-10-restore-banner`、`sd-11-restored`、`sd-12-expired`、`sd-13-motion-off-sheet`、`sd-14-motion-off-me`、`sd-15-file-me`、`sd-16-file-mobile-copilot`、`sd-17-mobile-data`、`sd-18-mobile-plan`、`sd-19-me-bottom`；CSV 样本 `sd-export.csv` / `sd-file-export.csv`
+- 截图（历史轮次，原存 `.tmp/ui/`，该临时区已回收、截图不再存在）：`sd-1-me`、`sd-2-avail-edit`、`sd-3-export`、`sd-4-delete-confirm`、`sd-5-font-l`、`sd-6-mobile-today`、`sd-7-mobile-me`、`sd-7b-grid-zoom`、`sd-8-mobile-copilot`、`sd-9-mobile-sheet`、`sd-10-restore-banner`、`sd-11-restored`、`sd-12-expired`、`sd-13-motion-off-sheet`、`sd-14-motion-off-me`、`sd-15-file-me`、`sd-16-file-mobile-copilot`、`sd-17-mobile-data`、`sd-18-mobile-plan`、`sd-19-me-bottom`；CSV 样本 `sd-export.csv` / `sd-file-export.csv`
 - 桌面 1440×900 三栏未变：`.rail 60` / `.copilot 392` / `.bench 988`，`scrollWidth 1440`；`.sd-mnav` `.sd-fab` `.cp-close` 计算值均为 `none`
 - 断点：861 → `60px 330px 471px` 三栏；860 → `860px` 单列、`.sd-mnav` grid
 - **390×844 溢出**：`documentElement.scrollWidth = 390`（今日 / 计划 / 数据 / 我的 四页均 390），全量元素扫描 `right > 390.6` 或 `left < 0` 的条目为 `[]`；`.sd-mnav` 390×56 @ y 788，`.bench-body` padding-bottom 72px
@@ -536,7 +536,7 @@ npm test
 | 按钮分级 | 「行内次要动作」（新建目标 / 重新安排 / 进入挽救 / 批量操作等原 26px 定义被全局 44px 抬高的按钮）回归 **36px** 紧凑档；任务行动作 38px；主操作与快捷指令保持 ≥44px 触控标准 |
 | 窄屏图表 | ≤640：周图 168→150px、时间带 32→30px、节律带 42→40px，图表少占一档高度 |
 
-**验证**：`npm test` 57/57；390×844 五页签与 600×900 溢出均为 0；1440×900 桌面截图逐像素级核对与改前一致（本轮规则全部限定在 ≤860/≤640）；改后 390 一屏可容纳 3 个任务 + 弹性位（改前 2 个），计划页可行性卡提前约 90px 进入首屏，周报 14px 长文实测可读；新建目标弹层表单/页脚正常。截图见 `过程产物/UI验证截图/诺瓦 Nova设计迭代/unify/`（`m0-*` 改前、`m1-*` 改后）。
+**验证**：`npm test` 57/57；390×844 五页签与 600×900 溢出均为 0；1440×900 桌面截图逐像素级核对与改前一致（本轮规则全部限定在 ≤860/≤640）；改后 390 一屏可容纳 3 个任务 + 弹性位（改前 2 个），计划页可行性卡提前约 90px 进入首屏，周报 14px 长文实测可读；新建目标弹层表单/页脚正常。截图见归档区 `过程产物/UI验证截图/<形象迭代轮次>/unify/`（`m0-*` 改前、`m1-*` 改后）。
 
 **遗留**：`file://` 双击模式本轮未单独回归（纯 CSS 追加，无资源路径变化）；「我的→字号」三档在移动端的上移（16/17/18）逻辑经 token 覆盖关系确认，未逐档实测。
 
@@ -626,7 +626,7 @@ npm test
 
 **未改动**：诺瓦九态素材与生成器（IP 纪律：机身不加粗勾线，柔和淡影与硬边分格形成「画框里的诺瓦」叙事）；R 刻度条/周图/时间带的语义色体系；全部 `data-act`、渲染接口与业务流程。
 
-**验证**：`npm test` 57/57；`npm run audit` 0 error 0 warn；桌面 1280×800 五页签 + 新建目标弹层 + 390×844 移动端（对话/今日）截图核验，`scrollWidth−clientWidth` 均为 0；`file://` 双击模式 headless 截图正常（素材、气泡、输入台完整）。截图见 `过程产物/UI验证截图/诺瓦 Nova设计迭代/清晰线分格/`。
+**验证**：`npm test` 57/57；`npm run audit` 0 error 0 warn；桌面 1280×800 五页签 + 新建目标弹层 + 390×844 移动端（对话/今日）截图核验，`scrollWidth−clientWidth` 均为 0；`file://` 双击模式 headless 截图正常（素材、气泡、输入台完整）。截图见归档区 `过程产物/UI验证截图/<形象迭代轮次>/清晰线分格/`。
 
 **遗留**：荧光笔目前仅出现在 hover 与 banner 底，尚无「划重点标记关键数字」的静态用法（留作后续增强）；弹层进出场动效仍为淡入位移，未做分格式硬切（可探讨）。
 
@@ -641,7 +641,7 @@ npm test
 | 色板 | 冷灰纸白 `#F5F6F8` + 墨蓝 `#2C5A9E` | **奶油漫画纸** `#FBF7EF`（panel2 随暖 `#F7F4EC`）+ **天空蓝** `#3161C1`（白字 4.9:1）；新增**樱花粉** `--pink` 仅做用户侧说话人圆点（「你 = 粉、诺瓦 = 蓝」） |
 | 底纹 | 方格底纹 | **网点 halftone**（radial-gradient 圆点平铺，`data-grid` 开关语义不变） |
 | 装饰 | 无 | banner 右上角 **repeating-conic 集中线**（透明度 .09，pointer-events:none，banner 加 overflow:hidden） |
-| 标记 | 方点体系（状态点/步骤点/eyebrow 方块） | **圆点体系**（`.dot`、`.step .sk`、`.sc-dot`、`.sd-cell` 选中点、`.wk.on` 指示点、说话人圆点全部 50% 圆化） |
+| 标记 | 方点体系（状态点/步骤点/eyebrow 方块） | **圆点体系**（`.dot`、`.sc-dot`、`.sd-cell` 选中点、`.wk.on` 指示点、说话人圆点全部 50% 圆化） |
 | 手感 | hover 平移 1px | **果冻手感**：`.btn:active` 下压回弹 `translateY(1px) scale(.98)`；滚动条圆角化 |
 
 **配套修正**：`theme-color` 同步 `#FBF7EF`；死 token 清理——`--ac-a18`（上轮已清）之外本轮新增 `--pinkbg` 定义即删、`--pink` 落地为用户说话人圆点后才过审计；顶栏状态点由方章点改圆点（IP-DESIGN 同步）。
@@ -717,7 +717,7 @@ npm test
 | 1 | 尺寸·文案 | 「我的 → 显示与动效」字号行写「正文字号 · 13 / 14 / 15 px」，与实现不符（桌面 `--fs-body` 15/16/17，移动整体 +1） | 文案改为「正文字号 · 15 / 16 / 17 px」（`views/me.js`） |
 | 2 | 叠层·裁剪 | ≤860 任务行「进行中」朱砂竖条 `left:-8px`，落在 `.ttable` overflow:hidden 裁剪区外（实测整条不可见，进行中只剩 6% 底色） | 移动端竖条改 `left:0`，任务行补左内距 10px（`padding:9px 2px 10px 10px`），与桌面「条 3px + 内容 12px」同构 |
 | 3 | 尺寸·溢出 | `.sc2-col` 设 `max-height:216px` 但无 overflow，日程板列内容超出列框继续画到框外——实测周日列 3 块即溢出 16px，压住列底线与板底 | 去掉 max-height；同排各列由 grid 拉伸保持齐平，内容再多也完整可见（实测列高 238px、块底距框 7px） |
-| 4 | 叠层·叠压 | 「诺」印（bottom:7px + 高 14px，顶部伸入内容区 6px）与以 ecard / steps 收尾的消息叠压 2–6px：重排卡片、降载建议、重排步骤均命中 | seal 由 say() 追加、恒为 `.txt` 末子元素，故末位内容块是倒数第二：`.msg.a .txt > .ecard:nth-last-child(2), .msg.a .txt > .steps:nth-last-child(2)` 补 `margin-bottom:8px`（实测印顶在卡片底边下方 2px） |
+| 4 | 叠层·叠压 | 「诺」印（bottom:7px + 高 14px，顶部伸入内容区 6px）与以 ecard 收尾的消息叠压 2–6px：重排卡片、降载建议均命中 | seal 由 say() 追加、恒为 `.txt` 末子元素，故末位内容块是倒数第二：`.msg.a .txt > .ecard:nth-last-child(2)` 补 `margin-bottom:8px`（实测印顶在卡片底边下方 2px） |
 
 **排查过的其余组件（未见问题）**：气泡月牙尾巴与 meta 带宽（精修七后维持）、ecard/erow/diff-line 行距、可行性 R 刻度条与 marker 标签、学期节律带「当前」角标、周图 `.wk.on` 圆点（列底下 11px，与图例行距足够）、时间轴 `.tl-now` 标签、可用时段格与静默列、sheet/sheet-f/底部抽屉与安全区、toast 两页签落点、桌面 tnav（按钮比顶栏内容区高 2px 延至边框上，描边即状态，无视觉影响）。
 
@@ -800,3 +800,36 @@ npm test
 store 的 `applyToState` session 分支改为**直接落完整会话对象**（含 status/feel）——`GET /api/state` 的 `seed.sessions` 即回读接口，不再是无字段语义的包装结构。新增 API 测试：sync 上行 session op → `/api/state` 回读校验完整对象与字段。
 
 **验证**：`node --check` ×5；`npm test` 58/58（新增回读测试）；audit 0 error；浏览器端到端：三类记录 + 新目标改名 → 刷新存活 → 清理回种子态。**遗留清单清空（前端侧全部关闭）**：仅剩「新目标 / 记录的**服务端跨设备**同步与 store 磁盘持久化」为后续可选项——本地 overlay 已保证单机刷新存活，服务端仍是会话级内存存储（重启回落）。
+
+### 缺陷与悬空引用收口（2026-11-18 · 与文件夹结构对齐）
+
+**变更文件**：`assets/css/app.css`、`scripts/css-audit.mjs`、`server/main.js`、`server/auth.js`、`docs/FRONTEND-CONTRACT.md`、`docs/HANDOFF.md`、`README.md`
+
+**1. CSS 死代码清理（`96bfc92` 简化批一遗留）**
+
+`96bfc92` 删除了重排卡片的 stepper JS（`<div class="steps">` / `<div class="step">` / `<span class="sk">` / `<span class="sv">`），但 CSS 侧 `.steps` / `.step` / `.sk` / `.sv` 全族（含 `.step.done` / `.step.bad` 状态变体，共 9 条规则）未被清理。本轮核实该四类在 JS/HTML 与运行时 DOM 中均零引用后予以删除；连带移除 `.msg.a .txt > .steps:nth-last-child(2)` 让位规则（`.ecard` 同类规则保留）。
+
+**2. `.kpi .d.dn` 死类删除**：KPI 的 `.d` 描述行从未带 `dn` 修饰类（`dn` 仅出现在 `c0b5c71` 之前的旧实现），运行时 DOM 亦无。相邻的 `.kpi .d.up` 属状态语义位，一并保留。
+
+**3. 审计脚本两处缺陷修复（`scripts/css-audit.mjs`）**
+
+- **`var(--d)` 误报（error → 0）**：`--d` 是 `assistant.js` 行内注入的 diff 过账序号（`style="--d:..."`），与已豁免的 `--c`（科目色）同机制。豁免名单 `EXEMPT_UNDEFINED` 补入 `--d`。
+- **死类检测假阴性/假阳性**：原实现用词边界在整段源码中搜类名——`flow.step` 这类标识符会让 `.step` 被误判为「在用」（假阴性），而 CSS 注释里的「统一 `.sa-` 前缀」说明文字会被当成分类名（假阳性）。改为：先剥离 CSS 注释 → 丢弃尾部连字符的前缀碎片 → 在 JS/HTML 全量文本中按类名形态取词元（覆盖 `class` 属性、`className` 赋值、`classList.*`、字符串拼接与三元表达式）。
+- **灵敏度回归**：向 `app.css` 临时注入 4 个无引用类（`.pz-dead-probe` 等），审计全部检出；回滚后恢复 0 error 0 warn，文件字节数不变（101514）。
+
+**4. 服务端已下线端点残留清理**
+
+`96bfc92` 下线了 `POST /api/sessions` / `GET /api/sync?since=N` / `GET /api/reports/weekly`，但 `server/main.js` 启动横幅与 `server/auth.js` 的 `WRITE_LIMITS` 限流表仍列着它们。本轮删除横幅 3 行与限流表 1 条死条目，使服务端自述与实际路由一致。
+
+**5. 文档悬空引用修正**
+
+- `FRONTEND-CONTRACT.md` §7 验证协议：截图存放约定改为反映现状——临时轮次 `.tmp/ui/` 已于 2026-11-18 回收，对外留档以归档区 `过程产物/UI验证截图/<形象迭代轮次>/` 为准。
+- §8 中 5 处历史轮次截图清单（原 `sa-*` / `sb-*` / `sc-*` / `sc2-*` / `sd-*`）逐一标注「该临时区已回收、截图不再存在」——这些文件在归档中亦无副本，不虚构路径。
+- 2 处归档截图路径改为指向归档区实际目录（`unify/` 与 `清晰线分格/`，已核实文件确实存在）。
+- §7 对照表与叠层表中对 `.step .sk` / `.steps` 的引用，随 CSS 删除同步移除。
+- `docs/HANDOFF.md` §5 幂等口径：`POST /api/sessions` 与 `/api/sync/ops` 并列 → 仅 `/api/sync/ops`，并注明打卡以 `entity:"session"` 的 op 走同一幂等键。
+- `FRONTEND-CONTRACT.md` Stage C-1 遗留项：明确 `/api/sessions` 已下线（返回 404 / E2001），后端仅存下线断言测试。
+- `README.md`：函数包体积 509 KB → 529 KB（实际 45 文件 / 543235 字节，与 `npm run build:cloudbase` 输出一致）。
+
+**验证**：`npm test` 58/58；`npm run audit` 0 error 0 warn；`npm run build:cloudbase` 成功（45 文件 / 529 KB）；`node --check` 三个改动 JS 通过；HTML 资源引用全量扫描 0 缺失；运行时 DOM 交叉验证确认删除的类零出现。
+
