@@ -33,32 +33,20 @@ npm test      # 引擎单测 + HTTP 冒烟
 | `npm test` | 引擎单测 + HTTP 端到端冒烟 |
 | `npm run build:engine` | 由 `shared/engine/*.js` 生成浏览器引擎产物（**改过引擎必须重跑**） |
 | `npm run audit` | CSS 审计 |
-| `npm run build:cloudbase` | 生成云函数包 `.deploy/cloudbase-functions/nova` |
 
 ### 环境变量
 
-本项目不自动读取 `.env`（零第三方依赖），请通过 shell 或部署平台注入；清单见 [`.env.example`](.env.example)（只含变量名与说明，无真实值，`.env` 已被 `.gitignore` 忽略）。
+本项目不自动读取 `.env`（零第三方依赖），请通过 shell 或系统环境变量注入；清单见 [`.env.example`](.env.example)（只含变量名与说明，无真实值，`.env` 已被 `.gitignore` 忽略）。
 
 | 变量 | 缺省 | 说明 |
 |---|---|---|
 | `PORT` | `8787` | 监听端口（`server/main.js` 的 `DEFAULT_PORT`） |
 | `HOST` | `0.0.0.0` | 监听地址（`DEFAULT_HOST`）；本机自用建议显式设 `127.0.0.1` |
 | `NOVA_AUTH_SECRET` | 本地随机 / 生产必填 | 凭证 HMAC 密钥，需 ≥32 字节随机串；`NODE_ENV=production` 未配置直接拒绝启动 |
-| `NOVA_TRUST_PROXY` | 未设置 | 置于网关 / 反代之后时设为 `1`，按 `X-Forwarded-For` 最后一跳隔离限流桶 |
-| `CORS_MODE` | 未设置 | 云函数经 HTTP 网关暴露时设为 `off`，避免与网关回填的 `Access-Control-Allow-Origin` 冲突 |
+| `NOVA_TRUST_PROXY` | 未设置 | 置于网关 / 反代之后时设为 `1`，按 `X-Forwarded-For` 最后一跳隔离限流桶；不设则按不可伪造的 TCP 对端地址 |
 | `NODE_ENV` | 未设置 | 设为 `production` 启用生产约束（鉴权密钥必填等） |
 
 > 缺省值以 `server/main.js` 为准：`.env.example` 里的 `PORT=8080` / `HOST=127.0.0.1` 是示例取值，不是缺省。缺省绑定 `0.0.0.0`，启动横幅打印 `http://0.0.0.0:8787`，浏览器请用 `http://127.0.0.1:8787/` 访问。
-
-### 部署到腾讯云 CloudBase
-
-```bash
-npm run build:cloudbase   # 产出 .deploy/cloudbase-functions/nova
-```
-
-产物即函数包：HTTP 云函数 `nova`，运行时 `Nodejs20.19`，常驻监听 `9000`（由 `scf_bootstrap` 拉起），零第三方依赖。更新线上代码：重新构建，再用 CloudBase 的 `manageFunctions(action="updateFunctionCode", functionName="nova")` 上传。
-
-必配环境变量 `NOVA_AUTH_SECRET`（≥32 字节随机串）；网关需放行 `Authorization` 请求头并强制 HTTPS。网关 / 反代场景另建议设 `NOVA_TRUST_PROXY=1`，避免全部访客共享同一限流桶。
 
 ### 使用指南
 
@@ -88,9 +76,8 @@ npm run build:cloudbase   # 产出 .deploy/cloudbase-functions/nova
 
 ### 使用前须知
 
-- **数据不持久化**：后端为内存态，服务重启 / 函数实例回收后回到种子数据；新目标与打卡记录只在本机（`zx.overlay`）存活，改期与锁定未接服务端持久化。
+- **数据不持久化**：后端为内存态，服务重启后回到种子数据；新目标与打卡记录只在本机（`zx.overlay`）存活，改期与锁定未接服务端持久化。
 - **单人演示账户**：已内置 Bearer 凭证鉴权（由 `POST /api/auth/session` 签发），但无注册 / 多用户体系。
-- **默认域名中间页**：CloudBase 默认测试域名（`*.app.tcloudbase.com`）首次导航会展示一次「风险提醒 / 确定访问」中间页，唯一移除方式是绑定已备案的自定义域名。
 - 通知开关仅记录意图、不实际投递；CSV 导出为浏览器本地生成；页面无第三方脚本、无埋点、无 Cookie。
 
 ---
