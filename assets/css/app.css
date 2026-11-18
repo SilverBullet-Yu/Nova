@@ -406,6 +406,8 @@ html[data-tab="chat"] .bench{display:none}
   border-color:var(--txt);background:var(--panel);
   box-shadow:inset 0 -2px 0 var(--ac);
 }
+/* ② 聆听态：输入台左侧的诺瓦头像——用户输入时换聆听形象（眼高 ×1.28 + 耳侧声弧） */
+.cp-listen{width:24px;height:24px;flex:0 0 24px;display:block}
 .composer .caret{color:var(--ac);font-family:var(--mono);font-size:14px;opacity:.9}
 .composer input{flex:1;min-width:0;background:none;border:0;outline:0;color:var(--txt);font:inherit;font-size:14px;letter-spacing:.01em}
 .composer input::placeholder{color:var(--txt3)}

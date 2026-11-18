@@ -132,7 +132,7 @@
 | # | 状态 | 视觉变化 | 素材文件 | 触发场景 | 前端接入点 |
 |---|---|---|---|---|---|
 | ① | 待机 idle | 标准竖条眼（右眼略高） | `mascot-v4.svg` | 进入对话页的欢迎语首屏 | `assets/js/main.js` `greetingHtml()`（132×116） |
-| ② | 聆听 listening | 眼高 ×1.28 + 耳侧声弧 | `mascot-v4-listen.svg`、`avatar-v4-listen.svg` | 素材在库，当前产品未接入（对话页头部已撤除） | — |
+| ② | 聆听 listening | 眼高 ×1.28 + 耳侧声弧 | `mascot-v4-listen.svg`、`avatar-v4-listen.svg` | 用户在对话页输入框输入时 | `assets/js/main.js` `updateListen()`（输入台头像，24×24） |
 | ③ | 计算中 scheduling | 面罩内六点矩阵（右列抬高 2px） | `mascot-v4-calc.svg` | 助理正在处理、等待回复 | `assets/js/assistant.js` `typing()`（24×21） |
 | ④ | 专注 focusing | 耳与面罩描边转朱砂 + 朱砂进度环 | `mascot-v4-focus.svg` | 今日页任务计时进行中 | `assets/js/views/today.js` 任务行（24×30） |
 | ⑤ | 达成 done | 月牙眼 + 笑弧 + 纸屑 | `mascot-v4-done.svg` | 任务完成；挽救完成后的横幅 | `assets/js/flows/exec.js`、`assets/js/flows/rescue.js`（32×28） |
@@ -141,7 +141,7 @@
 | ⑧ | 离线 offline | 横条眼 + 整体褪色 | `mascot-v4-offline.svg`、`avatar-v4-offline.svg` | 后端不可达（网络失败或超时）时的顶栏同步位 | `assets/js/main.js` `updateSync()`（24×24 头像，褪色涂装） |
 | ⑨ | 兜底 unknown | 单眼 + 「?」 + o 嘴 | `mascot-v4-unknown.svg` | 关键词未命中的兜底回复 | `assets/js/assistant.js` `fallback()`（32×28） |
 
-表中 ② 聆听 的素材已生成但**当前未接入产品**（需先定义「何时处于聆听态」的产品语义）；其余 8 态均已接入，接入点见末列。⑧ 离线只接头像（`avatar-v4-offline.svg`），全身立绘 `mascot-v4-offline.svg` 未接入。`mascot-v4-classic.svg` 为原味涂装，按 §3.3 不进产品 UI。
+九态素材**全部已接入产品**：② 聆听 与 ⑧ 离线 以头像形态接入（24×24），其余七态为立绘；②⑧ 的全身立绘（`mascot-v4-listen.svg`、`mascot-v4-offline.svg`）未接入。`mascot-v4-classic.svg` 为原味涂装，按 §3.3 不进产品 UI。
 
 情绪上限为「平静—关切—欣喜」三档：⑧是状态性褪色而非情绪，⑦是紧张但克制（只改眼形与耳色，无红色、无尖角）。
 
@@ -150,7 +150,7 @@
 ### 5.1 生成与来源
 
 - 全部 14 个 SVG 由 `node scripts/build-mascot-v4.js` 生成到 `assets/img/`（脚本零依赖，只写该目录，不读其它目录）。该命令不在 `package.json` 的 scripts 里，需直接用 node 执行；重新生成的结果与仓库内文件逐字节一致。
-- 同一脚本另生成 `assets/js/mascot-inline.js`：`avatar-v4-offline.svg` 的 base64 data URI 内联副本，导出 `window.ZX_MASCOT.offlineAvatar`。静态资源以 `Cache-Control: no-cache` 提供，后端不可达时无法加载，而离线指示恰好在此刻出现，故用不依赖网络的内联副本。该文件同属产物，禁止手改。
+- 同一脚本另生成 `assets/js/mascot-inline.js`：待机 / 聆听 / 离线三枚头像（`avatar-v4.svg`、`avatar-v4-listen.svg`、`avatar-v4-offline.svg`）的 base64 data URI 内联副本，导出 `window.ZX_MASCOT.idleAvatar` / `listenAvatar` / `offlineAvatar`。静态资源以 `Cache-Control: no-cache` 提供，后端不可达时无法加载，而离线指示与聆听切换恰好在这种时刻发生，故用不依赖网络的内联副本。该文件同属产物，禁止手改。
 - 素材只走本地相对路径，不加载第三方资源。
 
 ### 5.2 favicon 与首屏形象
@@ -161,13 +161,14 @@
 | 顶栏品牌标记 `.seal` | `index.html`：`<img src="assets/img/avatar-v4.svg" width="26" height="26" alt="" />` | 26×26 |
 | 顶栏对话入口 `.cp-open` | `index.html`：`<img src="assets/img/avatar-v4.svg" width="22" height="22" alt="" />` | 22×22 |
 | 顶栏离线指示 | `assets/js/main.js` `updateSync()`：`<img class="sync-offline" …>`，`src` 取 `window.ZX_MASCOT.offlineAvatar`，回退 `assets/img/avatar-v4-offline.svg` | 24×24 |
+| 输入台聆听指示 | `index.html`：`<img class="cp-listen" id="cpListen" src="assets/img/avatar-v4.svg" …>`；`assets/js/main.js` `updateListen()` 按「焦点在输入框且有非空文本」在 `window.ZX_MASCOT.listenAvatar` / `idleAvatar` 间切换 | 24×24 |
 | 对话欢迎语首屏 | `assets/js/main.js` `greetingHtml()`：`<img class="msg-mascot" src="assets/img/mascot-v4.svg" width="132" height="116" alt="诺瓦" />` | 132×116 |
 
 `favicon-v4.svg` 的底色与 `<meta name="theme-color" content="#FBF7EF">` 同值，与 `--bg` 一致。
 
 ### 5.3 状态图的使用位置
 
-见 §4 表。对应样式类在 `assets/css/app.css`：`.msg-mascot`（132×116）、`.msg-state` / `.msg-state.state-calc`（32×28 / 24×21）、`.tk-mascot`（24×30）、`.sb-mascot`（32×28）、`.warn-flag`（22×19）、`.sync-offline`（24×24，顶栏离线头像）、`.sync-pending`（待上行数字角标）。助理消息落款印由 `.seal-no` 渲染（`--cinnabar` 底 + `--ac-ink` 字），不占用独立素材。
+见 §4 表。对应样式类在 `assets/css/app.css`：`.msg-mascot`（132×116）、`.msg-state` / `.msg-state.state-calc`（32×28 / 24×21）、`.tk-mascot`（24×30）、`.sb-mascot`（32×28）、`.warn-flag`（22×19）、`.sync-offline`（24×24，顶栏离线头像）、`.sync-pending`（待上行数字角标）、`.cp-listen`（24×24，输入台聆听头像）。助理消息落款印由 `.seal-no` 渲染（`--cinnabar` 底 + `--ac-ink` 字），不占用独立素材。
 
 ### 5.4 动效归属
 
@@ -193,6 +194,6 @@ SVG 内不含任何动画（经 `<img>` 引用也读不到页面上的 `data-mot
 | 状态映射与素材一致 | 在 `assets/js/` 与 `index.html` 中检索 `assets/img/` 引用 | 每个被引用的文件名都在 `assets/img/` 中存在；§4 表中 9 行与实际文件逐字一致；接入状态以 §4 表末列为准 |
 | 主题色一致 | 读 `assets/css/app.css` 的 `:root` | `--bg #FBF7EF`、`--ac #3161C1`、`--cinnabar #A03B2C`、`--warn #8A5A1E` 等与 §3.1 表一致 |
 | 接入无报错 | `npm start` 后打开首页 | 控制台无错误；首屏出现 `mascot-v4.svg`，顶栏出现 `avatar-v4.svg`，标签页出现 `favicon-v4.svg` |
-| 离线形象 | 停服后刷新首页 | 顶栏出现 `.sync-offline` 离线头像且不破图；`alt` / `title` 为「离线 · 本地计算」或「离线 · 待上行 N」 |
-| 内联副本一致 | `node scripts/build-mascot-v4.js` 后比对 | `assets/js/mascot-inline.js` 的 data URI 解码后与 `assets/img/avatar-v4-offline.svg` 逐字节一致 |
+| 离线与聆听形象 | 停服后刷新首页；在输入框输入文字，随后发送 | 顶栏出现 `.sync-offline` 离线头像且不破图（`alt` / `title` 为「离线 · 本地计算」或「离线 · 待上行 N」）；输入台头像换为聆听形象（`alt` 为「诺瓦正在聆听」），发送后回待机 |
+| 内联副本一致 | `node scripts/build-mascot-v4.js` 后比对 | `assets/js/mascot-inline.js` 的三枚 data URI 解码后分别与 `assets/img/avatar-v4.svg`、`avatar-v4-listen.svg`、`avatar-v4-offline.svg` 逐字节一致 |
 | 回归 | `npm test` | 引擎单测与 HTTP 冒烟全绿 |

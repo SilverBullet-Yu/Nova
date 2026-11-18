@@ -183,14 +183,38 @@ window.ZX = window.ZX || {};
     var v = U.$('#input').value.trim();
     if (!v) return;
     ZX.assistant.me(v);
+    sentLock = true;   /* 已送出：诺瓦回到待机，不再处于聆听 */
+    updateListen();
     var t = ZX.assistant.typing();
     await U.sleep(340);
     t.remove();
     ZX.assistant.route(v);
   });
 
-  /* 输入聚焦反馈：focus-visible 描边与 caret 已足够（聆听态头像随对话页头部一并撤除） */
+  /* ---------- 输入台聆听态（②）：用户输入时诺瓦换聆听形象 ---------- */
   var inputEl = U.$('#input');
+  var listenEl = U.$('#cpListen');
+  var sentLock = false;   /* 发送后强制回待机，直到用户再次输入 */
+  var AVATAR_FALLBACK = {
+    idleAvatar: 'assets/img/avatar-v4.svg',
+    listenAvatar: 'assets/img/avatar-v4-listen.svg'
+  };
+  function avatarSrc(key) {
+    var M = window.ZX_MASCOT || {};
+    return M[key] || AVATAR_FALLBACK[key] || '';
+  }
+  function updateListen() {
+    if (!listenEl || !inputEl) return;
+    /* 判据：焦点在输入框且有非空文本 = 用户正在输入；发送后强制回待机 */
+    var listening = !sentLock && document.activeElement === inputEl && !!inputEl.value.trim();
+    listenEl.src = avatarSrc(listening ? 'listenAvatar' : 'idleAvatar');
+    listenEl.alt = listening ? '诺瓦正在聆听' : '诺瓦';
+  }
+  if (inputEl) {
+    inputEl.addEventListener('input', function () { sentLock = false; updateListen(); });
+    inputEl.addEventListener('focus', updateListen);
+    inputEl.addEventListener('blur', updateListen);
+  }
 
   document.addEventListener('keydown', function (e) {
     /* 「/」进入对话页并聚焦输入框：仅在未处于任何输入态、且无弹层时生效 */
@@ -275,6 +299,7 @@ window.ZX = window.ZX || {};
     if (ZX.flows && ZX.flows.settings) ZX.flows.settings.init();
     ZX.api.onStatus(updateSync);
     updateSync();   /* 初始同步态：离线时顶栏显示「离线 · 本地计算」 */
+    updateListen(); /* 初始聆听态：输入台头像换内联副本（离线时也能显示） */
 
     U.$('#chips').innerHTML = CHIPS.map(function (c) {
       return '<button class="chip" data-act="say" data-say="' + c + '">' + c + '</button>';
