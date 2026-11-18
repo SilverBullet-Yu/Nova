@@ -206,6 +206,11 @@ button{font-family:inherit;color:inherit}
 .dot.ac::after{content:none}
 .dot.warn{background:var(--warn)}
 .dot.off{background:var(--txt3)}
+.dot.hide{display:none}
+/* ⑧ 离线态：顶栏同步位用诺瓦的离线褪色头像承担指示，状态文案收进 alt / title */
+.sync-offline{width:24px;height:24px;display:block;flex:0 0 24px}
+.sync-pending{font-family:var(--mono);font-size:11px;color:var(--warn);line-height:1}
+.sync-pending.off{display:none}
 .kbd{
   font-family:var(--mono);font-size:11px;color:var(--txt3);border:1px solid var(--line2);
   border-radius:var(--r);padding:1px 6px;background:transparent;

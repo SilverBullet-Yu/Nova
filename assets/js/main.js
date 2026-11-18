@@ -32,22 +32,36 @@ window.ZX = window.ZX || {};
     return '';
   }
 
-  /* ---------- 顶栏同步指示器：三态 ---------- */
+  /* ---------- 顶栏同步指示器：三态 ----------
+     ⑧ 离线：顶栏同步位改用诺瓦的离线褪色头像（avatar-v4-offline.svg）承担状态指示，
+     文字状态收进图片 alt / title；待上行数量保留为数字角标，信息不丢。 */
   function updateSync() {
     var online = ZX.api.isOnline();
-    /* ⑧ 离线：状态由顶栏同步指示承担（对话页头部与头像已撤除） */
     var pending = ZX.api.pendingCount();
     var dot = U.$('#syncDot'), text = U.$('#syncText');
     if (dot && text) {
       if (online) {
         dot.className = 'dot';
         text.textContent = '本地优先 · 已同步';
-      } else if (pending > 0) {
-        dot.className = 'dot warn';
-        text.textContent = '离线 · 待上行 ' + pending;
       } else {
-        dot.className = 'dot off';
-        text.textContent = '离线 · 本地计算';
+        var label = pending > 0 ? ('离线 · 待上行 ' + pending) : '离线 · 本地计算';
+        dot.className = 'dot off hide';
+        var img = text.querySelector('.sync-offline');
+        if (!img) {
+          /* 优先用内联副本（assets/js/mascot-inline.js，脚本生成）：后端不可达时静态资源无法加载 */
+          var src = (window.ZX_MASCOT && window.ZX_MASCOT.offlineAvatar)
+            ? window.ZX_MASCOT.offlineAvatar : 'assets/img/avatar-v4-offline.svg';
+          text.innerHTML = '<img class="sync-offline" src="' + src + '" width="24" height="24" alt="" />' +
+            '<span class="sync-pending"></span>';
+          img = text.querySelector('.sync-offline');
+        }
+        img.alt = label;
+        img.title = label;
+        var num = text.querySelector('.sync-pending');
+        if (num) {
+          num.textContent = pending > 0 ? String(pending) : '';
+          num.className = pending > 0 ? 'sync-pending' : 'sync-pending off';
+        }
       }
     }
     var pDot = U.$('#plannerDot'), pText = U.$('#plannerText');

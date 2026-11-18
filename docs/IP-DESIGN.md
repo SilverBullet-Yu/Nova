@@ -138,10 +138,10 @@
 | ⑤ | 达成 done | 月牙眼 + 笑弧 + 纸屑 | `mascot-v4-done.svg` | 任务完成；挽救完成后的横幅 | `assets/js/flows/exec.js`、`assets/js/flows/rescue.js`（32×28） |
 | ⑥ | 挽救 rescue | 闭眼下弯 + 机身 −7° + 递出纸条 | `mascot-v4-rescue.svg` | 今日页顶部的中断横幅 | `assets/js/flows/rescue.js`（32×28） |
 | ⑦ | 提醒 warn | 紧张眼「><」+ 耳变深墨蓝 + 耳尖闪线 | `mascot-v4-warn.svg` | 数据页「偏差归因」面板；重排后未来 7 天负载增幅 ≥ 20% 的预警旗标 | `assets/js/views/data.js`、`assets/js/views/plan.js`（22×19） |
-| ⑧ | 离线 offline | 横条眼 + 整体褪色 | `mascot-v4-offline.svg`、`avatar-v4-offline.svg` | 素材在库，当前产品未接入；离线状态由顶栏「离线 · 本地计算 / 离线 · 待上行 N」承担 | — |
+| ⑧ | 离线 offline | 横条眼 + 整体褪色 | `mascot-v4-offline.svg`、`avatar-v4-offline.svg` | 后端不可达（网络失败或超时）时的顶栏同步位 | `assets/js/main.js` `updateSync()`（24×24 头像，褪色涂装） |
 | ⑨ | 兜底 unknown | 单眼 + 「?」 + o 嘴 | `mascot-v4-unknown.svg` | 关键词未命中的兜底回复 | `assets/js/assistant.js` `fallback()`（32×28） |
 
-表中 ② 聆听 与 ⑧ 离线 的素材已生成但**当前未接入产品**（离线态由顶栏「离线 · 本地计算 / 离线 · 待上行 N」承担）；其余 7 态均已接入，接入点见末列。`mascot-v4-classic.svg` 为原味涂装，按 §3.3 不进产品 UI。
+表中 ② 聆听 的素材已生成但**当前未接入产品**（需先定义「何时处于聆听态」的产品语义）；其余 8 态均已接入，接入点见末列。⑧ 离线只接头像（`avatar-v4-offline.svg`），全身立绘 `mascot-v4-offline.svg` 未接入。`mascot-v4-classic.svg` 为原味涂装，按 §3.3 不进产品 UI。
 
 情绪上限为「平静—关切—欣喜」三档：⑧是状态性褪色而非情绪，⑦是紧张但克制（只改眼形与耳色，无红色、无尖角）。
 
@@ -150,6 +150,7 @@
 ### 5.1 生成与来源
 
 - 全部 14 个 SVG 由 `node scripts/build-mascot-v4.js` 生成到 `assets/img/`（脚本零依赖，只写该目录，不读其它目录）。该命令不在 `package.json` 的 scripts 里，需直接用 node 执行；重新生成的结果与仓库内文件逐字节一致。
+- 同一脚本另生成 `assets/js/mascot-inline.js`：`avatar-v4-offline.svg` 的 base64 data URI 内联副本，导出 `window.ZX_MASCOT.offlineAvatar`。静态资源以 `Cache-Control: no-cache` 提供，后端不可达时无法加载，而离线指示恰好在此刻出现，故用不依赖网络的内联副本。该文件同属产物，禁止手改。
 - 素材只走本地相对路径，不加载第三方资源。
 
 ### 5.2 favicon 与首屏形象
@@ -159,13 +160,14 @@
 | 标签页 / 桌面图标 | `index.html`：`<link rel="icon" href="assets/img/favicon-v4.svg" type="image/svg+xml" />` | 16×16，底色 `#FBF7EF` |
 | 顶栏品牌标记 `.seal` | `index.html`：`<img src="assets/img/avatar-v4.svg" width="26" height="26" alt="" />` | 26×26 |
 | 顶栏对话入口 `.cp-open` | `index.html`：`<img src="assets/img/avatar-v4.svg" width="22" height="22" alt="" />` | 22×22 |
+| 顶栏离线指示 | `assets/js/main.js` `updateSync()`：`<img class="sync-offline" …>`，`src` 取 `window.ZX_MASCOT.offlineAvatar`，回退 `assets/img/avatar-v4-offline.svg` | 24×24 |
 | 对话欢迎语首屏 | `assets/js/main.js` `greetingHtml()`：`<img class="msg-mascot" src="assets/img/mascot-v4.svg" width="132" height="116" alt="诺瓦" />` | 132×116 |
 
 `favicon-v4.svg` 的底色与 `<meta name="theme-color" content="#FBF7EF">` 同值，与 `--bg` 一致。
 
 ### 5.3 状态图的使用位置
 
-见 §4 表。对应样式类在 `assets/css/app.css`：`.msg-mascot`（132×116）、`.msg-state` / `.msg-state.state-calc`（32×28 / 24×21）、`.tk-mascot`（24×30）、`.sb-mascot`（32×28）、`.warn-flag`（22×19）。助理消息落款印由 `.seal-no` 渲染（`--cinnabar` 底 + `--ac-ink` 字），不占用独立素材。
+见 §4 表。对应样式类在 `assets/css/app.css`：`.msg-mascot`（132×116）、`.msg-state` / `.msg-state.state-calc`（32×28 / 24×21）、`.tk-mascot`（24×30）、`.sb-mascot`（32×28）、`.warn-flag`（22×19）、`.sync-offline`（24×24，顶栏离线头像）、`.sync-pending`（待上行数字角标）。助理消息落款印由 `.seal-no` 渲染（`--cinnabar` 底 + `--ac-ink` 字），不占用独立素材。
 
 ### 5.4 动效归属
 
@@ -191,4 +193,6 @@ SVG 内不含任何动画（经 `<img>` 引用也读不到页面上的 `data-mot
 | 状态映射与素材一致 | 在 `assets/js/` 与 `index.html` 中检索 `assets/img/` 引用 | 每个被引用的文件名都在 `assets/img/` 中存在；§4 表中 9 行与实际文件逐字一致；接入状态以 §4 表末列为准 |
 | 主题色一致 | 读 `assets/css/app.css` 的 `:root` | `--bg #FBF7EF`、`--ac #3161C1`、`--cinnabar #A03B2C`、`--warn #8A5A1E` 等与 §3.1 表一致 |
 | 接入无报错 | `npm start` 后打开首页 | 控制台无错误；首屏出现 `mascot-v4.svg`，顶栏出现 `avatar-v4.svg`，标签页出现 `favicon-v4.svg` |
+| 离线形象 | 停服后刷新首页 | 顶栏出现 `.sync-offline` 离线头像且不破图；`alt` / `title` 为「离线 · 本地计算」或「离线 · 待上行 N」 |
+| 内联副本一致 | `node scripts/build-mascot-v4.js` 后比对 | `assets/js/mascot-inline.js` 的 data URI 解码后与 `assets/img/avatar-v4-offline.svg` 逐字节一致 |
 | 回归 | `npm test` | 引擎单测与 HTTP 冒烟全绿 |

@@ -25,8 +25,9 @@
 | `assets/css/app.css` | 唯一样式来源；顶部 `:root` 块为视觉配置区 |
 | `assets/js/rhythm.build.js` | 生成产物（`scripts/build-engine.js` → `shared/engine/*.js`），禁止手改 |
 | `assets/img/*.svg` | 生成产物（`scripts/build-mascot-v4.js`），禁止手改 |
+| `assets/js/mascot-inline.js` | 生成产物（`scripts/build-mascot-v4.js`），离线头像的 base64 data URI 内联副本，导出 `window.ZX_MASCOT.offlineAvatar`，禁止手改 |
 
-`index.html` 的脚本顺序固定：`shared/data/seed.js` → `assets/js/rhythm.build.js` → `assets/js/util.js` → `assets/js/ui.js` → `assets/js/api.js` → `assets/js/engine.js` → `assets/js/state.js` → `assets/js/views/today.js` → `assets/js/views/plan.js` → `assets/js/views/data.js` → `assets/js/views/me.js` → `assets/js/assistant.js` → `assets/js/flows/goal.js` → `assets/js/flows/rescue.js` → `assets/js/flows/exec.js` → `assets/js/flows/planedit.js` → `assets/js/flows/settings.js` → `assets/js/main.js`。改顺序前先确认依赖链（util → ui → state → 视图 → assistant → flows → main）。
+`index.html` 的脚本顺序固定：`shared/data/seed.js` → `assets/js/rhythm.build.js` → `assets/js/mascot-inline.js` → `assets/js/util.js` → `assets/js/ui.js` → `assets/js/api.js` → `assets/js/engine.js` → `assets/js/state.js` → `assets/js/views/today.js` → `assets/js/views/plan.js` → `assets/js/views/data.js` → `assets/js/views/me.js` → `assets/js/assistant.js` → `assets/js/flows/goal.js` → `assets/js/flows/rescue.js` → `assets/js/flows/exec.js` → `assets/js/flows/planedit.js` → `assets/js/flows/settings.js` → `assets/js/main.js`。改顺序前先确认依赖链（util → ui → state → 视图 → assistant → flows → main）。
 
 ### 2.2 流程模块 `assets/js/flows/`
 
@@ -136,7 +137,7 @@
 
 ## 8. 形象接入
 
-已接入的形象素材与产品场景映射（引用点均在前端代码内；未接入的聆听 / 离线两态见 `docs/IP-DESIGN.md` §4）：
+已接入的形象素材与产品场景映射（引用点均在前端代码内；未接入的聆听态见 `docs/IP-DESIGN.md` §4）：
 
 | 素材 | 场景 | 引用点 |
 |---|---|---|
@@ -148,9 +149,11 @@
 | `mascot-v4-warn.svg` | 提醒（数据页偏差归因、计划页负载预警，22×19） | `assets/js/views/data.js`、`assets/js/views/plan.js` |
 | `mascot-v4-unknown.svg` | 兜底（关键词未命中，32×28） | `assets/js/assistant.js` `fallback()` |
 | `avatar-v4.svg` | 顶栏 `.seal`（26×26）与 `.cp-open`（22×22） | `index.html` |
+| `avatar-v4-offline.svg` | 顶栏离线指示（24×24，褪色涂装） | `assets/js/main.js` `updateSync()`，经 `assets/js/mascot-inline.js` 的内联副本加载 |
 | `favicon-v4.svg` | 站点图标（16px） | `index.html` |
 
-- 素材由 `scripts/build-mascot-v4.js` 生成到 `assets/img/`，禁止手改；改形象改脚本后重跑 `node scripts/build-mascot-v4.js`。生成器另有 `mascot-v4-classic.svg`（周边涂装）、`mascot-v4-listen.svg`、`mascot-v4-offline.svg`、`avatar-v4-listen.svg`、`avatar-v4-offline.svg`；其中后四者当前未被产品代码引用，接入前先与 IP 设定对齐。
+- 素材由 `scripts/build-mascot-v4.js` 生成到 `assets/img/`，禁止手改；改形象改脚本后重跑 `node scripts/build-mascot-v4.js`。生成器另有 `mascot-v4-classic.svg`（周边涂装）、`mascot-v4-listen.svg`、`mascot-v4-offline.svg`、`avatar-v4-listen.svg`，这四个当前未被产品代码引用，接入前先与 IP 设定对齐。
+- 离线头像另有一份内联副本 `assets/js/mascot-inline.js`（同一脚本生成）：静态资源以 `Cache-Control: no-cache` 提供，后端不可达时重新加载必然失败，而离线指示恰好在此刻出现，故改用不依赖网络的内联 data URI；`main.js` 优先取 `window.ZX_MASCOT.offlineAvatar`，缺失时回退 `assets/img/avatar-v4-offline.svg`。
 - 形象只作为 `img` 元素出现在界面，SVG 内部不做动画；动效只加在产品侧元素上。
 
 ## 9. 验证协议
@@ -165,7 +168,8 @@
 | CSS 审计 | `npm run audit` | 退出码 0；仅 warn（死 token / 死类候选）可过，存在 error 必须先修 |
 | 服务冒烟 | `npm start`（默认 `127.0.0.1:8787`） | `GET /api/health` 返回 200 且含 `"ok":true`；首页返回 200 |
 | 资源引用 | 见下方扫描命令 | `index.html` 引用的 `src` / `href` 全部存在，无 404 |
-| 离线链路 | 双击 `index.html` 以 `file://` 打开 | 顶栏显示「离线 · 本地计算」，排程 / 记录 / 导出可用，控制台无报错 |
+| 离线链路 | 双击 `index.html` 以 `file://` 打开 | 顶栏显示离线褪色形象（`alt` / `title` 为「离线 · 本地计算」），排程 / 记录 / 导出可用，控制台无报错 |
+| 离线指示 | 停服后刷新首页；有待上行 op 时复看 | 顶栏出现 `.sync-offline` 头像且不破图；待上行 N 时 `.sync-pending` 角标显示 N；恢复服务后回到圆点 + 「本地优先 · 已同步」 |
 | 降级与动效 | 停服后重复关键操作；`html[data-motion="off"]` 下复看 | 操作走本地引擎兜底；关动效后不破版 |
 
 `index.html` 资源引用全量扫描（在仓库根目录执行）：

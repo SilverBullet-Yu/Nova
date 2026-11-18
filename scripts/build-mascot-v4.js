@@ -321,3 +321,20 @@ Object.keys(files).forEach(function (name) {
   fs.writeFileSync(path.join(OUT, name), files[name], 'utf8');
   console.log('wrote assets/img/' + name + ' (' + files[name].length + ' bytes)');
 });
+
+/* 顶栏离线态形象的内联副本（assets/js/mascot-inline.js）：
+   静态资源以 Cache-Control: no-cache 提供，后端不可达时重新加载必然失败，
+   离线指示恰好在这种时刻出现——内联 data URI 不依赖网络，保证仍可显示。
+   本文件由本脚本生成，禁止手改；改形象请改本脚本后重跑。 */
+const INLINE_OUT = path.join(__dirname, '..', 'assets', 'js');
+const inlineSvg = files['avatar-v4-offline.svg'];
+const inlineFile = '/* 自动生成文件，请勿手改。\n' +
+  ' * 来源：scripts/build-mascot-v4.js（assets/img/avatar-v4-offline.svg 的内联副本）\n' +
+  ' * 用途：顶栏离线态形象；静态资源在后端不可达时无法加载，故内联一份 data URI。\n' +
+  ' */\n' +
+  'window.ZX_MASCOT = window.ZX_MASCOT || {};\n' +
+  'window.ZX_MASCOT.offlineAvatar = ' +
+  JSON.stringify('data:image/svg+xml;base64,' + Buffer.from(inlineSvg, 'utf8').toString('base64')) + ';\n';
+fs.mkdirSync(INLINE_OUT, { recursive: true });
+fs.writeFileSync(path.join(INLINE_OUT, 'mascot-inline.js'), inlineFile, 'utf8');
+console.log('wrote assets/js/mascot-inline.js (' + inlineFile.length + ' bytes)');

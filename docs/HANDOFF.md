@@ -152,6 +152,7 @@
 - 凭证：`POST /api/auth/session` 取得 `{ token, userId, expiresAt }`，存 `localStorage['zx.auth_token']`；本地先按 `expiresAt` 预判过期；收到 401 时清空凭证并重新签发一次，不循环重试。仅 `/api/health` 与 `/api/auth/session` 不带凭证，其余请求统一带 `Authorization: Bearer <token>`。
 - 身份只来自凭证：请求体的 `userId` 不参与判定；`POST /api/sync/ops` 中 `op.userId` 若与凭证不一致，直接 `E4030`。
 - 降级：`assets/js/engine.js` 后端优先，响应结构不合约定或请求失败即走本地 `assets/js/rhythm.build.js`，并置 `ZX.engine.source` 为 `local`；产物缺失时抛错提示先跑 `npm run build:engine`，不静默换语义。同步入口 `ZX.engine.feasibilityNow` 与 `ZX.engine.attributeNow` 直接用本地产物。
+- 离线指示：顶栏同步位在线时为圆点 + 「本地优先 · 已同步」，离线时换为诺瓦的离线褪色头像（`assets/js/main.js` `updateSync()`），形象取自 `assets/js/mascot-inline.js` 的内联 data URI——静态资源以 `Cache-Control: no-cache` 提供，后端不可达时无法加载，故离线指示不依赖网络请求。
 - op 队列：写操作先入 `localStorage['zx.op_queue']`；`opId` 形如 `op_<Date.now().toString(36)>_<计数>`，`clientTs` 取 `Date.now()`，`baseSeq` 取 `ZX.state.serverSeq`；队列保存时只保留最后 200 条，故单批上行 ≤ 200，与服务端 `MAX_SYNC_BATCH` 一致，超限服务端返回 `E4002`。
 - 幂等键是 `opId`，分区内唯一；重复提交返回首次的 `serverSeq`（HTTP 200，`accepted` 仍含该 `opId`，不报错）。
 - 字段级合并（`server/store/memory.js` 的 `policyOf`）：墓碑类 `deleted`、`isDeleted`、`deletedAt` 墓碑优先不可翻转；计数类 `count`、`sessionCount`、`sessions`、`times` 求和；`actual`、`durationMin`、`minutes`、`duration` 取最大值；其余字段最后写入优先（同 `clientTs` 时 `serverSeq` 大者为准）。
