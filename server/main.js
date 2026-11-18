@@ -48,15 +48,10 @@ const MIME = {
 /**
  * CORS 策略：
  * 1. 本机来源（127.0.0.1 / localhost / file:// 的 null origin）——支持 file:// 双击打开的前端连后端；
- * 2. 同源来源（Origin 的 host 与请求 Host 一致）——支持云端部署后前端与 API 同源互调。
+ * 2. 同源来源（Origin 的 host 与请求 Host 一致）——支持自部署后前端与 API 同源互调。
  * 其余外部站点一律拒绝。
- *
- * 关闭开关：CORS_MODE=off。云函数经 HTTP 网关暴露时，网关已按环境安全域名回填
- * Access-Control-Allow-Origin；函数再写一次会得到 "<origin>,*" 这种非法多值，
- * 浏览器直接判为 CORS 失败。部署到网关后请通过环境变量设为 off。
  */
 function corsHeaders(req) {
-  if (process.env.CORS_MODE === 'off') return {};
   const origin = req.headers.origin;
   if (!origin) return {};
   const local = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin) || origin === 'null';

@@ -1,7 +1,7 @@
 # 诺瓦 · IP 形象设定
 
-> 「诺瓦 Nova」的视觉 IP 规范。**本文件是唯一设定来源**；素材由 [`scripts/build-mascot-v4.js`](../scripts/build-mascot-v4.js) 生成到 [`assets/img/`](../assets/img/)，预览见 [`design-preview/mascot/preview-v4.html`](../design-preview/mascot/preview-v4.html)。
-> 当前为 **v4（向官方版图造型语言对齐的重绘）**。历史方案归档：v1 方盒 / v2 球形 + 细棒耳在 [`design-preview/mascot/`](../design-preview/mascot/)，v3 球形 + 兔子耳在 [`design-preview/mascot/archive-v3/`](../design-preview/mascot/archive-v3/)。
+> 「诺瓦 Nova」的视觉 IP 规范。**本文件是唯一设定来源**；素材由 [`scripts/build-mascot-v4.js`](../scripts/build-mascot-v4.js) 生成到 [`assets/img/`](../assets/img/)。
+> 当前为 **v4（向官方版图造型语言对齐的重绘）**。历史方案（v1 方盒 / v2 球形 + 细棒耳 / v3 球形 + 兔子耳）的设计稿已从仓库移除，设定以本文件为准。
 > **2026-11-14 协调性微调**（几何与色板，不改造型语言）：耳根扎入球体、透镜沿杆轴、关节盘落球面（消除耳根悬空断裂）；耳杆三段透明度阶梯放缓（.94/.55/.28）；飞溅碎片按漂离方向分组统一倾角；旧主题色残留统一（classic 朱砂印、专注态朱砂 → `#A03B2C`，提醒态耳 → 现行深墨蓝 `#274B94`，闪线 → 警示金 `#B98A3C`，favicon 底 → 奶油纸 `#FBF7EF`）；warn/calc 右眼抬高 2px 对齐待机态脸部语言；新增产品侧「灵动」动效（见 §6）。
 >
 > 风格参考：《赛尔号》超能NoNo（球形悬浮助手 · 斜向细长光柱耳 · 深色大面罩 + 亮色描边 · 发光竖条眼 · 外挂小圆点 · 悬浮飞溅）。**轮廓类别致敬，细节全部原创**——耳杆构造、面罩倾角与比例、配色构型与胸口朱砂「诺」印均与原设不同构；不复制、不描摹、不使用《赛尔号》/ 超能NoNo 的原设造型与命名（超能NoNo 为淘米网络 IP）。参考来源见文末。
@@ -194,7 +194,7 @@ v4 的做法：**把原设的造型语言整体搬到诺瓦身上，但每一个
 | 逐条过账 `novaDiffIn` | 一次性 | 重排卡片 diff 行（`--d` 序号阶梯 45ms） | translateX −6px→0 + 淡入，.3s；呼应「逐条可见、给理由」 |
 | 依次浮现 | 一次性 | 快捷指令 `#chips .chip`（6 枚 stagger 50ms） | translateY 6px→0 + 淡入，.3s |
 
-总闸唯一：`html[data-motion="off"]`（动画与过渡时长归零，素材退回静态）。裁决（2026-11-15）：用户在产品内对动效的**显式选择优先于系统 `prefers-reduced-motion`**——「我的 → 界面动效」打开即播放；从未选择过的用户才按系统提示默认关闭（首帧脚本 / `util.prefs` 落为 `data-motion`，系统媒体查询不再单独设闸）。预览：`design-preview/mascot/preview-v4.html` §07「灵动」（每式带重播按钮）；聊天流三式（气泡 / 过账 / chips）在真实对话中直接可见。
+总闸唯一：`html[data-motion="off"]`（动画与过渡时长归零，素材退回静态）。裁决（2026-11-15）：用户在产品内对动效的**显式选择优先于系统 `prefers-reduced-motion`**——「我的 → 界面动效」打开即播放；从未选择过的用户才按系统提示默认关闭（首帧脚本 / `util.prefs` 落为 `data-motion`，系统媒体查询不再单独设闸）。聊天流三式（气泡 / 过账 / chips）与各场景动效在真实对话中直接可见。
 
 ## 7. 禁用清单
 
@@ -209,7 +209,7 @@ v4 的做法：**把原设的造型语言整体搬到诺瓦身上，但每一个
 
 - 素材：`node scripts/build-mascot-v4.js` 重新生成后，用 Chrome headless（`--headless=new --screenshot`）逐张截图人工核验；
 - 接入：启动 `npm start` 后用 CDP 驱动真实浏览器，检查图片 `naturalWidth > 0`、聆听态切换（`is-listen` + 可见性）、专注态 `.tk-mascot` 存在、移动端无横向溢出、控制台无报错；
-- 回归：`npm test`（引擎单测 + HTTP 冒烟）全绿；`npm run build:cloudbase` 确认 `assets/img/` 进入部署包。
+- 回归：`npm test`（引擎单测 + HTTP 冒烟）全绿。
 
 ---
 

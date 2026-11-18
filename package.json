@@ -12,9 +12,7 @@
     "test": "node --test \"test/*.test.js\"",
     "pretest": "node scripts/build-engine.js",
     "audit": "node scripts/css-audit.mjs",
-    "build:engine": "node scripts/build-engine.js",
-    "build:cloudbase": "node scripts/build-cloudbase-fn.js",
-    "prebuild:cloudbase": "node scripts/build-engine.js"
+    "build:engine": "node scripts/build-engine.js"
   },
   "engines": {
     "node": ">=22"

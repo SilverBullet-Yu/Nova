@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" role="img" aria-label="小序头像：章式简化版（v2 球形）">
-  <!-- 小序 v2 · 头像（章式简化）：暖墨底 + 双耳 + 琥珀眼，对话 .avatar / 顶栏 .seal 可直接替换 -->
-  <rect width="96" height="96" rx="14" fill="#241E16"/>
-  <path d="M28 36C24 24 20 14 16 7Q14 2 20 2Q24 3 27 10C31 19 34 27 36 33Z" fill="#D9A44A"/>
-  <path d="M68 36C72 24 76 14 80 7Q82 2 76 2Q72 3 69 10C65 19 62 27 60 33Z" fill="#D9A44A"/>
-  <rect x="32" y="42" width="9" height="18" rx="4.5" fill="#D9A44A"/>
-  <rect x="55" y="42" width="9" height="18" rx="4.5" fill="#D9A44A"/>
-  <rect x="41" y="70" width="14" height="4" rx="2" fill="rgba(217,164,74,.75)"/>
-</svg>

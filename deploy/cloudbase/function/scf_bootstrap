@@ -1,6 +1,0 @@
-#!/bin/bash
-cd "$(dirname "$0")" || exit 1
-export PORT=9000
-export HOST=0.0.0.0
-export CORS_MODE=off
-exec /var/lang/node20/bin/node index.js

@@ -833,3 +833,15 @@ store 的 `applyToState` session 分支改为**直接落完整会话对象**（�
 
 **验证**：`npm test` 58/58；`npm run audit` 0 error 0 warn；`npm run build:cloudbase` 成功（45 文件 / 529 KB）；`node --check` 三个改动 JS 通过；HTML 资源引用全量扫描 0 缺失；运行时 DOM 交叉验证确认删除的类零出现。
 
+### 仓库收敛：仅保留运行与使用必需内容（2026-11-18 · README 定稿后清理）
+
+**变更文件**：`deploy/`（整目录）、`design-preview/`（整目录）、`scripts/build-cloudbase-fn.js`（均已移入回收站）、`package.json`、`.env.example`、`.gitignore`、`server/main.js`、`docs/IP-DESIGN.md`、`docs/FRONTEND-CONTRACT.md`、`README.md`
+
+**1. 删除腾讯云 CloudBase 部署相关**：`deploy/cloudbase/`（函数入口 + `scf_bootstrap`）与 `scripts/build-cloudbase-fn.js`（打包脚本）移入回收站；`package.json` 移除 `build:cloudbase` / `prebuild:cloudbase`；`.env.example` 移除云网关专用变量 `CORS_MODE`；`server/main.js` 删除 `corsHeaders` 里 `CORS_MODE === 'off'` 的提前返回分支（本地与自部署场景行为不变）；`.gitignore` 移除 `.deploy/` 规则及对应注释。
+
+**2. 删除设计预览目录**：`design-preview/`（18 个文件，含 v1 / v2 / v3 历史形象稿与 `preview-v4.html`）移入回收站。`scripts/build-mascot-v4.js` 只写 `assets/img/`、不读该目录，素材重建不受影响；`docs/IP-DESIGN.md` 中 4 处指向该目录的引用同步改写为文字描述，不留悬空链接。
+
+**3. 保留项及理由**：`docs/`（README 引用 `docs/IP-DESIGN.md`）、`test/`（`npm test` 依赖，且是 README 列出的验证命令）、`scripts/build-mascot-v4.js`（`assets/img/` 素材的唯一重建入口）属运行 / 维护必需，未删除。
+
+**验证**：`npm test` 58/58；`node --check` 两个改动 JS 通过；`npm start` 冒烟——`GET /api/health` 返回 `{"ok":true,"version":"1.0.0"}`，根路径 200；HTML 资源引用全量扫描 21 项 0 缺失；全仓库关键词扫描 `cloudbase` / `design-preview` / `CORS_MODE` 仅剩本文件的历史轮次记录。
+
