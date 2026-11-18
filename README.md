@@ -42,7 +42,7 @@
 ### 方式二：前后端完整运行
 
 ```bash
-npm start     # 启动服务，默认 http://127.0.0.1:8787
+npm start     # 启动服务，默认端口 8787
 npm test      # 引擎单测 + HTTP 冒烟
 ```
 
@@ -51,14 +51,16 @@ npm test      # 引擎单测 + HTTP 冒烟
 ### 环境要求
 
 - Node.js **22+**（仅 `npm start` / `npm test` 需要；双击打开 `index.html` 不需要任何环境）
-- **零第三方依赖**：只用 `node:http`、`node:fs`、`node:path`、`node:url` 等内置模块，无需 `npm install`
+- **零第三方依赖**：只用 `node:http`、`node:fs`、`node:path`、`node:url`、`node:crypto` 等内置模块，无需 `npm install`
 
 ### 端口与绑定地址
 
 | 环境变量 | 缺省 | 说明 |
 |---|---|---|
-| `PORT` | `8787` | 服务监听端口 |
-| `HOST` | `0.0.0.0` | 监听地址。容器或反向代理场景保持默认；本机自用建议显式设为 `127.0.0.1` |
+| `PORT` | `8787` | 服务监听端口（缺省值定义在 `server/main.js` 的 `DEFAULT_PORT`） |
+| `HOST` | `0.0.0.0` | 监听地址（`DEFAULT_HOST`）。容器或反向代理场景保持默认；本机自用建议显式设为 `127.0.0.1` |
+
+> 监听地址与访问地址不是一回事：缺省绑定 `0.0.0.0`（所有网卡），启动横幅打印的是 `http://0.0.0.0:8787`，浏览器请用 `http://127.0.0.1:8787/` 访问。
 
 ```bash
 PORT=8080 HOST=127.0.0.1 node server/main.js
@@ -68,6 +70,8 @@ PORT=8080 HOST=127.0.0.1 node server/main.js
 
 完整清单与生成方式见 [`.env.example`](.env.example)。本项目不自动读取 `.env`（零第三方依赖），请通过 shell 或部署平台的环境变量注入。
 
+> `.env.example` 里的 `PORT=8080` / `HOST=127.0.0.1` 是**示例取值**（本机自用的收紧配置），不是程序缺省值；缺省仍以 `server/main.js` 的 `DEFAULT_PORT` / `DEFAULT_HOST` 为准（`8787` / `0.0.0.0`）。
+
 | 变量 | 缺省 | 说明 |
 |---|---|---|
 | `NOVA_AUTH_SECRET` | 本地随机 / 生产必填 | 凭证签名的 HMAC 密钥，需 ≥32 字节随机串。生产环境（`NODE_ENV=production`）未配置将直接拒绝启动 |
@@ -76,6 +80,22 @@ PORT=8080 HOST=127.0.0.1 node server/main.js
 | `NODE_ENV` | 未设置 | 设为 `production` 启用生产约束（鉴权密钥必填等） |
 
 > 密钥类变量一律不写入仓库；`.env` 已被 `.gitignore` 忽略，`.env.example` 仅含变量名与说明，不含任何真实值。
+
+---
+
+## 开发与验证
+
+| 命令 | 作用 | 备注 |
+|---|---|---|
+| `npm start` | 启动 HTTP 服务（API + 静态托管前端） | `prestart` 会先重建引擎产物 |
+| `npm test` | 引擎单测 + HTTP 端到端冒烟 | `pretest` 会先重建引擎产物 |
+| `npm run build:engine` | 由 `shared/engine/*.js` 生成 `assets/js/rhythm.build.js` | **改过引擎必须重跑**，否则前端离线兜底跑的是旧逻辑 |
+| `npm run audit` | CSS 审计（体积 / 重复声明 / 变量引用） | 脚本见 `scripts/css-audit.mjs` |
+| `npm run build:cloudbase` | 生成云函数包 `.deploy/cloudbase-functions/nova` | 产物不入库（`.gitignore` 已忽略 `.deploy/`） |
+
+### 引擎的唯一实现
+
+`shared/engine/` 下的四个模块是排程逻辑的**唯一实现**；`assets/js/rhythm.build.js` 是由 `scripts/build-engine.js` 拼接生成的浏览器产物，禁止手改或手工复制。任何引擎改动都必须重跑 `npm run build:engine` 并把产物一并提交，否则后端在线计算与前端离线兜底会出现两套行为。
 
 ---
 
@@ -90,6 +110,8 @@ PORT=8080 HOST=127.0.0.1 node server/main.js
 | 函数包 | `.deploy/cloudbase-functions/nova`（约 529 KB / 45 个文件，零依赖） |
 
 > 环境 ID、访问域名等云资源标识由部署方在自己的 CloudBase 环境中确定，不在本仓库固化。
+
+> 运行时兼容性：代码只使用 Node 20 起已稳定的内置模块（`node:http` / `node:fs` / `node:path` / `node:url` / `node:crypto`），零第三方依赖，因此云端 `Nodejs20.19` 与本地 Node 22+ 跑的是同一份逻辑。本地建议 22+（见 `package.json` 的 `engines`）。
 
 ### 为什么是云函数而不是云托管
 
@@ -174,6 +196,7 @@ npm run build:cloudbase   # 产出 .deploy/cloudbase-functions/nova
 .
 ├── index.html                # 前端入口，支持 file:// 双击打开
 ├── .env.example              # 环境变量模板（仅变量名与说明，无真实值）
+├── LICENSE                   # MIT 许可证
 ├── assets/
 │   ├── css/app.css           # 样式（单一来源，CSS 变量驱动）
 │   ├── img/                  # 诺瓦 v4 形象素材（由 scripts/build-mascot-v4.js 生成）
@@ -201,6 +224,9 @@ npm run build:cloudbase   # 产出 .deploy/cloudbase-functions/nova
 │   ├── api/routes.js         # REST 路由
 │   └── store/memory.js       # 内存存储
 ├── scripts/                  # 构建脚本（引擎产物 / 云函数包 / 形象 / CSS 审计）
+├── design-preview/
+│   └── mascot/               # 形象设计预览页与各版形象稿（预览 / states / views）
+│       └── archive-v3/       # v3 形象归档（历史版本，仅作对照参考）
 ├── deploy/cloudbase/         # 云函数入口与引导脚本（构建时落入 .deploy/）
 ├── test/
 │   ├── engine.test.js        # 引擎单测（node:test）
@@ -213,6 +239,17 @@ npm run build:cloudbase   # 产出 .deploy/cloudbase-functions/nova
 ```
 
 `shared/` 下全部为纯函数模块：不读时钟、不读随机数、不做 I/O，采用 UMD 形态以同时支持浏览器 `<script>` 与 Node `require()`。
+
+---
+
+## 文档索引
+
+| 文档 | 内容 | 何时看 |
+|---|---|---|
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 架构说明与生产形态设计稿摘编 | 理解分层、数据流与设计意图 |
+| [`docs/HANDOFF.md`](docs/HANDOFF.md) | 前后端接口契约（字段级定义 + 错误码附录） | 改 API 或做前后端对接 |
+| [`docs/FRONTEND-CONTRACT.md`](docs/FRONTEND-CONTRACT.md) | 前端开发约定与阶段记录 | 改前端视图与交互 |
+| [`docs/IP-DESIGN.md`](docs/IP-DESIGN.md) | 「诺瓦」形象设定与版权边界 | 改形象素材或对外文案 |
 
 ---
 
