@@ -153,7 +153,7 @@ window.ZX = window.ZX || {};
       };
     }
     return {
-      head: ['目标 / 拆解', '拆解草案', '这一页只调计划项；确认后由排程引擎排进本周空档。'],
+      head: ['目标 / 拆解', '拆解草案', '当前仅编辑任务草案。确认后交给确定性引擎排程。'],
       body: planHtml(),
       footer: planFooter(),
       wide: true
@@ -266,8 +266,8 @@ window.ZX = window.ZX || {};
       '<div class="sa-f-top">' +
         '<div class="sa-f-r"><b>' + f.R.toFixed(2) + '</b>' +
           '<span class="sa-tag ' + verdictClass(f.verdict) + '">' + f.verdict + '</span></div>' +
-        '<div class="sa-f-note">T = ' + d.weeklyH + ' h/周 × ' + d.weeks + ' 周 × 0.85 = ' + f.T + ' h<br>' +
-          'D = ' + BASE_HOURS[d.type] + ' h × 基础系数 ' + coefOf(d.base).toFixed(2) + ' = ' + f.D + ' h</div>' +
+        '<div class="sa-f-note">目标草案：' + d.weeklyH + ' h/周 × ' + d.weeks + ' 周<br>' +
+          '确定性引擎：可用 T 按 ' + DISCOUNT + ' 折算为 ' + f.T + ' h；当前需求 D = ' + f.D + ' h</div>' +
       '</div>' +
       '<div class="sa-kvs">' +
         kv('可用 T', f.T) + kv('需求 D', f.D) +
@@ -364,11 +364,12 @@ window.ZX = window.ZX || {};
     var ratio = cap ? total / cap : 0;
     return '<div class="sa-stats">' +
         stat('计划总时长', U.hm(total)) +
-        stat('周容量', U.hm(cap)) +
+        stat('草案周容量', U.hm(cap)) +
         stat('负载比', ratio.toFixed(2)) +
         stat('当前 R', f.R.toFixed(2), f.R >= GATE ? 'ac' : 'warn') +
       '</div>' +
       '<div class="sa-notices">' + noticesHtml(cap, total, f) + '</div>' +
+      '<p class="note">' + scheduleConstraints(buildSlots()) + '</p>' +
       rowsHtml() +
       addHtml();
   }
@@ -485,7 +486,7 @@ window.ZX = window.ZX || {};
      环节③④贯通：草案确认后交给 schedule 引擎真排进本周空档，
      今日任务、任务时段与周视图全部来自引擎输出，不再硬编码时段。 */
 
-  /* 本周可排空档：每天 18:00–22:00 学习窗（8 格 × 30min）+ 22:00–23:00 弹性位（2 格）。
+  /* 本周可排空档取自可用时段网格，弹性槽也必须位于可用窗口内。
      「今天」排数组最前：候选按 slots 顺序评估，权重最高的任务先占今天。 */
   var DAY_ORDER = ['一', '二', '三', '四', '五', '六', '日'];
   var STUDY_FROM = 18 * 60;        /* 18:00 */
@@ -499,14 +500,28 @@ window.ZX = window.ZX || {};
     var dow = U.todayDow();
     var days = [dow].concat(DAY_ORDER.filter(function (x) { return x !== dow; }));
     var slots = [];
+    var grid = ZX.state.avail;
+    var ranges = [[480, 720], [720, 1080], [1080, 1320]];
     days.forEach(function (d) {
-      for (var s = STUDY_FROM; s < STUDY_TO; s += 30) {
-        slots.push({ date: d, startMin: s, durMin: 30, available: true, isBuffer: false });
-      }
-      slots.push({ date: d, startMin: STUDY_TO, durMin: 30, available: true, isBuffer: true });
-      slots.push({ date: d, startMin: STUDY_TO + 30, durMin: 30, available: true, isBuffer: true });
+      var row = grid && grid[DAY_ORDER.indexOf(d)];
+      var starts = [];
+      ranges.forEach(function (range, i) {
+        if (row ? row[i] !== true : i !== 2) return;
+        for (var min = range[0]; min < range[1]; min += 30) starts.push(min);
+      });
+      starts.forEach(function (min, i) {
+        slots.push({ date: d, startMin: min, durMin: 30, available: true, isBuffer: i >= starts.length - BUFFER_MIN / 30 });
+      });
     });
     return slots;
+  }
+
+  function scheduleConstraints(slots) {
+    if (!slots.length) return '没有可用时段，无法排程。';
+    var days = new Set(slots.map(function (s) { return s.date; }));
+    var minutes = slots.reduce(function (sum, s) { return sum + s.durMin; }, 0);
+    return '可用时段：' + days.size + ' 天，共 ' + minutes / 60 +
+      ' 小时（含弹性位，不等于可排任务工时）；只在可用时段内排程，弹性位兜底。';
   }
 
   /* 引擎 blocks → 周视图（segs 按科目聚合；弹性位容量单列，与周图 .buf 同语） */
@@ -563,6 +578,21 @@ window.ZX = window.ZX || {};
       });
   }
 
+  function traceSchedule(status, planVersion) {
+    try {
+      var store = window.localStorage;
+      var bytes = crypto.getRandomValues(new Uint8Array(16));
+      var id = 'schedule-' + Array.from(bytes, function (v) { return v.toString(16).padStart(2, '0'); }).join('');
+      var key = 'zx.scheduleTrace';
+      var events = JSON.parse(store.getItem(key) || '[]');
+      store.setItem(key, JSON.stringify((Array.isArray(events) ? events : []).slice(-99).concat([{
+        id: id, tool: 'schedule', at: Date.now(), planVersion: planVersion,
+        rulesVersion: 'nova-schedule-p0-1', status: status
+      }])));
+    } catch (err) { /* 留痕失败不影响排程 */ }
+  }
+
+  var scheduleRequest = 0;
   function apply() {
     var S = ZX.state;
     var d = draft();
@@ -574,59 +604,58 @@ window.ZX = window.ZX || {};
     var all = plan().map(function (it) {
       return { id: it.id, subject: it.s, title: it.title, estMin: it.est, weight: it.weight };
     });
+    var slots = buildSlots();
+    if (!slots.length) { ZX.ui.toast('没有可用时段，请先在「我的」中设置。当前计划未变更。', 'warn'); return; }
     var stamp = Date.now().toString(36);
 
-    S.goal.name = String(d.name || '').trim();
-    S.goal.deadline = d.deadline;
-    S.goal.weeks = d.weeks;
-    S.feas.weeklyH = d.weeklyH;
-    S.feas.weeks = d.weeks;
-    S.feas.discount = DISCOUNT;
-    S.feas.demand = d.demand;
+    var request = ++scheduleRequest;
+    var approved = JSON.stringify([d, all, slots]);
+    ZX.engine.schedule({ tasks: all, slots: slots, params: {} }).then(function (res) {
+      if (request !== scheduleRequest || S.goalDraft !== d) return;
+      var current = plan().map(function (it) {
+        return { id: it.id, subject: it.s, title: it.title, estMin: it.est, weight: it.weight };
+      });
+      if (approved !== JSON.stringify([d, current, buildSlots()])) {
+        traceSchedule('stale', S.currentPlanVersion ? S.currentPlanVersion() : null);
+        ZX.ui.toast('草案或可用时段有变，请重新确认。当前计划未变更。', 'warn');
+        return;
+      }
+      if (!res || !Array.isArray(res.blocks) || !res.blocks.length || !Array.isArray(res.unplanned)) {
+        traceSchedule('failed', S.currentPlanVersion ? S.currentPlanVersion() : null);
+        ZX.ui.toast('没有可应用的排程结果，当前计划未变更。', 'warn');
+        return;
+      }
+      applyScheduled(res, all, stamp, d, slots);
+    }, function () {
+      if (request === scheduleRequest && S.goalDraft === d) {
+        traceSchedule('failed', S.currentPlanVersion ? S.currentPlanVersion() : null);
+        ZX.ui.toast('排程未完成，当前计划未变更；可重试提交。', 'warn');
+      }
+    });
+  }
 
-    /* 新目标生效后，旧计时 / 旧重排快照 / 旧降载态都失去对应任务，一并作废 */
+  function applyScheduled(res, all, stamp, d, slots) {
+    var S = ZX.state;
+    var blocks = res.blocks;
+    var unplanned = res.unplanned;
+    var dow = U.todayDow();
+    var week = weekFromBlocks(blocks);
+    var patch = {
+      goal: Object.assign({}, S.goal, { name: String(d.name || '').trim(), deadline: d.deadline, weeks: d.weeks, source: 'user' }),
+      feas: { weeklyH: d.weeklyH, weeks: d.weeks, discount: DISCOUNT, demand: d.demand },
+      week: week, weekShift: U.clone(week), tasks: todayTasksFromBlocks(blocks, all, stamp),
+      buffer: { time: BUFFER_TIME, free: !blocks.some(function (b) { return b.isBuffer && b.date === dow; }) },
+      replanned: false, snapshot: null, replanRecord: null, tiredAdopted: false, movedOut: null,
+      replanHistory: [], dayAssign: {}, locks: {}, goalDraft: null, planDraft: null
+    };
     S.resetTimer();
-    S.replanned = false;
-    S.snapshot = null;
-    S.replanRecord = null;
-    S.tiredAdopted = false;
-    S.movedOut = null;
-    S.replanHistory = [];
-
-    S.goalDraft = null;
-    S.planDraft = null;
-
-    ZX.ui.toast('目标已生效 · 排程中', 'ok');
+    Object.assign(S, patch);
+    traceSchedule('committed', S.currentPlanVersion ? S.currentPlanVersion() : null);
     var ctl = api;
     api = null;
     if (ctl) ctl.close('applied');
     ZX.render();
     ZX.setTab('plan');
-
-    /* 排程走统一入口（后端优先 → 本地降级），结果回来后写任务与周视图 */
-    ZX.engine.schedule({ tasks: all, slots: buildSlots(), params: {} }).then(function (res) {
-      applyScheduled(res, all, stamp);
-    }, function () {
-      say('<p>排程没有完成：引擎不可用。计划草案已保存，稍后说「重排」可以再排一次。</p>', '排程 · 失败');
-    });
-  }
-
-  function applyScheduled(res, all, stamp) {
-    var S = ZX.state;
-    var blocks = (res && Array.isArray(res.blocks)) ? res.blocks : [];
-    var unplanned = (res && Array.isArray(res.unplanned)) ? res.unplanned : [];
-    var dow = U.todayDow();
-
-    var week = weekFromBlocks(blocks);
-    S.week = week;
-    S.weekShift = U.clone(week);
-    S.buffer = {
-      time: BUFFER_TIME,
-      free: !blocks.some(function (b) { return b.isBuffer && b.date === dow; })
-    };
-    S.tasks = todayTasksFromBlocks(blocks, all, stamp);
-
-    ZX.render();
 
     var rows = S.tasks.map(function (t) {
       return '<div class="erow"><span class="k">' + U.esc(t.time.split('–')[0]) + '</span>' +
@@ -637,10 +666,11 @@ window.ZX = window.ZX || {};
       ? '<div class="ecard-f"><span class="note">另 ' + unplanned.length + ' 项未排入：' +
         U.esc(unplanned.map(function (u) { return (u.reason || '无可用时段').split('，')[0]; }).join('；')) + '</span></div>'
       : '';
-    say('<p>排程完成：<b>' + all.length + '</b> 项计划已排进本周空档（每天 18:00–22:00 学习窗 + 22:00 弹性位），' +
+    say('<p>排程完成：<b>' + (all.length - unplanned.length) + '</b> 项已排入可用时段，' +
       '今天先做 <b>' + S.tasks.length + '</b> 项。</p>' +
       '<div class="ecard"><div class="ecard-h"><b>今晚开始</b><span class="tag">引擎 ' + U.esc(res.version || '') + '</span></div>' +
-      '<div class="ecard-b">' + rows + unplannedTxt + '</div></div>', '排程 · ' + blocks.length + ' 块');
+      '<div class="ecard-b"><p class="note">输入：已确认任务草案；来源：确定性引擎。' +
+      scheduleConstraints(slots) + '</p>' + rows + unplannedTxt + '</div></div>', '排程 · ' + blocks.length + ' 块');
   }
 
   /* ---------- 事件 ---------- */

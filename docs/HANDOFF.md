@@ -117,11 +117,11 @@
 |---|---|---|---|---|---|
 | GET | `/api/health` | 免 | 无 | `{ ok, version, uptimeMs }` | 无 |
 | POST | `/api/auth/session` | 免 | 无（不接受任何身份字段） | `{ token, userId, expiresAt }` | E4290 |
-| GET | `/api/state` | 需 | 无 | `{ seed, replan, notifications }` | E4010 |
+| GET | `/api/state` | 需 | 无 | `{ seed, replan, notifications, planBaseline }`；`planBaseline` 为 `null`（无已确认重排）或 `{ version, stale }`（进程内基线；任意新入库同步操作保守标脏，不代表已执行离线复核） | E4010 |
 | POST | `/api/feasibility` | 需 | `weeklyH`、`weeks`、`discount`、`demand` 均必填且须为有限数值 | `feasibility()` 返回 | E4010, E1001, E4290 |
 | POST | `/api/schedule` | 需 | `tasks`、`slots` 必填数组；`params` 可选对象 | `{ blocks, unplanned, version }` | E4010, E1001, E4290 |
-| POST | `/api/replan` | 需 | `tasks`、`week` 必填数组；`params`、`history`、`locks` 可选对象；`timestamp` 可选 | `replan()` 返回 | E4010, E1001, E4290 |
-| POST | `/api/replan/confirm` | 需 | `result` 必填对象 | `confirmReplan()` 返回 | E4010, E1001, E4290 |
+| POST | `/api/replan` | 需 | `tasks`、`week` 必填数组；`params`、`history`、`locks` 可选对象；`timestamp` 可选 | `replan()` 返回；可提交结果附 `draftId`，不写业务记录 | E4010, E1001, E4290 |
+| POST | `/api/replan/confirm` | 需 | 仅 `draftId` 字符串 | 已确认重排结果；草案同身份、5 分钟内且仍在缓存中，重复确认不重写 | E4010, E1001, E2001, E3001, E4290 |
 | POST | `/api/replan/undo` | 需 | `snapshot` 必填对象 | `{ tasks, week }` | E4010, E1001, E4290 |
 | POST | `/api/attribute` | 需 | 请求体不得为空；6 个数值字段均可选 | `attribute()` 返回 | E4010, E1001, E4290 |
 | POST | `/api/sync/ops` | 需 | `ops` 必填数组；每条须有非空字符串 `opId`、`entity`、`field` 与非空 `entityId`；`clientTs` 可选有限数值 | `{ accepted: [opId], serverSeq }` | E4010, E1001, E4002, E4030, E4290 |
@@ -150,12 +150,15 @@
 
 - 入口 `assets/js/api.js`，超时 `3000` ms（`AbortController` 主动中断）。`BASE` 取 `window.__ZX_API_BASE__`（覆盖时去掉末尾斜杠），否则 `http`/`https` 用同源 `location.origin`，`file://` 用 `http://127.0.0.1:8787`。
 - 凭证：`POST /api/auth/session` 取得 `{ token, userId, expiresAt }`，存 `localStorage['zx.auth_token']`；本地先按 `expiresAt` 预判过期；收到 401 时清空凭证并重新签发一次，不循环重试。仅 `/api/health` 与 `/api/auth/session` 不带凭证，其余请求统一带 `Authorization: Bearer <token>`。
-- 身份只来自凭证：请求体的 `userId` 不参与判定；`POST /api/sync/ops` 中 `op.userId` 若与凭证不一致，直接 `E4030`。
+- 身份只来自凭证：请求体的 `userId` 不参与判定；`POST /api/sync/ops` 中 `op.userId` 若与凭证不一致，直接 `E4030`。同步实体标识和改期任务标识只接受字符串或安全整数；实体、字段与这些标识不得使用原型保留键，非法输入返回 `E1001`，且整批不入库。
 - 降级：`assets/js/engine.js` 后端优先，响应结构不合约定或请求失败即走本地 `assets/js/rhythm.build.js`，并置 `ZX.engine.source` 为 `local`；产物缺失时抛错提示先跑 `npm run build:engine`，不静默换语义。同步入口 `ZX.engine.feasibilityNow` 与 `ZX.engine.attributeNow` 直接用本地产物。
-- 离线指示：顶栏同步位在线时为圆点 + 「本地优先 · 已同步」，离线时换为诺瓦的离线褪色头像（`assets/js/main.js` `updateSync()`），形象取自 `assets/js/mascot-inline.js` 的内联 data URI——静态资源以 `Cache-Control: no-cache` 提供，后端不可达时无法加载，故离线指示不依赖网络请求。
+- 离线指示：顶栏同步位在线时按待上行数量显示「本地优先 · 待上行 N」或「本地优先 · 已同步」，离线时换为诺瓦的离线褪色头像（`assets/js/main.js` `updateSync()`），形象取自 `assets/js/mascot-inline.js` 的内联 data URI——静态资源以 `Cache-Control: no-cache` 提供，后端不可达时无法加载，故离线指示不依赖网络请求。
+- 补传：启动探测流程在采纳服务端状态并重放已加载的本地 overlay 后尝试补传；已判定离线后，下一次非同步 API 请求成功也会触发补传。无后台轮询；网络恢复但没有新请求时不会立即触发。队列只把服务端 `accepted` 确认的操作标为已同步。
 - op 队列：写操作先入 `localStorage['zx.op_queue']`；`opId` 形如 `op_<Date.now().toString(36)>_<计数>`，`clientTs` 取 `Date.now()`，`baseSeq` 取 `ZX.state.serverSeq`；队列保存时只保留最后 200 条，故单批上行 ≤ 200，与服务端 `MAX_SYNC_BATCH` 一致，超限服务端返回 `E4002`。
-- 幂等键是 `opId`，分区内唯一；重复提交返回首次的 `serverSeq`（HTTP 200，`accepted` 仍含该 `opId`，不报错）。
+- 幂等键是 `opId`，分区内唯一；重复提交不再次写入，`accepted` 仍含该 `opId`。非空批次的 `serverSeq` 对应最后一条操作（若重复则为首次写入的序号），不是分区最新序号，也不能作为单调游标。客户端以 `accepted` 确认队列；上行 `baseSeq` 当前不参与服务端字段合并。
 - 字段级合并（`server/store/memory.js` 的 `policyOf`）：墓碑类 `deleted`、`isDeleted`、`deletedAt` 墓碑优先不可翻转；计数类 `count`、`sessionCount`、`sessions`、`times` 求和；`actual`、`durationMin`、`minutes`、`duration` 取最大值；其余字段最后写入优先（同 `clientTs` 时 `serverSeq` 大者为准）。
+
+- 基线 `version` 为服务端生成的版本标识，区别于浏览器执行事件关联的计划版本；`stale` 不是联网复核结果。普通新建计划不建立基线，服务进程重启后基线清空。
 
 ## 7. 兼容性硬要求
 

@@ -50,6 +50,7 @@ window.ZX = window.ZX || {};
     var S = ZX.state;
     if (!Array.isArray(S.avail) || S.avail.length !== 7) {
       S.avail = normGrid(DEFAULT_GRID);
+      S.availSource = 'default';
     } else {
       S.avail = normGrid(S.avail);
     }
@@ -71,7 +72,7 @@ window.ZX = window.ZX || {};
 
   function summaryHtml() {
     var m = metrics();
-    return '已选 <b>' + m.segs + '</b> 段 · 可用窗口 <b>' + m.hours + '</b> h';
+    return '已选 <b>' + m.segs + '</b> 段 · 可用窗口 <b>' + m.hours + '</b> h · ' + ({ default: '默认模板', user: '用户设置', legacy: '旧版设置' }[ZX.state.availSource] || '来源未知');
   }
 
   /* 局部更新：只改网格与计数，避免整页重绘丢失焦点 / 滚动位置 */
@@ -103,6 +104,8 @@ window.ZX = window.ZX || {};
     if (s < 0 || s > 3) return;
     var g = ensure();
     g[d][s] = !g[d][s];
+    ZX.state.availSource = 'user';
+    ZX.state.saveOverlay();
     queueAvail('toggle', { day: d, slot: s, value: g[d][s] });
     syncDom();
     U.refocus(U.$('.sd-cell[data-day="' + d + '"][data-slot="' + s + '"]'));
@@ -128,6 +131,8 @@ window.ZX = window.ZX || {};
     } else {
       return;
     }
+    ZX.state.availSource = kind === 'reset' ? 'default' : 'user';
+    ZX.state.saveOverlay();
     syncDom();
     U.refocus(U.$('[data-act="avail-bulk"][data-kind="' + kind + '"]'));
   }
@@ -153,9 +158,29 @@ window.ZX = window.ZX || {};
     return '未开始';
   }
 
+  function availabilityRows() {
+    var S = ZX.state;
+    if (!Array.isArray(S.avail) || S.avail.length !== DAYS.length || S.availSource === 'default') return [];
+    var source = S.availSource === 'user' ? '用户设置' : '旧版设置';
+    var rows = [];
+    DAYS.forEach(function (day, d) {
+      SLOTS.slice(0, 3).forEach(function (slot, i) {
+        var enabled = Array.isArray(S.avail[d]) && S.avail[d][i] === true;
+        rows.push(['可用时段', '', '', day + ' ' + slot + '（' + source + '）', '', '', '', enabled ? '可排程' : '不可排程', '', '']);
+      });
+    });
+    return rows;
+  }
+
+  function goalRows() {
+    var goal = ZX.state.goal;
+    if (!goal || goal.source !== 'user' || !goal.name) return [];
+    return [['阶段目标', '', '', goal.name, '', '', '', '用户设置', goal.deadline || '', '']];
+  }
+
   function csv() {
     var S = ZX.state;
-    var head = ['类型', '任务ID', '科目', '标题', '预估分钟', '实际分钟', '完成度', '状态', '日期'];
+    var head = ['类型', '任务ID', '科目', '标题', '预估分钟', '实际分钟', '完成度', '状态', '日期', '计划版本'];
     var today = ymd();
     var rows = [];
     var byId = {};
@@ -169,7 +194,7 @@ window.ZX = window.ZX || {};
         '任务', t.id, t.subject || t.s || '', t.title || '',
         U.num(t.est, 0),
         (t.actual === undefined || t.actual === null) ? '' : U.num(t.actual, 0),
-        pct, taskStatus(t), today
+        pct, taskStatus(t), today, ''
       ]);
     });
 
@@ -179,12 +204,12 @@ window.ZX = window.ZX || {};
         '记录', s.taskId || '', t.subject || t.s || '', t.title || '',
         '', U.num(s.minutes, 0),
         (s.completion === undefined || s.completion === null) ? '' : U.num(s.completion, 0),
-        s.status || '', ymd(s.startAt)
+        s.status || '', ymd(s.startAt), s.planVersion || ''
       ]);
     });
 
     return head.join(',') + '\n' +
-      rows.map(function (r) { return r.map(cell).join(','); }).join('\n') + '\n';
+      rows.concat(availabilityRows(), goalRows()).map(function (r) { return r.map(cell).join(','); }).join('\n') + '\n';
   }
 
   /* 数据行数在组装时统计，避免按换行符拆分把引号内换行误算成多行 */
@@ -192,7 +217,7 @@ window.ZX = window.ZX || {};
     var n = 0;
     (ZX.state.tasks || []).forEach(function () { n++; });
     (ZX.state.sessions || []).forEach(function () { n++; });
-    return n;
+    return n + availabilityRows().length + goalRows().length;
   }
 
   function download(filename, text) {
@@ -257,6 +282,7 @@ window.ZX = window.ZX || {};
       goal: U.clone(S.goal || null),
       feas: U.clone(S.feas || null),
       avail: U.clone(ensure()),
+      availSource: S.availSource,
       week: U.clone(S.week || null),
       at: Date.now()
     };
@@ -273,6 +299,28 @@ window.ZX = window.ZX || {};
     S.avail = zeroGrid();
     ZX.ui.toast('已删除，可在 7 天内恢复', 'warn');
     setTimeout(function () { window.location.reload(); }, 260);
+  }
+
+  function confirmRemoveGoal() {
+    var S = ZX.state;
+    var goal = S.goal;
+    if (!goal || goal.source !== 'user') return Promise.resolve(false);
+    return ZX.ui.confirm({ title: '删除阶段目标？', text: '仅移除本机阶段目标，保留已生成计划与执行记录。', okText: '删除阶段目标', danger: true }).then(function (ok) {
+      if (!ok || S.goal !== goal) return false;
+      var trash = readTrash();
+      if (trash) {
+        delete trash.snapshot.goal;
+        delete trash.snapshot.feas;
+        writeRaw(TRASH_KEY, JSON.stringify({ at: trash.at, snapshot: trash.snapshot }));
+      }
+      S.goal = { name: '未设置阶段目标', deadline: '', weeks: 0, target: '', source: 'removed' };
+      S.feas = { weeklyH: 0, weeks: 0, discount: 0, demand: 0 };
+      S.goalDraft = null;
+      S.planDraft = null;
+      S.saveOverlay();
+      ZX.render();
+      return true;
+    });
   }
 
   function confirmWipe() {
@@ -295,10 +343,15 @@ window.ZX = window.ZX || {};
     var s = t.snapshot || {};
     if (Array.isArray(s.tasks)) S.tasks = s.tasks.map(ZX.state.normTask);
     if (Array.isArray(s.sessions)) S.sessions = s.sessions;
-    if (s.goal) S.goal = s.goal;
-    if (s.feas) S.feas = s.feas;
+    if (!S.goal || S.goal.source !== 'removed') {
+      if (s.goal) S.goal = s.goal;
+      if (s.feas) S.feas = s.feas;
+    }
     if (s.week) S.week = s.week;
-    if (s.avail) S.avail = normGrid(s.avail);
+    if (s.avail) {
+      S.avail = normGrid(s.avail);
+      S.availSource = ['default', 'user'].indexOf(s.availSource) >= 0 ? s.availSource : 'legacy';
+    }
     dropRaw(TRASH_KEY);
     ZX.api.queueOp({ entity: 'data', entityId: 'all', field: 'restored', value: { at: t.at } });
     ZX.render();
@@ -332,7 +385,7 @@ window.ZX = window.ZX || {};
     ensure: ensure, grid: grid, metrics: metrics, summaryHtml: summaryHtml,
     toggle: toggle, bulk: bulk,
     csv: csv, exportCsv: exportCsv,
-    confirmWipe: confirmWipe, restoreInfo: restoreInfo, restore: restore,
+    confirmRemoveGoal: confirmRemoveGoal, confirmWipe: confirmWipe, restoreInfo: restoreInfo, restore: restore,
     setFont: setFont, init: init
   };
   ZX.settings = ZX.flows.settings;

@@ -1,8 +1,6 @@
 /* =========================================================
    诺瓦 Nova · 数据视图
-   KPI / 科目结构 / 归因全部由本地执行记录与归因计数推导（环节⑧回流），
-   不读种子摆拍数据；只有历史趋势沿用 seed.WEEKS（过去几周无数据源），
-   并把最后一周替换为本周真算的达成率。周数与日期范围由当前时间推导（ISO 周）。
+   周报按本地周汇总执行记录；今日达成率单独展示。
    ========================================================= */
 window.ZX = window.ZX || {};
 
@@ -10,7 +8,6 @@ window.ZX = window.ZX || {};
   'use strict';
 
   var U = ZX.util;
-  var NORTH_STAR = 70;   /* 北极星口径：达成率 ≥ 70% 计为有效周（与页面说明一致） */
   var MIX_COLOR = { '数学': 'var(--m-math)', '专业课': 'var(--m-408)', '英语': 'var(--m-en)', '政治': 'var(--m-pol)' };
   var ATTR_META = {
     '计划过载': ['var(--warn)', '下调密度，提高弹性位比例'],
@@ -22,7 +19,8 @@ window.ZX = window.ZX || {};
   /* ---------- 周报真算（不读种子摆拍） ---------- */
   function realStats() {
     var S = ZX.state;
-    var m = ZX.flows.exec.metrics();          /* 达成率与剩余口径，过滤 skipped */
+    var mon = weekStart();
+    var next = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 7);
     var sess = Array.isArray(S.sessions) ? S.sessions : [];
 
     /* 有效学习 / 科目结构 / 记录天数：来自执行记录（补录不计） */
@@ -31,13 +29,15 @@ window.ZX = window.ZX || {};
     var daySet = {};
     sess.forEach(function (s) {
       if (!s || s.isBackfill) return;
+      var at = s.endAt ?? s.startAt;
+      if (!Number.isFinite(at) || at < mon.getTime() || at >= next.getTime()) return;
       var min = U.num(s.minutes, 0);
       effMin += min;
       var t = null;
       for (var i = 0; i < S.tasks.length; i++) if (S.tasks[i].id === s.taskId) { t = S.tasks[i]; break; }
       var key = t ? t.s : '其他';
       bySubject[key] = U.num(bySubject[key], 0) + min;
-      var k = U.dayKey(s.endAt || s.startAt);
+      var k = U.dayKey(at);
       if (k) daySet[k] = true;
     });
 
@@ -46,13 +46,9 @@ window.ZX = window.ZX || {};
     var adopted = hist.filter(function (r) { return r && r.undone !== true; }).length;
 
     var seedStats = S.weekStats || {};
-    var seedKpis = seedStats.kpis || {};
 
     var kpis = {
       effectiveHours: Math.round(effMin / 60 * 10) / 10,
-      targetHours: U.num(seedKpis.targetHours, 15),
-      achievementRate: m.rate,
-      achievementDeltaPt: null,               /* 无上周数据源：不显示环比 */
       replanAdopted: adopted,
       replanTotal: hist.length,
       replanRate: hist.length ? Math.round(adopted / hist.length * 100) : null,
@@ -81,12 +77,7 @@ window.ZX = window.ZX || {};
       });
     }
 
-    /* 趋势：历史周沿用 seed，最后一周替换为本周真算 */
-    var WEEKS = Array.isArray(seedStats.WEEKS) ? seedStats.WEEKS.slice() : [];
-    if (WEEKS.length) WEEKS[WEEKS.length - 1] = m.rate;
-
     return {
-      WEEKS: WEEKS,
       kpis: kpis,
       subjectMix: subjectMix,
       attribution: attribution,
@@ -97,15 +88,14 @@ window.ZX = window.ZX || {};
   function stats() { return realStats(); }
   function kpis() { return stats().kpis; }
 
-  function weeks() {
-    var w = stats().WEEKS;
-    return Array.isArray(w) ? w : [];
+  /* 当前 ISO 周的周一至周日（MM.DD – MM.DD） */
+  function weekStart() {
+    var now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7));
   }
 
-  /* 当前 ISO 周的周一至周日（MM.DD – MM.DD） */
   function weekRange() {
-    var now = new Date();
-    var mon = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7));
+    var mon = weekStart();
     var sun = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6);
     return U.pad2(mon.getMonth() + 1) + '.' + U.pad2(mon.getDate()) + ' – ' +
       U.pad2(sun.getMonth() + 1) + '.' + U.pad2(sun.getDate());
@@ -119,7 +109,7 @@ window.ZX = window.ZX || {};
   function data() {
     var k = kpis();
     var attr = stats().attribution || {};
-    var dPt = k.achievementDeltaPt;
+    var todayRate = ZX.flows.exec.metrics().rate;
     return '<div class="wrap">' +
       '<div class="vhead"><div>' +
         '<div class="eyebrow">第 ' + U.isoWeek() + ' 周 · ' + weekRange() + '</div>' +
@@ -128,69 +118,25 @@ window.ZX = window.ZX || {};
 
       '<div class="sec-h"><span class="n">01</span><span class="t">本周概览</span><span class="rule"></span></div>' +
       '<div class="kpis">' +
-        '<div class="kpi"><span>有效学习</span><b>' + U.num(k.effectiveHours, 0) + '<span class="u">h</span></b><span class="d">目标 ' + U.num(k.targetHours, 0) + ' h</span></div>' +
-        '<div class="kpi"><span>达成率</span><b>' + U.num(k.achievementRate, 0) + '<span class="u">%</span></b><span class="d">' +
-          (dPt === null ? '本周为基线周' : '较上周 ' + (dPt >= 0 ? '+' : '−') + Math.abs(dPt) + ' pt') + '</span></div>' +
-        '<div class="kpi"><span>重排采纳</span><b>' + U.num(k.replanAdopted, 0) + '<span class="u">/ ' + U.num(k.replanTotal, 0) + '</span></b><span class="d">' +
-          (k.replanRate === null ? '本周还没有重排' : '采纳率 ' + U.num(k.replanRate, 0) + '%') + '</span></div>' +
+        '<div class="kpi"><span>有效学习</span><b>' + U.num(k.effectiveHours, 0) + '<span class="u">h</span></b><span class="d">仅计本周非补录会话</span></div>' +
+        '<div class="kpi"><span>重排采纳（累计）</span><b>' + U.num(k.replanAdopted, 0) + '<span class="u">/ ' + U.num(k.replanTotal, 0) + '</span></b><span class="d">' +
+          (k.replanRate === null ? '暂无重排记录' : '采纳率 ' + U.num(k.replanRate, 0) + '%') + '</span></div>' +
         '<div class="kpi"><span>记录天数</span><b>' + U.num(k.recordedDays, 0) + '<span class="u">/ ' + U.num(k.totalDays, 0) + '</span></b><span class="d">' +
           (U.num(k.recordedDays, 0) >= U.num(k.totalDays, 0) ? '无中断' : '有 ' + (U.num(k.totalDays, 0) - U.num(k.recordedDays, 0)) + ' 天未记录') + '</span></div>' +
       '</div>' +
 
       '<div class="sec-h"><span class="n">02</span><span class="t">本周周报</span><span class="rule"></span>' +
-        '<span class="r">结论 / 依据 / 已执行的动作</span></div>' +
+        '<span class="r">结论 / 依据 / 演示预置</span></div>' +
+      '<div class="kpis"><div class="kpi"><span>今日达成率</span><b>' + U.num(todayRate, 0) + '<span class="u">%</span></b><span class="d">仅统计今日任务</span></div></div>' +
       reportBlock() +
       ZX.ui.fold('data:trend', {
-        title: '趋势与归因',
-        meta: weeks().length + ' 周达成率 · 科目结构 · ' + Math.max(1, Object.keys(attr).length) + ' 类归因',
+        title: '科目结构与归因',
+        meta: '科目结构 · ' + Math.max(1, Object.keys(attr).length) + ' 类归因',
         body:
-          '<div class="sec-h"><span class="n">03</span><span class="t">达成率趋势</span><span class="rule"></span><span class="r">' + weeks().length + ' 周 · 虚线为 ' + NORTH_STAR + '% 目标</span></div>' +
-          lineChart() +
-          '<div class="sec-h"><span class="n">04</span><span class="t">结构与归因</span><span class="rule"></span></div>' +
+          '<div class="sec-h"><span class="n">03</span><span class="t">结构与归因</span><span class="rule"></span></div>' +
           '<div class="grid2">' + subjectBars() + attribution() + '</div>'
       }) +
     '</div>';
-  }
-
-  function lineChart() {
-    var W = 640, H = 168, L = 30, R = 12, T = 14, B = 26;
-    var data = weeks();
-    if (!data.length) return '<div class="empty">暂无趋势数据</div>';
-    var iw = W - L - R, ih = H - T - B;
-    var y = function (v) { return T + ih - (v - 40) / 50 * ih; };
-    var span = Math.max(1, data.length - 1);   /* 单元素数据时避免除零产生 NaN */
-    var x = function (i) { return L + i / span * iw; };
-    var pts = data.map(function (v, i) { return [x(i), y(v)]; });
-    var line = pts.map(function (p, i) { return (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1); }).join(' ');
-    var area = line + ' L' + x(data.length - 1).toFixed(1) + ' ' + (T + ih) + ' L' + L + ' ' + (T + ih) + ' Z';
-    var grid = '';
-    [40, 55, 70, 85, 100].forEach(function (v) {
-      grid += '<line class="grid-l" x1="' + L + '" y1="' + y(v) + '" x2="' + (W - R) + '" y2="' + y(v) + '"/>' +
-              '<text class="axis" x="' + (L - 8) + '" y="' + (y(v) + 3) + '" text-anchor="end">' + v + '</text>';
-    });
-    var base = U.isoWeek() - data.length + 1;
-    var labels = data.map(function (v, i) { return '<text class="axis" x="' + x(i) + '" y="' + (H - 8) + '" text-anchor="middle">W' + (base + i) + '</text>'; }).join('');
-    var dots = pts.map(function (p, i) { return '<circle class="pt" cx="' + p[0] + '" cy="' + p[1] + '" r="' + (i === pts.length - 1 ? 3.4 : 2.1) + '"/>'; }).join('');
-    var last = pts[pts.length - 1];
-    var latest = data[data.length - 1];
-    var streak = 0;
-    for (var i = data.length - 1; i >= 0 && data[i] < NORTH_STAR; i--) streak++;
-    var streakTxt = streak >= 2 ? '连续 ' + streak + ' 周低于目标'
-      : streak === 1 ? '低于 ' + NORTH_STAR + '% 目标'
-      : '达到 ' + NORTH_STAR + '% 目标';
-    return '<div class="chart"><div class="chart-h"><b>周达成率</b><span class="r">最新 ' + latest + '% · ' + streakTxt + '</span></div>' +
-      '<svg class="ch" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img"' +
-        ' aria-label="近 ' + data.length + ' 周达成率趋势，最新 ' + latest + '%">' +
-        '<defs><linearGradient id="lg" x1="0" y1="0" x2="0" y2="1">' +
-          '<stop offset="0%" style="stop-color:var(--ac)" stop-opacity=".16"/><stop offset="100%" style="stop-color:var(--ac)" stop-opacity="0"/>' +
-        '</linearGradient></defs>' +
-        grid +
-        '<line class="thr" x1="' + L + '" y1="' + y(NORTH_STAR) + '" x2="' + (W - R) + '" y2="' + y(NORTH_STAR) + '"/>' +
-        '<path class="line-a" d="' + area + '"/>' +
-        '<path class="line" d="' + line + '"/>' +
-        dots + labels +
-        '<text class="axis" x="' + (last[0] - 6) + '" y="' + (last[1] - 9) + '" text-anchor="end" fill="var(--ac)">' + latest + '</text>' +
-      '</svg></div>';
   }
 
   function subjectBars() {
@@ -210,7 +156,7 @@ window.ZX = window.ZX || {};
   function attribution() {
     var attr = stats().attribution || {};
     var keys = Object.keys(attr);
-    return '<div class="panel"><div class="panel-h">偏差归因' +
+    return '<div class="panel"><div class="panel-h">累计偏差归因' +
       '<img class="warn-flag" src="assets/img/mascot-v4-warn.svg" width="22" height="19" alt="偏差提醒" />' +
       '<span>顺序即优先级</span></div><div class="panel-b">' +
       (keys.length
@@ -229,25 +175,20 @@ window.ZX = window.ZX || {};
     var mix = stats().subjectMix || {};
     var attr = stats().attribution || {};
     var actions = Array.isArray(stats().actions) ? stats().actions : [];
-    var delta = k.achievementDeltaPt;
-    var gap = Math.round(Math.max(0, U.num(k.targetHours, 0) - U.num(k.effectiveHours, 0)) * 10) / 10;   /* 消除浮点误差（15-11.2=3.800…07） */
     var mixTxt = Object.keys(mix).map(function (n) { return n + ' ' + U.num(mix[n], 0) + '%'; }).join(' / ');
     var attrTxt = Object.keys(attr).map(function (n) { return n + ' ' + U.num(attr[n], 0) + '%'; }).join('、');
     return '<div class="report">' +
       '<div class="report-h"><b>第 ' + U.isoWeek() + ' 周 · 周报</b><span>' + genStamp() + ' 生成</span></div>' +
       /* 荧光笔静态用法（清晰线遗留项）：结论行的关键数字「划重点」，仅装饰、不承载语义 */
-      '<div class="rp-row"><div class="k">结论</div><div class="v">本周达成率 <b class="hl">' + U.num(k.achievementRate, 0) + '%</b>' +
-        (delta === null ? '' : '，较上周' + (delta >= 0 ? '上升' : '下降') + ' ' + Math.abs(delta) + ' 个百分点') +
-        '；有效学习 <b class="hl">' + U.num(k.effectiveHours, 0) + ' 小时</b>（目标 ' + U.num(k.targetHours, 0) + ' 小时）' +
-        (gap > 0 ? '。计划仍然存活，缺口 <b class="hl">' + gap + ' 小时</b>。' : '。') + '</div></div>' +
+      '<div class="rp-row"><div class="k">结论</div><div class="v">周达成率暂无数据（缺少本周计划基准）；有效学习 <b class="hl">' + U.num(k.effectiveHours, 0) + ' 小时</b>。</div></div>' +
       '<div class="rp-row"><div class="k">依据</div><div class="v">' +
         (mixTxt ? '科目分布 ' + U.esc(mixTxt) + '；' : '') +
-        (attrTxt ? '归因 ' + U.esc(attrTxt) + '。' : '') + '</div></div>' +
-      '<div class="rp-row"><div class="k">已执行</div><div class="v">' +
+        (attrTxt ? '累计归因 ' + U.esc(attrTxt) + '。' : '') + '</div></div>' +
+      '<div class="rp-row"><div class="k">演示预置</div><div class="v">' +
         (actions.length
-          ? '下周计划已预置 ' + actions.length + ' 处调整：' + U.esc(actions.join('；')) + '。<b>不是建议，是已经排进日程的 block。</b>'
-          : '本周没有预置调整。') + '</div></div>' +
-      '<div class="preset"><span class="tx">预置：<b>周日 08:00–10:00 政治 · 马原第 3 章</b></span><span class="spacer"></span>' +
+          ? '演示数据中的调整示例：' + U.esc(actions.join('；')) + '。生成周报不会将示例写入日程。'
+          : '暂无演示调整。') + '</div></div>' +
+      '<div class="preset"><span class="tx">演示预置：<b>周日 08:00–10:00 政治 · 马原第 3 章</b></span><span class="spacer"></span>' +
         '<button class="btn ghost" data-act="preset">' + (S.presetActive ? '撤销预置' : '恢复预置') + '</button></div>' +
     '</div>';
   }

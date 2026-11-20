@@ -5,12 +5,13 @@
  * 错误统一形状：{ error: { code, message } }
  */
 
+const { randomUUID } = require('node:crypto');
 const { feasibility } = require('../../shared/engine/feasibility.js');
 const { schedule } = require('../../shared/engine/schedule.js');
 const { replan, confirmReplan, undoReplan } = require('../../shared/engine/replan.js');
 const { attribute } = require('../../shared/engine/attribute.js');
 
-const VERSION = '1.0.0';
+const VERSION = require('../../package.json').version;
 
 /* 附录 B 错误码 → HTTP 状态码
  * E1001 参数非法 / 缺失        → 400
@@ -83,6 +84,13 @@ function checkNumericFields(obj, fields) {
 }
 
 function createRouter(store, auth) {
+  const drafts = new Map();
+  const draftTtlMs = 5 * 60 * 1000;
+  const maxDrafts = 128;
+
+  function revision(userId) {
+    return [store.getSeq(userId), store.getLatestReplan(userId)?.seq || 0].join(':');
+  }
   /* ── GET /api/health ── */
   function health() {
     return {
@@ -152,23 +160,31 @@ function createRouter(store, auth) {
       locks: b.locks,
       timestamp: b.timestamp === undefined ? null : b.timestamp
     });
-    /* L4 放弃需用户确认：needsConfirmation 的结果不落库 */
-    if (result.accepted === true) store.recordReplan(userId, result);
-    return result;
+    if (result.accepted !== true && result.needsConfirmation !== true) return result;
+    const now = Date.now();
+    for (const [id, draft] of drafts) if (draft.expiresAt <= now) drafts.delete(id);
+    if (drafts.size >= maxDrafts) drafts.delete(drafts.keys().next().value);
+    const draftId = randomUUID();
+    drafts.set(draftId, { userId, revision: revision(userId), expiresAt: now + draftTtlMs, result, locks: b.locks, params: b.params });
+    return { ...result, draftId };
   }
 
   /* ── POST /api/replan/confirm ──
-     用途：用户确认 L4 放弃建议后落库。只接受 needsConfirmation=true 的结果。 */
+     用途：仅对该身份先前生成的草案写入业务记录。 */
   function replanConfirmRoute(body, userId) {
     const b = needObject(body);
-    if (!isPlainObject(b.result)) throw new ApiError('E1001', '缺少字段 result');
-    let confirmed;
-    try {
-      confirmed = confirmReplan(b.result);
-    } catch (err) {
-      throw new ApiError('E1001', err.message);
+    if (typeof b.draftId !== 'string' || Object.keys(b).length !== 1) throw new ApiError('E1001', '仅接受 draftId');
+    const draft = drafts.get(b.draftId);
+    if (!draft || draft.userId !== userId) throw new ApiError('E2001', '找不到重排草案');
+    if (draft.expiresAt <= Date.now()) {
+      drafts.delete(b.draftId);
+      throw new ApiError('E2001', '找不到重排草案');
     }
-    store.recordReplan(userId, confirmed);
+    if (draft.confirmed) return draft.confirmed;
+    if (draft.revision !== revision(userId)) throw new ApiError('E3001', '计划状态已变化，请重新预览');
+    const confirmed = draft.result.needsConfirmation ? confirmReplan(draft.result) : draft.result;
+    store.recordReplan(userId, confirmed, { version: randomUUID(), locks: draft.locks, params: draft.params });
+    draft.confirmed = confirmed;
     return confirmed;
   }
 
@@ -210,9 +226,19 @@ function createRouter(store, auth) {
       needString(op.opId, 'ops[' + i + '].opId');
       needString(op.entity, 'ops[' + i + '].entity');
       needString(op.field, 'ops[' + i + '].field');
-      if (op.entityId === undefined || op.entityId === null) {
-        throw new ApiError('E1001', 'ops[' + i + '].entityId 缺失');
+      if (typeof op.entityId !== 'string' && !Number.isSafeInteger(op.entityId)) {
+        throw new ApiError('E1001', 'ops[' + i + '].entityId 必须是字符串或安全整数');
       }
+      const reservedKey = (key) => Object.prototype.hasOwnProperty.call(Object.prototype, key) || key === 'prototype';
+      const keys = [op.entity, String(op.entityId), op.field];
+      if (op.entity === 'plan' && op.field === 'moved' && isPlainObject(op.value) && op.value.taskId !== undefined) {
+        const taskId = op.value.taskId;
+        if (typeof taskId !== 'string' && !Number.isSafeInteger(taskId)) {
+          throw new ApiError('E1001', 'ops[' + i + '].value.taskId 必须是字符串或安全整数');
+        }
+        keys.push(String(taskId));
+      }
+      if (keys.some(reservedKey)) throw new ApiError('E1001', 'ops[' + i + '] 包含保留键');
       if (op.clientTs !== undefined && op.clientTs !== null) needNumber(op.clientTs, 'ops[' + i + '].clientTs');
       /* 身份只来自凭证：请求体携带的 userId 若与凭证不一致，直接拒绝，避免越权写入他人分区 */
       if (op.userId !== undefined && op.userId !== null && String(op.userId) !== userId) {

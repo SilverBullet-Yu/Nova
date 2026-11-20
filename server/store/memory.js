@@ -64,7 +64,8 @@ function createPartition(userId) {
     entities: {},       // entity → entityId → field → { value, tombstone, clientTs, seq }
     opIndex: new Map(), // opId → serverSeq（分区内 op_id 唯一，幂等兜底）
     replanRecords: [],
-    replanSeq: 0
+    replanSeq: 0,
+    planBaseline: null
   };
 }
 
@@ -267,7 +268,7 @@ function getLatestReplan(userId) {
   return p.replanRecords.length ? clone(p.replanRecords[p.replanRecords.length - 1]) : null;
 }
 
-function recordReplan(userId, result) {
+function recordReplan(userId, result, constraints) {
   const p = partitionOf(userId);
   p.replanSeq += 1;
   const rec = {
@@ -284,6 +285,10 @@ function recordReplan(userId, result) {
     nextWeek: clone(result.nextWeek || [])
   };
   p.replanRecords.push(rec);
+  if (rec.accepted && constraints) {
+    p.planBaseline = { version: constraints.version, seq: p.seq, record: rec,
+      locks: clone(constraints.locks || {}), params: clone(constraints.params || {}) };
+  }
   return clone(rec);
 }
 
@@ -333,8 +338,11 @@ module.exports = {
     return partitionOf(userId).seq;
   },
   getState: function (userId) {
+    const p = partitionOf(userId);
+    const baseline = p.planBaseline;
     return {
-      seed: clone(partitionOf(userId).state),
+      seed: clone(p.state),
+      planBaseline: baseline ? { version: baseline.version, stale: baseline.seq !== p.seq } : null,
       replan: getLatestReplan(userId),
       notifications: getNotifications(userId)
     };

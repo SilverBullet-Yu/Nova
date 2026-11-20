@@ -71,7 +71,7 @@ test('GET /api/health 返回 ok:true（无需凭证）', async () => {
 test('GET /api/state 返回初始全量（seed / replan / notifications）', async () => {
   const r = await call('GET', '/api/state', undefined, userA.token);
   assert.equal(r.status, 200);
-  assert.deepEqual(Object.keys(r.body).sort(), ['notifications', 'replan', 'seed']);
+  assert.deepEqual(Object.keys(r.body).sort(), ['notifications', 'planBaseline', 'replan', 'seed']);
   assert.equal(r.body.seed.tasks.length, 4);
   assert.equal(r.body.seed.user.name, '林清');
   assert.ok(Array.isArray(r.body.notifications));
@@ -139,6 +139,7 @@ test('POST /api/replan/confirm 确认后才落库', async () => {
   const week = seed.week.map((d) => ({ date: d.d, minutes: d.total, buffer: d.buf }));
   const before = await call('GET', '/api/state', undefined, userA.token);
   assert.equal(before.body.replan, null);
+  assert.equal(before.body.planBaseline, null);
 
   const r = await call('POST', '/api/replan', {
     tasks: seed.tasks, week: week, params: {},
@@ -146,11 +147,14 @@ test('POST /api/replan/confirm 确认后才落库', async () => {
   }, userA.token);
   assert.equal(r.body.needsConfirmation, true);
 
-  /* 未确认：服务端不得记录 */
+  /* 未确认：放弃项必须可预览，服务端全量业务状态保持不变。 */
+  assert.ok(r.body.diff.some(change => change.op === 'abandon'));
   const mid = await call('GET', '/api/state', undefined, userA.token);
-  assert.equal(mid.body.replan, null);
+  assert.equal(mid.status, 200);
+  assert.deepEqual(mid.body, before.body);
 
-  const c = await call('POST', '/api/replan/confirm', { result: r.body }, userA.token);
+  assert.equal(typeof r.body.draftId, 'string');
+  const c = await call('POST', '/api/replan/confirm', { draftId: r.body.draftId }, userA.token);
   assert.equal(c.status, 200);
   assert.equal(c.body.accepted, true);
   assert.equal(c.body.needsConfirmation, false);
@@ -159,10 +163,38 @@ test('POST /api/replan/confirm 确认后才落库', async () => {
   const after = await call('GET', '/api/state', undefined, userA.token);
   assert.ok(after.body.replan);
   assert.equal(after.body.replan.accepted, true);
+  assert.match(after.body.planBaseline.version, /^[0-9a-f-]{36}$/);
+  assert.equal(after.body.planBaseline.stale, false);
+  assert.equal((await call('GET', '/api/state', undefined, userB.token)).body.planBaseline, null);
 
-  /* 已确认结果不能重复确认 */
-  const again = await call('POST', '/api/replan/confirm', { result: c.body }, userA.token);
-  assert.equal(again.status, 400);
+  const again = await call('POST', '/api/replan/confirm', { draftId: r.body.draftId }, userA.token);
+  assert.equal(again.status, 200);
+  assert.deepEqual(again.body, c.body);
+  assert.deepEqual((await call('GET', '/api/state', undefined, userA.token)).body, after.body);
+});
+
+test('普通在线重排预览不改变服务端重排记录', async () => {
+  const before = await call('GET', '/api/state', undefined, userA.token);
+  const input = {
+    tasks: [{ id: 'preview-only', subject: '数学', est: 30, weight: 0.8 }],
+    week: ['二', '三', '四', '五', '六', '日', '一'].map(date => ({ date, minutes: 100, capacity: date === '二' ? 130 : 100, buffer: 60 })),
+    timestamp: 1000
+  };
+  const preview = await call('POST', '/api/replan', input, userA.token);
+  const parallel = await call('POST', '/api/replan', input, userA.token);
+  assert.equal(preview.status, 200);
+  assert.equal(parallel.status, 200);
+  assert.equal(preview.body.accepted, true);
+  const after = await call('GET', '/api/state', undefined, userA.token);
+  assert.equal(after.status, 200);
+  assert.deepEqual(after.body, before.body);
+  const confirmed = await call('POST', '/api/replan/confirm', { draftId: preview.body.draftId }, userA.token);
+  assert.equal(confirmed.status, 200);
+  const committed = (await call('GET', '/api/state', undefined, userA.token)).body;
+  assert.equal(committed.replan.accepted, true);
+  const stale = await call('POST', '/api/replan/confirm', { draftId: parallel.body.draftId }, userA.token);
+  assert.equal(stale.status, 409);
+  assert.deepEqual((await call('GET', '/api/state', undefined, userA.token)).body, committed);
 });
 
 test('POST /api/attribute 返回归因结果', async () => {
@@ -199,12 +231,13 @@ test('下线端点：sessions / sync 拉取 / weekly 周报返回 404', async ()
 /* ── 幂等 ─────────────────────────────────────────────────────────────── */
 
 test('GET /api/state 回读 session：sync 上行的记录以完整会话对象返回', async () => {
-  const sess = { id: 's_readback_1', taskId: 't2', startAt: 1000, endAt: 2000, minutes: 30, completion: 100, status: 'backfill', feel: null, isBackfill: true };
+  const sess = { id: 's_readback_1', taskId: 't2', startAt: 1000, endAt: 2000, minutes: 30, completion: 100, status: 'backfill', feel: null, isBackfill: true, planVersion: null };
   const up = await call('POST', '/api/sync/ops', {
-    ops: [{ opId: 'op-session-readback', entity: 'session', entityId: 't2', field: 'recorded', value: sess, clientTs: 300 }]
+    ops: [{ opId: 'op-session-readback', entity: 'session', entityId: 't2', field: 'recorded', value: sess, clientTs: 300 },
+      { opId: 'op-session-version', entity: 'session', entityId: 't2', field: 'recorded', value: { ...sess, id: 's_readback_version', isBackfill: false, status: 'done', planVersion: 'plan-0123456789abcdef0123456789abcdef' }, clientTs: 301 }]
   }, userA.token);
   assert.equal(up.status, 200);
-  assert.deepEqual(up.body.accepted, ['op-session-readback']);
+  assert.deepEqual(up.body.accepted, ['op-session-readback', 'op-session-version']);
 
   const r = await call('GET', '/api/state', undefined, userA.token);
   assert.equal(r.status, 200);
@@ -214,6 +247,8 @@ test('GET /api/state 回读 session：sync 上行的记录以完整会话对象�
   assert.equal(hit.status, 'backfill');
   assert.equal(hit.minutes, 30);
   assert.equal(hit.feel, null);
+  assert.equal(hit.planVersion, null);
+  assert.equal(sessions.find(x => x.id === 's_readback_version')?.planVersion, 'plan-0123456789abcdef0123456789abcdef');
 });
 
 test('POST /api/sync/ops 幂等：同 opId 重复提交不产生新 seq', async () => {
@@ -227,6 +262,22 @@ test('POST /api/sync/ops 幂等：同 opId 重复提交不产生新 seq', async 
   assert.equal(b.status, 200);
   assert.deepEqual(b.body.accepted, ['op-sync-1']);
   assert.equal(b.body.serverSeq, seqA);
+});
+
+test('同步混合批次：旧操作重试不会覆盖新改期', async () => {
+  const { token } = await newSession();
+  const old = { opId: 'old', entity: 'plan', entityId: 'dayAssign', field: 'moved', value: { taskId: 't2', day: '二' }, clientTs: 100 };
+  const first = await call('POST', '/api/sync/ops', { ops: [old] }, token);
+  assert.equal(first.status, 200);
+  const moved = { ...old, opId: 'new', value: { taskId: 't2', day: '三' }, clientTs: 200 };
+  const retry = { ...old, clientTs: 300 };
+  const mixed = await call('POST', '/api/sync/ops', { ops: [moved, retry] }, token);
+  assert.equal(mixed.status, 200);
+  assert.deepEqual(mixed.body.accepted, ['new', 'old']);
+  assert.equal(mixed.body.serverSeq, first.body.serverSeq);
+  const state = await call('GET', '/api/state', undefined, token);
+  assert.equal(state.status, 200);
+  assert.equal(state.body.seed.dayAssign.t2, '三');
 });
 
 /* ── 字段级合并规则 ───────────────────────────────────────────────────── */
@@ -272,6 +323,21 @@ test('同步合并：删除类墓碑优先且不可翻转', async () => {
   assert.equal(model.tasks.find((t) => t.id === 't3').deleted, true);
 });
 
+test('HTTP 回读：撤销顺延恢复原非默认落点', async () => {
+  const { token } = await newSession();
+  for (const [i, day] of ['二', '三', '二'].entries()) {
+    const opId = 'undo-placement-' + i;
+    const up = await call('POST', '/api/sync/ops', { ops: [{
+      opId, entity: 'plan', entityId: 'dayAssign', field: 'moved', value: { taskId: 't2', day }, clientTs: 900 + i
+    }] }, token);
+    assert.equal(up.status, 200);
+    assert.deepEqual(up.body.accepted, [opId]);
+    const state = await call('GET', '/api/state', undefined, token);
+    assert.equal(state.status, 200);
+    assert.equal(state.body.seed.dayAssign.t2, day);
+  }
+});
+
 test('回放：moved / locked / notif / buffer 经 state 可读（多端一致）', async () => {
   await call('POST', '/api/sync/ops', {
     ops: [
@@ -315,6 +381,18 @@ test('错误：参数缺失返回 E1001 / 400', async () => {
   const r = await call('POST', '/api/feasibility', { weeklyH: 20 }, userA.token);
   assert.equal(r.status, 400);
   assert.equal(r.body.error.code, 'E1001');
+});
+
+test('同步拒绝非标量实体标识，且不应用同批合法操作', async () => {
+  const before = await call('GET', '/api/state', undefined, userA.token);
+  const r = await call('POST', '/api/sync/ops', { ops: [
+    { opId: 'invalid-key-batch-valid', entity: 'task', entityId: 't1', field: 'status', value: 'scheduled' },
+    { opId: 'invalid-key-batch-invalid', entity: 'task', entityId: ['t1'], field: 'status', value: 'scheduled' }
+  ] }, userA.token);
+  assert.equal(r.status, 400);
+  assert.equal(r.body.error.code, 'E1001');
+  const after = await call('GET', '/api/state', undefined, userA.token);
+  assert.equal(after.body.serverSeq, before.body.serverSeq);
 });
 
 test('错误：单批上行超过 200 条返回 E4002 / 400', async () => {

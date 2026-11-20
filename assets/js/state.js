@@ -161,9 +161,27 @@ window.ZX = window.ZX || {};
      （flows/settings.js 的 wipe），否则重载会复活已删数据。 */
   var OVERLAY_KEY = 'zx.overlay';
 
+  var versionId = null;
+  var versionInput = null;
+  function planInput() {
+    var days = state.dayAssign || {}, locks = state.locks || {};
+    return JSON.stringify([state.goal, state.feas, state.week, state.avail,
+      state.tasks.map(function (t) { return [t.id, t.subject, t.est, t.time, !!t.abandoned, !!t.substituted, days[t.id] || '日', !!locks[t.id]]; })]);
+  }
+  state.currentPlanVersion = function () {
+    var input = planInput();
+    if (input !== versionInput || !versionId) {
+      var bytes = crypto.getRandomValues(new Uint8Array(16));
+      versionId = 'plan-' + Array.from(bytes, function (v) { return v.toString(16).padStart(2, '0'); }).join('');
+      versionInput = input;
+    }
+    return versionId;
+  };
+
   function saveOverlay() {
     try {
       window.localStorage.setItem(OVERLAY_KEY, JSON.stringify({
+        planVersion: state.currentPlanVersion(),
         tasks: state.tasks,
         sessions: state.sessions || [],
         goal: state.goal,
@@ -173,16 +191,23 @@ window.ZX = window.ZX || {};
         dayAssign: state.dayAssign || {},
         locks: state.locks || {},
         avail: state.avail || null,
+        availSource: state.availSource || null,
         notif: state.notif || null,
         attrCounts: state.attrCounts || {},
         replanHistory: state.replanHistory || [],
+        replanSnapshot: state.replanned ? state.snapshot : null,
         at: Date.now()
       }));
     } catch (e) { /* 隐私模式 / 配额不足：会话内仍可用，刷新后回落 */ }
   }
 
   function dropOverlay() {
+    if (ZX.api && ZX.api.invalidatePendingSync) ZX.api.invalidatePendingSync();
     try { window.localStorage.removeItem(OVERLAY_KEY); } catch (e) { /* 忽略 */ }
+    try { window.localStorage.removeItem('zx.replanTrace'); } catch (e) { /* 忽略 */ }
+    try { window.localStorage.removeItem('zx.scheduleTrace'); } catch (e) { /* 忽略 */ }
+    try { window.localStorage.removeItem('zx.executionTrace'); } catch (e) { /* 忽略 */ }
+    try { window.localStorage.removeItem('zx.syncTrace'); } catch (e) { /* 忽略 */ }
   }
 
   /* 启动时本地 overlay 是否存在：服务端采纳后的 applyOverlay 以此区分两种场景——
@@ -196,7 +221,7 @@ window.ZX = window.ZX || {};
     try { o = JSON.parse(window.localStorage.getItem(OVERLAY_KEY) || 'null'); } catch (e) { o = null; }
     if (!o || typeof o !== 'object') return false;
     if (Array.isArray(o.sessions)) state.sessions = o.sessions;
-    if (Array.isArray(o.tasks) && o.tasks.length) state.tasks = o.tasks.map(normTask);
+    if (Array.isArray(o.tasks)) state.tasks = o.tasks.map(normTask);
     if (o.goal && typeof o.goal === 'object') state.goal = o.goal;
     if (o.feas && typeof o.feas === 'object') state.feas = o.feas;
     if (Array.isArray(o.week)) state.week = normWeek(o.week);
@@ -204,10 +229,20 @@ window.ZX = window.ZX || {};
     /* 手工改期 / 锁定 / 可用时段 / 通知开关：此前只发 op 不入 overlay，刷新即丢 */
     if (o.dayAssign && typeof o.dayAssign === 'object') state.dayAssign = o.dayAssign;
     if (o.locks && typeof o.locks === 'object') state.locks = o.locks;
-    if (Array.isArray(o.avail) && o.avail.length === 7) state.avail = o.avail;
+    if (Array.isArray(o.avail) && o.avail.length === 7) {
+      state.avail = o.avail;
+      state.availSource = ['default', 'user'].indexOf(o.availSource) >= 0 ? o.availSource : 'legacy';
+    }
     if (o.notif && typeof o.notif === 'object') state.notif = o.notif;
     if (o.attrCounts && typeof o.attrCounts === 'object') state.attrCounts = o.attrCounts;
     if (Array.isArray(o.replanHistory)) state.replanHistory = o.replanHistory;
+    if (Object.prototype.hasOwnProperty.call(o, 'replanSnapshot')) {
+      var snap = o.replanSnapshot;
+      state.snapshot = snap && Array.isArray(snap.tasks) ? snap : null;
+      state.replanned = state.snapshot !== null;
+    }
+    versionId = /^plan-[0-9a-f]{32}$/.test(o.planVersion) ? o.planVersion : null;
+    versionInput = planInput();
     return true;
   }
 

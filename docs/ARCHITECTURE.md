@@ -144,16 +144,18 @@
 | --- | --- | --- | --- |
 | `GET /api/health` | 否 | 无 | `{ ok, version, uptimeMs }` |
 | `POST /api/auth/session` | 否 | 空对象 | `{ token, userId, expiresAt }` |
-| `GET /api/state` | 是 | 无 | `{ seed, replan, notifications }` |
+| `GET /api/state` | 是 | 无 | `{ seed, replan, notifications, planBaseline }` |
 | `POST /api/feasibility` | 是 | `weeklyH`/`weeks`/`discount`/`demand` | 可行性结果 |
 | `POST /api/schedule` | 是 | `tasks`/`slots`/`params?` | `{ blocks, unplanned, version }` |
-| `POST /api/replan` | 是 | `tasks`/`week`/`params?`/`history?`/`locks?`/`timestamp?` | 重排结果（`accepted=true` 才落库） |
-| `POST /api/replan/confirm` | 是 | `result` | 确认后的重排结果 |
+| `POST /api/replan` | 是 | `tasks`/`week`/`params?`/`history?`/`locks?`/`timestamp?` | 重排预览；可提交时返回 `draftId`，不落业务库 |
+| `POST /api/replan/confirm` | 是 | `draftId` | 校验身份及版本后写入业务记录、更新计划基线并返回结果 |
 | `POST /api/replan/undo` | 是 | `snapshot` | `{ tasks, week }` |
 | `POST /api/attribute` | 是 | 六个归因数值字段 | `{ type, confidence, actions, evidence }` |
 | `POST /api/sync/ops` | 是 | `ops[]`（至多 200 条） | `{ accepted[], serverSeq }` |
 
 已下线端点（返回 404 / `E2001`，见 `../test/api.test.js`）：`POST /api/sessions`、`GET /api/sync`、`GET /api/reports/weekly`。
+
+在线重排确认成功后，按凭证身份记录进程内基线，引用确认结果并保存锁定与引擎参数。读接口仅新增基线元数据 `null` 或 `{ version, stale }`。同一分区有新同步操作登记时保守标记过期；重复操作不会推进分区序号。重启清空，普通新建计划不建立基线。当前未接入离线复核。
 
 ### 9.2 错误码
 

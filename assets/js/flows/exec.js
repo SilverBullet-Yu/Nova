@@ -43,7 +43,7 @@ window.ZX = window.ZX || {};
 
   /* 参与今日统计的任务：跳过项不算计划、不算剩余、不算达成率分母 */
   function activeTasks() {
-    return tasks().filter(function (t) { return !t.skipped; });
+    return tasks().filter(function (t) { return !t.skipped && !t.deferred; });
   }
 
   function colorOf(t) {
@@ -103,6 +103,7 @@ window.ZX = window.ZX || {};
     var sess = {
       id: 's_' + now.toString(36) + '_' + (S.sessions.length + 1),
       taskId: o.taskId,
+      planVersion: o.isBackfill ? null : S.currentPlanVersion(),
       startAt: U.num(o.startAt, now),
       endAt: U.num(o.endAt, now),
       minutes: Math.max(0, Math.round(U.num(o.minutes, 0))),
@@ -112,6 +113,15 @@ window.ZX = window.ZX || {};
       isBackfill: !!o.isBackfill
     };
     S.sessions.push(sess);
+    try {
+      var store = window.localStorage;
+      var key = 'zx.executionTrace';
+      var events = JSON.parse(store.getItem(key) || '[]');
+      store.setItem(key, JSON.stringify((Array.isArray(events) ? events : []).slice(-99).concat([{
+        id: sess.id, tool: 'execution', at: sess.endAt, planVersion: sess.planVersion,
+        rulesVersion: 'nova-execution-p0-1', status: 'recorded-local'
+      }])));
+    } catch (e) { /* 留痕失败不阻断执行记录 */ }
     try {
       ZX.api.queueOp({ entity: 'session', entityId: o.taskId, field: 'recorded', value: sess });
     } catch (e) { /* 离线写队列失败不影响本地记录 */ }
@@ -208,13 +218,22 @@ window.ZX = window.ZX || {};
     } else if (attr.type === '效率不足') {
       btn = '<button class="btn" data-say="今天有点累">降载一点</button>';
     }
-    var matched = (attr.evidence && attr.evidence.matched && attr.evidence.matched[0]) || '';
+    var evidence = attr.evidence || {};
+    var matched = Array.isArray(evidence.matched) ? evidence.matched.join('；') : '';
+    var values = [
+      ['计划负载比', 'planLoadRatio'], ['无记录天数', 'consecutiveZeroDays'],
+      ['超时次数', 'consecutiveTimeoutCount'], ['用时／原估时', 'efficiencyRatio'],
+      ['完成度（比例）', 'completion'], ['外部原因跳过占比', 'externalRatio']
+    ].filter(function (field) { return Number.isFinite(evidence[field[1]]); })
+      .map(function (field) { return field[0] + ' ' + evidence[field[1]]; }).join('；');
     return '<div class="ecard sc-attr">' +
       '<div class="ecard-h"><b>偏差归因</b>' +
         '<span class="tag ' + (attr.type === '无偏差' ? 'ok' : 'warn') + '">' + U.esc(attr.type) + '</span></div>' +
       '<div class="ecard-b">' +
-        '<div class="erow"><span class="k">依据</span><span class="why">' + U.esc(matched) + '</span>' +
-          '<span class="v">置信 ' + Math.round(U.num(attr.confidence, 0) * 100) + '%</span></div>' +
+        '<p class="note">来源：当前计划与执行记录，由固定规则计算，不是模型推断。</p>' +
+        '<p class="note">' + U.esc(values) + '</p>' +
+        '<div class="erow"><span class="k">命中规则</span><span class="why">' + U.esc(matched) + '</span>' +
+          '<span class="v">规则评分 ' + Math.round(U.num(attr.confidence, 0) * 100) + '%</span></div>' +
         '<div class="ecard-f">' + (btn || '<span class="note">' + U.esc(attr.actions[0] || '保持当前节奏') + '</span>') + '</div>' +
       '</div></div>';
   }

@@ -58,11 +58,11 @@
 |---|---|---|
 | GET | `/api/health` | 健康探测（免鉴权） |
 | POST | `/api/auth/session` | 签发 Bearer 凭证（免鉴权） |
-| GET | `/api/state` | 拉取初始全量状态 |
+| GET | `/api/state` | 拉取初始状态；响应含 `planBaseline: null` 或 `{ version, stale }`，前端尚未使用该字段执行联网复核 |
 | POST | `/api/feasibility` | 可行性评估 |
 | POST | `/api/schedule` | 排程 |
-| POST | `/api/replan` | 四级重排 |
-| POST | `/api/replan/confirm` | 确认含「放弃」项的重排 |
+| POST | `/api/replan` | 四级重排预览（不写业务记录） |
+| POST | `/api/replan/confirm` | 按 `draftId` 确认在线重排（含普通和放弃项）；不兼容旧 `result` 请求 |
 | POST | `/api/replan/undo` | 撤销重排 |
 | POST | `/api/sync/ops` | 批量上行本地 op |
 

@@ -31,7 +31,6 @@ window.ZX = window.ZX || {};
   function localFeasibility(input) { return mustRhythmFn('feasibility')(input); }
   function localReplan(input) { return mustRhythmFn('replan')(input); }
   function localUndo(snapshot) { return mustRhythmFn('undoReplan')(snapshot); }
-  function localConfirm(result) { return mustRhythmFn('confirmReplan')(result); }
   function localAttribute(input) { return mustRhythmFn('attribute')(input); }
   function localSchedule(input) { return mustRhythmFn('schedule')(input); }
 
@@ -62,15 +61,11 @@ window.ZX = window.ZX || {};
         return localReplan(input);
       });
     },
-    /* 确认 L4 放弃建议（确认后才由服务端落库） */
-    confirmReplan: function (result) {
-      return ZX.api.confirmReplan(result).then(function (r) {
-        if (!okReplan(r) || r.accepted !== true) { ZX.engine.source = 'local'; return localConfirm(result); }
-        ZX.engine.source = 'backend';
+    /* 服务端草案必须收到有效确认，不降级为本地提交。 */
+    confirmReplan: function (draftId) {
+      return ZX.api.confirmReplan(draftId).then(function (r) {
+        if (!okReplan(r) || r.accepted !== true) throw new Error('重排确认无效');
         return r;
-      }, function () {
-        ZX.engine.source = 'local';
-        return localConfirm(result);
       });
     },
     undo: function (snapshot) {

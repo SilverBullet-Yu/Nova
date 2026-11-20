@@ -134,7 +134,7 @@ window.ZX = window.ZX || {};
 
   /* ---------- 意图路由 ---------- */
   var INTENTS = [
-    { k: ['确认放弃'], run: confirmAbandonFlow },
+    { k: ['确认重排', '确认放弃'], run: confirmAbandonFlow },
     { k: ['我断了四天', '断了', '中断', '挽救', '没打开'], run: rescueFlow },
     { k: ['新建目标', '定目标', '改目标'], run: goalFlow },
     { k: ['撤销', '恢复', '撤回'], run: undoReplan },
@@ -195,7 +195,34 @@ window.ZX = window.ZX || {};
      因此先 await 引擎结果，再据此渲染步骤动画与 diff 明细。
      Stage C-2：锁定项随输入下行（locked 字段）；引擎不识别锁定，
      由结果层过滤命中锁定项的 diff，并记录「N 个锁定块未参与」。 */
+  var pendingDraftId = null;
+  var onlineDraft = null;
+  var confirmingOnline = false;
+  var planFingerprint, planRevision = 0;
+  function currentPlan() {
+    var s = ZX.state;
+    var next = JSON.stringify([s.tasks, s.week, s.locks, s.dayAssign, s.goal, s.avail, s.replanHistory]);
+    if (next !== planFingerprint) { planFingerprint = next; planRevision++; }
+    return planRevision;
+  }
+  var REPLAN_RULES_VERSION = 'nova-replan-p0-1';
+  var replanWorkflow = window.Rhythm.workflow.createWorkflow({
+    tools: { replan: { preview: function (result) { return result; }, commit: applyReplan } },
+    version: currentPlan, now: Date.now, rulesVersion: REPLAN_RULES_VERSION,
+    traceVersion: function () { return ZX.state.currentPlanVersion ? ZX.state.currentPlanVersion() : null; },
+    onSettled: saveReplanTrace
+  });
+  function saveReplanTrace(event) {
+    try {
+      var store = window.localStorage;
+      var key = 'zx.replanTrace';
+      var events = JSON.parse(store.getItem(key) || '[]');
+      store.setItem(key, JSON.stringify((Array.isArray(events) ? events : []).slice(-99).concat([event])));
+    } catch (err) { /* 本地存储不可用时不影响草案结案 */ }
+  }
+  var previewRequest = 0;
   function replanFlow() {
+    if (confirmingOnline) return;
     var S = ZX.state;
     /* 去重按快照时间真实计算 24h 窗口；无时间戳或已过期则允许再次重排 */
     var lastTs = (S.replanned && S.snapshot) ? U.num(S.snapshot.timestamp, 0) : 0;
@@ -205,13 +232,25 @@ window.ZX = window.ZX || {};
       return;
     }
 
+    if (pendingDraftId) replanWorkflow.reject(pendingDraftId);
+    pendingDraftId = null;
+    onlineDraft = null;
+    var request = ++previewRequest;
+    var baseline = currentPlan();
+    var requestVersion = S.currentPlanVersion ? S.currentPlanVersion() : null;
     var input = S.replanInput();
 
     /* 计算走统一入口：后端优先，失败自动降级本地引擎 */
     ZX.engine.replan(input).then(function (res) {
-      S.replanRecord = res;
+      if (request !== previewRequest) return;
+      if (currentPlan() !== baseline) { say('<p>计划已变化，请重新生成重排预览。</p>'); return; }
       renderReplanResult(res);
-    }, function () { /* engine 内部已降级，不会走到这里 */ });
+    }, function () {
+      if (request !== previewRequest) return;
+      saveReplanTrace({ id: 'preview-' + Date.now() + '-' + request, tool: 'replan', at: Date.now(),
+        planVersion: requestVersion, rulesVersion: REPLAN_RULES_VERSION, status: 'failed', stage: 'engine' });
+      say('<p>暂时无法生成重排预览。现有计划未变更，请稍后重试。</p>', '重排 · 计算失败');
+    });
   }
 
   /* 从引擎结果渲染重排卡片：数值与 diff 全部来自 res，不硬编码 */
@@ -222,17 +261,20 @@ window.ZX = window.ZX || {};
     /* 锁定是引擎入参的硬约束：diff 中不会出现锁定任务，这里只统计展示，不做过滤 */
     var locks = (S.locks && typeof S.locks === 'object') ? S.locks : {};
     var lockCount = S.tasks.filter(function (t) { return !t.done && locks[t.id]; }).length;
+    var provenance = '<p>用户指令：重排；建议来源：确定性引擎。</p>';
     var diff = rawDiff;
     var needsConfirm = !!(res && res.needsConfirmation === true);
     var loadDelta = res && typeof res.loadDelta === 'number' ? res.loadDelta : 0;
     var guards = (res && res.guards) ? res.guards : {};
 
-    /* 防雪崩断言 3 触发（连续未改善）：引擎全线阻断 → 不落库、不重排，转目标校准 */
+    /* 区分连续未改善熔断与逐级校验均未通过。 */
     if (res && res.verdict === 'blocked') {
+      var stalled = guards.consecutiveOk === false;
+      var reasons = stalled ? strategies.slice(0, 1) : strategies;
+      var explanation = reasons.map(function (s) { return s.reason; }).filter(Boolean).join('；');
       say('<div class="ecard">' +
-        '<div class="ecard-h"><b>重排已停止</b><span class="tag warn">防雪崩 · 转校准</span></div>' +
-        '<div class="ecard-b"><p>连续 <b>' + S.noImproveCount() + '</b> 次重排未见改善（撤销或增幅触顶）。' +
-          '按规则停止重排：继续排只会把计划越搅越乱，先校准目标，再谈安排。</p>' +
+        '<div class="ecard-h"><b>重排已停止</b><span class="tag warn">' + (stalled ? '防雪崩 · 转校准' : '约束未通过') + '</span></div>' +
+        '<div class="ecard-b">' + provenance + '<p>' + U.esc(explanation || '当前约束下没有可应用的重排方案。') + '</p>' +
         '<div class="ecard-f"><button class="btn" data-say="新建目标">重新设定目标</button>' +
           '<span class="note">历史计划与记录都保留，不会被清除</span></div></div></div>', '重排 · 熔断');
       ZX.setTab('plan');
@@ -251,122 +293,132 @@ window.ZX = window.ZX || {};
     var appliedLevel = 0;
     strategies.forEach(function (s) { if (s.applied && s.level > appliedLevel) appliedLevel = s.level; });
 
-    /* L4 只出建议：未确认前不落本地、不入队同步；确认入口见 confirmAbandonFlow */
-    if (!needsConfirm) {
-      S.replanned = true;
-      /* 快照：契约形状 { tasks, week, timestamp }，撤销时反向应用、不重算 */
-      S.snapshot = {
-        tasks: U.clone(S.tasks),
-        week: U.clone(S.week),
-        timestamp: Date.now()
-      };
-      /* 压缩项按引擎 diff 落到本地任务上（仅压缩类改工时；顺延不改本地任务） */
-      S.tasks = S.tasks.map(function (t) {
-        var hit = compressed.find(function (d) { return d.taskId === t.id; });
-        if (hit && !t.done) {
-          return Object.assign({}, t, { est: parseInt(hit.to, 10) || t.est, compressed: true });
-        }
-        return t;
-      });
-
-      /* 重排历史：熔断计数与周报采纳率的数据源 */
-      S.replanHistory = (S.replanHistory || []).concat([
-        { at: Date.now(), loadDelta: loadDelta, appliedLevel: appliedLevel, undone: false }
-      ]);
-
-      ZX.api.queueOp({
-        entity: 'plan', entityId: 'replan', field: 'applied',
-        value: { loadDelta: loadDelta, appliedLevel: appliedLevel, diff: diff }
-      });
-    } else {
-      /* 暂存待确认结果，避免用户确认时重算导致结果漂移 */
-      S.pendingReplan = res;
+    var unsupportedPlacement = deferred.some(function (d) { return !/^[一二三四五六日]$/.test(d.to); });
+    var actionable = !unsupportedPlacement && diff.length > 0 && (needsConfirm || res.accepted === true);
+    if (actionable) {
+      var draft = replanWorkflow.preview('replan', res);
+      pendingDraftId = draft.status === 'pending' ? draft.id : null;
+      if (pendingDraftId && typeof res.draftId === 'string') onlineDraft = { id: res.draftId, version: currentPlan() };
     }
+    var tagText = pendingDraftId ? '待确认' : '无可提交变更';
+    var tagCls = 'warn';
 
-    var tagText = needsConfirm ? 'L4 需确认'
-      : appliedLevel === 2 ? 'L1 回退 → L2 生效'
-      : appliedLevel === 1 ? 'L1 顺延生效'
-      : '未通过校验';
-    var tagCls = (appliedLevel && !needsConfirm) ? 'ac' : 'warn';
-
-    /* Stage C-2：顺延 / 压缩行右侧挂「否决」，逐条回滚；放弃行不提供（需整单确认） */
+    /* 用任务 ID 关联计划中的标题，区分同科目变更。 */
+    var tasksById = new Map(S.tasks.map(function (t) { return [t.id, t]; }));
     var diffHtml = diff.map(function (d, idx) {
+      var task = tasksById.get(d.taskId) || {};
+      var taskLabel = [d.subject || task.subject || task.s, task.title].filter(Boolean).join(' · ') || d.taskId || '';
       var cls = d.op === 'compress' ? 'cp' : 'mv';
       var label = d.op === 'compress' ? '压缩' : d.op === 'defer' ? '顺延' : d.op === 'abandon' ? '放弃' : d.op;
       var detail = d.op === 'compress'
         ? d.from + ' → ' + d.to + ' min · degraded'
         : (d.detail || (d.from + ' → ' + d.to));
-      var veto = (d.op === 'compress' || d.op === 'defer')
-        ? '<button type="button" class="btn sc2-veto" data-veto="' + U.esc(d.taskId) + '" data-vop="' + d.op + '"' +
-          ' aria-label="否决：' + U.esc(label + ' ' + (d.subject || '')) + '">否决</button>'
-        : '';
         return '<div class="diff-line sc2-diff" data-diff="' + idx + '" style="--d:' + idx + '"><span class="s ' + cls + '">' + label + '</span>' +
-        '<span class="n">' + U.esc(d.subject || '') + '</span>' +
-        '<span class="d">' + U.esc(detail) + '</span>' + veto + '</div>';
+        '<span class="n">' + U.esc(taskLabel) + '</span>' +
+        '<span class="d">' + U.esc(detail) + '</span>' + '</div>';
     }).join('');
 
       var guardNote = [];
-      if (sL1 && sL1.applied) guardNote.push('L1 顺延到未来 7 天容量内的空闲时段，负载 +' + (l1Growth === null ? U.pct(loadDelta) : l1Growth) + '，未超单次上限 20%，直接生效');
-      else guardNote.push('L1 顺延后负载 +' + (l1Growth === null ? U.pct(loadDelta) : l1Growth) + '，超过单次上限 20%，已回退该级');
+      if (sL1 && sL1.applied) guardNote.push('L1 顺延到未来 7 天容量内的空闲时段，负载 +' + (l1Growth === null ? U.pct(loadDelta) : l1Growth) + '，未超单次上限 20%，确认后生效');
+      else if (sL1) guardNote.push('L1 ' + U.esc(sL1.reason || '顺延未通过校验，已回退该级'));
       if (sL2 && sL2.applied) guardNote.push('L2 按容量溢出压缩低权重项后复核通过（+' + (l2Growth === null ? U.pct(loadDelta) : l2Growth) + '），因此未进入替代与放弃');
       else if (sL2) guardNote.push('L2 压缩后复核未通过，已进入后续级别');
       if (needsConfirm) guardNote.push('L4 放弃只是建议，确认后才会落库');
 
-    say('<p>收到。先归因，再走四级流水线；任何一级通过防雪崩校验就停，不追求把计划排满。</p>' +
+    say('<p>收到。先归因，再走四级流水线；任何一级通过防雪崩校验就停，不追求把计划排满。</p>' + provenance +
       '<div class="ecard">' +
-      '<div class="ecard-h"><b>' + (needsConfirm ? '重排待确认' : '重排完成') + '</b><span class="tag ' + tagCls + '">' + tagText + '</span></div>' +
+      '<div class="ecard-h"><b>' + (pendingDraftId ? '重排待确认' : '重排未应用') + '</b><span class="tag ' + tagCls + '">' + tagText + '</span></div>' +
       '<div class="ecard-b">' +
         '<div class="erow"><span class="k">变更</span><span class="why">延期 ' + deferred.length + ' · 压缩 ' + compressed.length + ' · 放弃 ' + abandoned.length + '</span><span class="v">未来 7 天 ' + (loadDelta >= 0 ? '+' : '') + U.pct(loadDelta) + '</span></div>' +
         (lockCount ? '<div class="erow"><span class="k">锁定</span><span class="why">锁定任务是硬约束，不参与顺延 / 压缩 / 替代 / 放弃</span><span class="v ac">' + lockCount + ' 个锁定块保持原样</span></div>' : '') +
         '<div class="erow"><span class="k">弹性位</span><span class="why">每日 60 min 未被清空</span><span class="v ac">' + (guards.bufferPreserved === false ? '已侵占' : '1 / 1 保留') + '</span></div>' +
         diffHtml +
+        (unsupportedPlacement ? '<p>当前计划板不能保存跨日拆分或未知日期；本次不写入，请调整后重新预览。</p>' : '') +
         '<div class="ecard-f"><span class="note">' + guardNote.join('；') + '。' + (lockCount ? '锁定的 ' + lockCount + ' 块保持原工时与原落点。' : '') + '</span></div>' +
-        (needsConfirm
-          ? '<div class="ecard-f"><span class="note">本轮未落库：回复「确认放弃」后才会应用并同步。</span></div>'
-          : '<div class="ecard-f"><button class="btn" data-act="undo">撤销本次重排</button><span class="note mono">snapshot 已留存</span></div>') +
-      '</div></div>', '重排 · 412ms');
+        (pendingDraftId ? '<div class="ecard-f"><button class="btn" data-act="confirm-replan" data-draft="' + U.esc(pendingDraftId) + '">确认重排</button><span class="note">未写入；确认后可回复「撤销」恢复快照。</span></div>' : '') +
+      '</div></div>', '重排 · 确定性计算');
 
-    ZX.setTab('plan');
+    ZX.setTab('plan', { skipOverlaySave: true });
   }
 
-  /* ---------- flow：确认 L4 放弃（确认后才落库） ---------- */
-  function confirmAbandonFlow() {
+  function applyReplan(res) {
     var S = ZX.state;
-    var res = S.pendingReplan;
-    if (!res || res.needsConfirmation !== true) {
-      say('<p>当前没有待确认的放弃建议。</p>', '重排 · 无操作');
+    var at = Date.now();
+    var level = res.needsConfirmation ? 4 : res.strategies.reduce(function (max, item) {
+      return item.applied ? Math.max(max, item.level) : max;
+    }, 0);
+    var changes = new Map(res.diff.filter(function (d) { return d.op !== 'defer'; }).map(function (d) { return [d.taskId, d]; }));
+    var tasks = S.tasks.map(function (t) {
+      var d = changes.get(t.id);
+      if (!d || t.done || (S.locks && S.locks[t.id])) return t;
+      if (d.op === 'compress') return Object.assign({}, t, { est: Number(d.to), compressed: true });
+      if (d.op === 'abandon') return Object.assign({}, t, { abandoned: true });
+      return t;
+    });
+    var dayAssign = Object.assign({}, S.dayAssign);
+    var moved = [];
+    res.diff.forEach(function (d) {
+      if (d.op !== 'defer' || (S.locks && S.locks[d.taskId])) return;
+      if (!S.tasks.some(function (task) { return task.id === d.taskId && !task.done && !task.skipped; })) return;
+      var from = dayAssign[d.taskId] || '日';
+      if (from === d.to) return;
+      if (d.to === '日') delete dayAssign[d.taskId];
+      else dayAssign[d.taskId] = d.to;
+      moved.push({ taskId: d.taskId, from: from, to: d.to });
+    });
+    var snapshot = { tasks: U.clone(S.tasks), week: U.clone(S.week), timestamp: at, moved: moved };
+    var history = (S.replanHistory || []).concat([{ at: at, loadDelta: U.num(res.loadDelta, 0), appliedLevel: level, undone: false }]);
+    Object.assign(S, { snapshot: snapshot, tasks: tasks, dayAssign: dayAssign, replanRecord: res, replanned: true, replanHistory: history });
+  }
+
+  function confirmAbandonFlow(expectedId) {
+    if (typeof expectedId === 'string' && expectedId !== pendingDraftId) {
+      say('<p>这份预览已失效，请在最新预览卡上确认。</p>');
       return;
     }
-    ZX.engine.confirmReplan(res).then(function (confirmed) {
-      if (!confirmed || confirmed.accepted !== true) {
-        say('<p>确认失败：服务端未接受该重排结果，请重新重排。</p>', '重排 · 确认失败');
-        return;
-      }
-      S.snapshot = {
-        tasks: U.clone(S.tasks),
-        week: U.clone(S.week),
-        timestamp: Date.now()
-      };
-      S.replanned = true;
-      S.replanHistory = (S.replanHistory || []).concat([
-        { at: Date.now(), loadDelta: U.num(res.loadDelta, 0), appliedLevel: 4, undone: false }
-      ]);
-      var abandonedIds = {};
-      (confirmed.nextTasks || []).forEach(function (t) {
-        if (t.abandoned === true) abandonedIds[t.id] = true;
-      });
-      S.tasks = S.tasks.map(function (t) {
-        return abandonedIds[t.id] ? Object.assign({}, t, { abandoned: true }) : t;
-      });
-      (confirmed.diff || []).forEach(function (d) {
-        if (d.op !== 'abandon') return;
-        ZX.api.queueOp({ entity: 'task', entityId: d.taskId, field: 'abandoned', value: true });
-      });
-      S.pendingReplan = null;
-      ZX.render();
-      say('<p>已确认放弃 ' + Object.keys(abandonedIds).length + ' 项，结果已落库。如需回到确认前，说「撤销」。</p>', '重排 · 已确认');
-      ZX.setTab('plan');
+    if (!pendingDraftId) { say('<p>当前没有待确认的重排建议。</p>'); return; }
+    var id = pendingDraftId;
+    var remote = onlineDraft;
+    pendingDraftId = null;
+    onlineDraft = null;
+    if (remote && remote.version === currentPlan()) {
+      confirmingOnline = true;
+      return ZX.engine.confirmReplan(remote.id).then(function (ack) {
+        if (!ack || ack.accepted !== true) throw new Error('重排确认无效');
+        finishReplanConfirmation(id);
+      }).catch(function () {
+        replanWorkflow.reject(id);
+        say('<p>未收到服务端确认，本机未应用重排。请重新生成预览。</p>');
+      }).finally(function () { confirmingOnline = false; });
+    }
+    finishReplanConfirmation(id);
+  }
+
+  function finishReplanConfirmation(id) {
+    var S = ZX.state;
+    var before = S.currentPlanVersion ? S.currentPlanVersion() : null;
+    var result = replanWorkflow.confirm(id);
+    if (result.status !== 'committed') { say('<p>未应用重排，请重新生成预览。</p>'); return; }
+    var entry = S.replanHistory[S.replanHistory.length - 1];
+    var after = S.currentPlanVersion ? S.currentPlanVersion() : null;
+    Object.assign(entry, {
+      requestId: id, rulesVersion: REPLAN_RULES_VERSION,
+      planVersionBefore: before, planVersionAfter: after
     });
+    var res = S.replanRecord;
+    ZX.render();
+    ZX.api.queueOp({ entity: 'plan', entityId: 'replan', field: 'applied', value: { loadDelta: res.loadDelta, diff: res.diff } });
+    ZX.state.snapshot.moved.forEach(function (move) { queueReplanMove(move.taskId, move.to); });
+    res.diff.forEach(function (d) {
+      if (d.op === 'abandon' && !(ZX.state.locks && ZX.state.locks[d.taskId])) {
+        ZX.api.queueOp({ entity: 'task', entityId: d.taskId, field: 'abandoned', value: true });
+      }
+    });
+    say('<p>重排已确认。</p><button class="btn" data-act="undo">撤销本次重排</button>', '重排 · 已确认');
+  }
+
+  function queueReplanMove(taskId, day) {
+    ZX.api.queueOp({ entity: 'plan', entityId: 'dayAssign', field: 'moved', value: { taskId: taskId, day: day } });
   }
 
   /* ---------- flow：撤销 ---------- */
@@ -382,11 +434,26 @@ window.ZX = window.ZX || {};
 
     /* 立即本地反向应用：与重排前逐条一致，不重算 */
     S.tasks = tasks.map(ZX.state.normTask);
+    (snap.moved || []).slice().reverse().forEach(function (move) {
+      if ((S.dayAssign[move.taskId] || '日') !== move.to) return;
+      if (move.from === '日') delete S.dayAssign[move.taskId];
+      else S.dayAssign[move.taskId] = move.from;
+      queueReplanMove(move.taskId, move.from);
+    });
     S.snapshot = null;
     S.replanned = false;
     /* 撤销计入重排历史：连续撤销会累积「未改善」计数，达到阈值后重排被熔断 */
     for (var i = S.replanHistory.length - 1; i >= 0; i--) {
-      if (S.replanHistory[i] && S.replanHistory[i].undone !== true) { S.replanHistory[i].undone = true; break; }
+      var history = S.replanHistory[i];
+      if (history && history.undone !== true) {
+        history.undone = true;
+        history.planVersionAfterUndo = S.currentPlanVersion ? S.currentPlanVersion() : null;
+        history.undoneAt = Date.now();
+        if (history.requestId) saveReplanTrace({ id: history.requestId, tool: 'replan',
+          at: history.undoneAt, planVersion: history.planVersionAfterUndo,
+          rulesVersion: history.rulesVersion || null, status: 'undone' });
+        break;
+      }
     }
     ZX.render();
     say('<p>已撤销。计划恢复到 <span class="mono">' + (U.tsHM(snapTs) || '此前') + '</span> 的快照，未重算，逐条一致。</p>' +
@@ -467,7 +534,7 @@ window.ZX = window.ZX || {};
 
   /* ---------- flow：周报 ---------- */
   function weeklyFlow() {
-    say('<p>第 ' + U.isoWeek() + ' 周周报已生成。按「结论 / 依据 / 已执行的动作」三段式，最后一条不是建议，是已经排进下周的 block。</p>', '洞察 · 周报');
+    say('<p>第 ' + U.isoWeek() + ' 周周报已生成。周报展示执行统计、归因依据和演示预置；生成周报不会修改计划。</p>', '洞察 · 周报');
     ZX.setTab('data');
   }
 
@@ -476,7 +543,7 @@ window.ZX = window.ZX || {};
   function lowestWeightTask() {
     var pick = null;
     ZX.state.tasks.forEach(function (x) {
-      if (x.done || x.skipped) return;
+      if (x.done || x.skipped || (ZX.state.locks && ZX.state.locks[x.id]) || x.deferred) return;
       if (!pick || U.num(x.weight, 0) < U.num(pick.weight, 0)) pick = x;
     });
     return pick;
@@ -489,7 +556,7 @@ window.ZX = window.ZX || {};
     /* 计划口径与今日页 KPI 同源（exec.metrics 过滤跳过项） */
     var before = ZX.flows.exec.metrics().planned;
     var after = before - est;
-    var keepN = S.tasks.filter(function (x) { return !x.done && !x.skipped && (!pick || x.id !== pick.id); }).length;
+    var keepN = S.tasks.filter(function (x) { return !x.done && !x.skipped && !x.deferred && (!pick || x.id !== pick.id); }).length;
     say('<p>今天不追加任务。状态的波动是可预期的，系统不该用计划去对抗它。</p>' +
       '<div class="ecard">' +
         '<div class="ecard-h"><b>降载建议</b><span class="tag warn">保留弹性位</span></div>' +
@@ -516,7 +583,7 @@ window.ZX = window.ZX || {};
       '<div class="ecard"><div class="ecard-h"><b>接下来</b><span class="tag">弹性位 ' + U.esc(bufTime) + '</span></div><div class="ecard-b">' + rows +
         '<div class="erow"><span class="k">' + U.esc(bufTime) + '</span><span class="why" style="flex:1;color:var(--txt3)">弹性位 · 刻意留空</span><span class="v">60m</span></div>' +
       '</div></div>' +
-      '<p style="margin-top:10px">先做数学：极限是本周权重最高的一项（0.92），且 10:30 是你历史的高效时段。</p>', '排程 · 68ms');
+      '<p style="margin-top:10px;color:var(--txt3)">以上顺序来自当前任务的截止时间与权重字段；未启用历史行为模型，不推断个人高效时段。</p>', '排程 · 确定性计算');
     ZX.setTab('today');
   }
 
@@ -549,16 +616,19 @@ window.ZX = window.ZX || {};
   function adoptTired() {
     var S = ZX.state;
     if (S.tiredAdopted) return;
+    var previewTask = lowestWeightTask();
+    if (!previewTask || (S.locks && S.locks[previewTask.id])) return;
     S.tiredAdopted = true;
     /* 与 tiredFlow 同一选取：顺延当前权重最低的未完成项（不写死任务 id） */
-    var t = lowestWeightTask();
+    var t = previewTask;
     if (t) {
       S.movedOut = { title: t.title, est: t.est };
-      S.tasks = S.tasks.filter(function (x) { return x.id !== t.id; });
+      t.deferred = true;
+      t.deferredTo = '六';
     }
     var left = S.tasks.filter(function (x) { return !x.done && !x.skipped; }).length;
     ZX.render();
-    say('<p>已采纳。' + (t ? U.esc(t.s) + '（' + U.hm(t.est) + '）移到周六弹性位，今天剩 ' + left + ' 项收工。' : '今天没有需要顺延的项。') + '</p><p style="color:var(--txt3);font-size:11px">本次调整记入 replan_record，原因「状态不佳」；不计入断更，也不影响连续记录。</p>', '重排 · L1 顺延');
+    say('<p>已采纳。' + (t ? U.esc(t.s) + '（' + U.hm(t.est) + '）移到周六弹性位，今天剩 ' + left + ' 项收工。' : '今天没有需要顺延的项。') + '</p><p style="color:var(--txt3);font-size:11px">本次调整写入任务顺延状态，原因「状态不佳」；不计入断更，也不影响连续记录。</p>', '重排 · L1 顺延');
     ZX.api.queueOp({
       entity: 'task', entityId: t ? t.id : '', field: 'deferred',
       value: { reason: '状态不佳', to: '周六 15:00 弹性位', est: S.movedOut ? S.movedOut.est : 0 }
@@ -589,7 +659,7 @@ window.ZX = window.ZX || {};
     route: route, INTENTS: INTENTS,
     goalFlow: goalFlow,
     rescueFlow: rescueFlow,
-    replanFlow: replanFlow, undoReplan: undoReplan, feasibilityFlow: feasibilityFlow,
+    replanFlow: replanFlow, confirmReplan: confirmAbandonFlow, undoReplan: undoReplan, feasibilityFlow: feasibilityFlow,
     adjustMath: adjustMath, weeklyFlow: weeklyFlow, tiredFlow: tiredFlow,
     todayFlow: todayFlow, startFlow: startFlow, fallback: fallback,
     adoptTired: adoptTired, togglePreset: togglePreset, toggleNotif: toggleNotif

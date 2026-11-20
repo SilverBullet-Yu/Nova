@@ -162,10 +162,13 @@ window.ZX = window.ZX || {};
   /* 统一出口：收到 HTTP 响应即视为在线；只有网络失败/超时才标记离线 */
   function call(method, path, body) {
     return signedRequest(method, path, body).then(function (r) {
+      var recovered = status.checked && !status.online;
       status.online = true;
       status.checked = true;
       status.lastError = null;
       emit();
+      /* 首次启动由 probeBackend 在采纳状态后补传；同步请求本身不递归触发。 */
+      if (recovered && path !== '/api/sync/ops') flushQueue().catch(function () {});
       return r;
     }, function (e) {
       var reached = !!(e && typeof e.status === 'number');
@@ -224,7 +227,33 @@ window.ZX = window.ZX || {};
     return n;
   }
 
+  function traceSync(status, payload, acceptedIds, planVersion) {
+    try {
+      var store = window.localStorage, key = 'zx.syncTrace';
+      var events = JSON.parse(store.getItem(key) || '[]');
+      var bytes = crypto.getRandomValues(new Uint8Array(16));
+      var id = 'sync-' + Array.from(bytes, function (v) { return v.toString(16).padStart(2, '0'); }).join('');
+      var event = {
+        id: id, tool: 'sync', at: Date.now(), planVersion: planVersion,
+        rulesVersion: 'nova-sync-p0-1', status: status, sent: payload.length,
+        accepted: payload.filter(function (op) { return acceptedIds.indexOf(op.opId) >= 0; }).length
+      };
+      var sessions = payload.filter(function (op) {
+        return op.entity === 'session' && op.field === 'recorded' && op.value &&
+          typeof op.value.id === 'string' && /^s_[0-9a-z]{1,16}_[0-9]{1,16}$/.test(op.value.id);
+      }).map(function (op) {
+        return { id: op.value.id, confirmed: acceptedIds.indexOf(op.opId) >= 0 };
+      });
+      if (sessions.length) event.sessions = sessions;
+      store.setItem(key, JSON.stringify((Array.isArray(events) ? events : []).slice(-99).concat([event])));
+    } catch (e) { /* 留痕失败不影响队列 */ }
+  }
+
+  var syncGeneration = 0;
+  function invalidatePendingSync() { syncGeneration++; }
+
   function flushQueue() {
+    var generation = syncGeneration;
     var q = loadQueue();
     var pending = [];
     for (var i = 0; i < q.length; i++) if (q[i].pending) pending.push(q[i]);
@@ -237,7 +266,9 @@ window.ZX = window.ZX || {};
         field: o.field, value: o.value, clientTs: o.clientTs, baseSeq: o.baseSeq
       };
     });
+    var planVersion = ZX.state && ZX.state.currentPlanVersion ? ZX.state.currentPlanVersion() : null;
     return syncOps(payload).then(function (res) {
+      if (generation !== syncGeneration) return res;
       var accepted = (res && res.accepted) || [];
       var cur = loadQueue();
       for (var j = 0; j < cur.length; j++) {
@@ -245,8 +276,13 @@ window.ZX = window.ZX || {};
       }
       saveQueue(cur);
       if (res && typeof res.serverSeq === 'number' && ZX.state) ZX.state.serverSeq = res.serverSeq;
+      var count = payload.filter(function (op) { return accepted.indexOf(op.opId) >= 0; }).length;
+      traceSync(count === payload.length ? 'accepted' : count ? 'partial' : 'unconfirmed', payload, accepted, planVersion);
       emit();
       return res;
+    }, function (err) {
+      if (generation === syncGeneration) traceSync('failed', payload, [], planVersion);
+      throw err;
     });
   }
 
@@ -255,7 +291,7 @@ window.ZX = window.ZX || {};
   function feasibility(p) { return call('POST', '/api/feasibility', p || {}); }
   function schedule(p) { return call('POST', '/api/schedule', p || {}); }
   function replan(p) { return call('POST', '/api/replan', p || {}); }
-  function confirmReplan(result) { return call('POST', '/api/replan/confirm', { result: result }); }
+  function confirmReplan(draftId) { return call('POST', '/api/replan/confirm', { draftId: draftId }); }
   function undo(snapshot) { return call('POST', '/api/replan/undo', { snapshot: snapshot }); }
   function syncOps(ops) { return call('POST', '/api/sync/ops', { ops: ops || [] }); }
   function health() { return call('GET', '/api/health'); }
@@ -278,6 +314,7 @@ window.ZX = window.ZX || {};
     /* op 队列 */
     queueOp: queueOp,
     flushQueue: flushQueue,
+    invalidatePendingSync: invalidatePendingSync,
     pendingCount: pendingCount,
     loadQueue: loadQueue,
 

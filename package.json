@@ -1,6 +1,6 @@
 {
   "name": "nova",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "诺瓦 Nova · 面向学生的日程助理 Demo（确定性引擎 + REST API，零第三方依赖）",
   "type": "commonjs",

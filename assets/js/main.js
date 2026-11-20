@@ -42,7 +42,7 @@ window.ZX = window.ZX || {};
     if (dot && text) {
       if (online) {
         dot.className = 'dot';
-        text.textContent = '本地优先 · 已同步';
+        text.textContent = pending > 0 ? ('本地优先 · 待上行 ' + pending) : '本地优先 · 已同步';
       } else {
         var label = pending > 0 ? ('离线 · 待上行 ' + pending) : '离线 · 本地计算';
         dot.className = 'dot off hide';
@@ -99,7 +99,7 @@ window.ZX = window.ZX || {};
 
   /* 对话是主页面签：顶栏「诺瓦」入口与底部导航都只是切到该页，无覆盖层状态。
      聊天 DOM 持久（消息历史在 #chat 内），不参与 #view 重绘。 */
-  ZX.render = function () {
+  ZX.render = function (options) {
     var S = ZX.state;
     document.documentElement.dataset.tab = S.tab;
     try {
@@ -121,13 +121,13 @@ window.ZX = window.ZX || {};
     }
     /* 渲染即持久化：任何状态变更后都会走到这里，统一落本地 overlay
        （新目标 / 记录 / 跳过 / 补录跨刷新存活；见 state.js 顶部注释） */
-    if (ZX.state.saveOverlay) ZX.state.saveOverlay();
+    if (!(options && options.skipOverlaySave) && ZX.state.saveOverlay) ZX.state.saveOverlay();
   };
 
-  ZX.setTab = function (id) {
+  ZX.setTab = function (id, options) {
     ZX.state.tab = id;
     ZX.renderRail();
-    ZX.render();
+    ZX.render(options);
     if (id === 'chat') {
       var body = U.$('#chat');
       if (body) body.scrollTop = body.scrollHeight;
@@ -162,6 +162,7 @@ window.ZX = window.ZX || {};
     if (act === 'finish') { ZX.assistant.finishTask(b.dataset.id, false); return; }
     if (act === 'done') { ZX.assistant.finishTask(b.dataset.id, true); return; }
     if (act === 'buffer') { ZX.assistant.toggleBuffer(); return; }
+    if (act === 'confirm-replan') { if (b.dataset.draft) ZX.assistant.confirmReplan(b.dataset.draft); return; }
     if (act === 'undo') { ZX.assistant.undoReplan(); return; }
     if (act === 'tired') { ZX.assistant.adoptTired(); return; }
     if (act === 'preset') { ZX.assistant.togglePreset(); return; }
@@ -172,6 +173,7 @@ window.ZX = window.ZX || {};
     if (act === 'avail') { ZX.flows.settings.toggle(b.dataset.day, b.dataset.slot); return; }
     if (act === 'avail-bulk') { ZX.flows.settings.bulk(b.dataset.kind); return; }
     if (act === 'export') { ZX.flows.settings.exportCsv(); return; }
+    if (act === 'remove-goal') { ZX.flows.settings.confirmRemoveGoal(); return; }
     if (act === 'wipe') { ZX.flows.settings.confirmWipe(); return; }
     if (act === 'trash-restore') { ZX.flows.settings.restore(); return; }
     if (act === 'font') { ZX.flows.settings.setFont(b.dataset.v); return; }
@@ -288,9 +290,8 @@ window.ZX = window.ZX || {};
     var heavy = null;
     todo.forEach(function (t) { if (!heavy || U.num(t.weight, 0) > U.num(heavy.weight, 0)) heavy = t; });
     var p2 = heavy
-      ? U.esc(heavy.s) + '是今天权重最高的一项（' + U.num(heavy.weight, 0).toFixed(2) + '）' +
-        (heavy.time ? '，' + U.esc(heavy.time.split('–')[0]) + ' 开始' : '') + '。'
-      : '';
+      ? '当前未完成任务按截止时间与权重字段排序；未启用历史行为模型，不推断个人高效时段。'
+      : '当前没有可执行的未完成任务。';
     return '<img class="msg-mascot" src="assets/img/mascot-v4.svg" width="132" height="116" alt="诺瓦" />' +
       '<p>' + p1 + '</p><p>' + p2 + '要先开始，还是先说这周的情况？</p>';
   }

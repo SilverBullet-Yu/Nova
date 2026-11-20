@@ -70,6 +70,7 @@ window.ZX = window.ZX || {};
         title: '数据与隐私',
         meta: S.exportLog ? '上次导出 ' + S.exportLog.rows + ' 行' : '导出 · 删除 · 7 天恢复',
         body:
+          '<p class="pref-note">当前版本未接入云端模型，不向第三方模型发送对话或学习数据。联网时，相关操作会向配置的 Nova 后端发送计算所需的任务、时段与计划参数，或同步计划变更、可用时段和执行记录；离线时先在本机计算和保存。</p>' +
           '<div class="row2"><span class="k">待同步</span><span class="v" id="opPending">' + ZX.api.pendingCount() + '</span></div>' +
           '<div class="row2"><span class="k">同步序号</span><span class="v">' + S.serverSeq + '</span></div>' +
           '<div class="row2"><span class="k">上次同步</span><span class="v">' + U.nowStr() + '</span></div>' +
@@ -82,6 +83,7 @@ window.ZX = window.ZX || {};
           '<div class="sd-data-act"><button class="btn" data-act="export">导出计划与记录</button>' +
             '<span class="sd-data-n">生成 CSV · 本机下载</span></div>' +
           '<div class="sd-danger">' +
+            (S.goal && S.goal.source === 'user' ? '<button class="btn danger" data-act="remove-goal">删除阶段目标</button>' : '') +
             '<button class="btn danger" data-act="wipe">删除全部数据</button>' +
             '<span class="sd-danger-n">本机计划与记录 · 7 天内可恢复</span>' +
           '</div>'

@@ -121,6 +121,7 @@ window.ZX = window.ZX || {};
   function optionOf(key) {
     var S = ZX.state;
     var rest = undone();
+    var eligible = rest.filter(function (t) { return !(S.locks && S.locks[t.id]); });
 
     if (key === 'defer') {
       var planMin = weekPlannedMin();
@@ -140,7 +141,7 @@ window.ZX = window.ZX || {};
 
     if (key === 'downgrade') {
       var dropN = Math.min(2, Math.max(0, rest.length - 1));
-      var dropped = byWeightAsc(rest).slice(0, dropN).map(dropItem);
+      var dropped = byWeightAsc(eligible).slice(0, dropN).map(dropItem);
       var dropIds = dropped.map(function (d) { return d.id; });
       var keep = rest.filter(function (t) { return dropIds.indexOf(t.id) < 0; });
       var planD = S.workedMin() + sumEst(keep);
@@ -158,9 +159,9 @@ window.ZX = window.ZX || {};
     }
 
     /* compress */
-    var dropC = byWeightAsc(rest).slice(0, Math.min(1, Math.max(0, rest.length - 1))).map(dropItem);
+    var dropC = byWeightAsc(eligible).slice(0, Math.min(1, Math.max(0, rest.length - 1))).map(dropItem);
     var dropCIds = dropC.map(function (d) { return d.id; });
-    var items = rest.filter(function (t) { return dropCIds.indexOf(t.id) < 0; }).map(function (t) {
+    var items = eligible.filter(function (t) { return dropCIds.indexOf(t.id) < 0; }).map(function (t) {
       var from = U.num(t.est, 0);
       return {
         id: t.id, title: t.title, subject: t.s,
@@ -168,7 +169,7 @@ window.ZX = window.ZX || {};
         est: Math.max(MIN_EST, Math.round(from * (1 - COMPRESS_RATE)))
       };
     });
-    var planC = S.workedMin() + sumEst(items);
+    var planC = S.workedMin() + sumEst(items) + sumEst(rest.filter(function (t) { return S.locks && S.locks[t.id]; }));
     return {
       key: 'compress', label: '压缩',
       planMin: planC, days: remainDays(),
@@ -288,7 +289,7 @@ window.ZX = window.ZX || {};
     var dwn = optionOf('downgrade');
     var cmpTxt = cmp.items.length
       ? cmp.items.map(function (i) { return i.from + ' → ' + i.est; }).join('、') + ' min'
-      : '已无未完成项';
+      : '没有可压缩项';
     return '<div class="sb-steps">' + stepMarks(1) + '</div>' +
       '<div class="sb-metrics">' +
         cell('本周原计划', U.hm(m.planned), '7 天合计 · ' + m.planned + ' min') +
@@ -298,25 +299,25 @@ window.ZX = window.ZX || {};
       '</div>' +
       '<div class="notice sb-note">缺口 = 本周原计划 − 已投入 − 剩余可用。' +
         '这 ' + m.days + ' 天每天可用 ' + U.hm(Math.round(m.daily)) + '，合计 ' + U.hm(Math.round(m.avail)) + '。' +
-        (zero ? '本周没有硬缺口，可选择降载保节奏。' : '三种方式都会把它归零，代价各不相同。') +
+        (zero ? '本周没有硬缺口，可选择降载保节奏。' : '各方案可能仍有缺口，请比较下方计算结果。') +
       '</div>' +
       '<div class="sb-opts" role="radiogroup" aria-label="挽救方式">' +
         optCard(cmp,
-          '今天剩下的 ' + (cmp.items.length + cmp.dropped.length) + ' 项按 60% 重排，放弃权重最低的 1 项。',
-          '工时下调 40%（' + cmpTxt + '，不低于 15 分钟），这些项标记为降级完成。',
+          '压缩 ' + cmp.items.length + ' 项，放弃 ' + cmp.dropped.length + ' 项。',
+          '工时下调 40%（' + cmpTxt + '，不低于 15 分钟），压缩项标记为降级，未自动记为完成。',
           '本周计划 ' + U.hm(m.planned) + ' → ' + U.hm(cmp.planMin) + ' · 放弃 ' + cmp.dropped.length + ' 项') +
         optCard(dfr,
           '截止日期 +7 天、周期 +1 周；任务一项不删，工时一项不压。',
           '整体完成时间推后 7 天，截止 ' + dfr.deadlineAfter + '。',
           '剩余可用 ' + U.hm(Math.round(m.avail)) + ' → ' + U.hm(Math.round(dfr.avail)) + ' · 任务数不变') +
         optCard(dwn,
-          '目标值下调，放弃权重最低的 2 项。',
+          '按规则调整目标，放弃 ' + dwn.dropped.length + ' 项。',
           (dwn.targetFrom ? '目标 ' + dwn.targetFrom + ' → ' + dwn.targetAfter + ' 分，' : '') +
             '放弃 ' + dwn.dropped.length + ' 项，重心收在权重最高的项上。',
           '本周计划 ' + U.hm(m.planned) + ' → ' + U.hm(dwn.planMin) + ' · 放弃 ' + dwn.dropped.length + ' 项') +
       '</div>' +
       '<p class="sb-hint">中断天数由执行记录计算：连续 ' + U.num(ZX.state.consecutiveZeroDays, 0) +
-        ' 天没有记录，达到 ' + THRESHOLD + ' 天即进入挽救。以上数字由同一套公式实时算出，选择不会立即生效。</p>';
+        ' 天没有记录，达到 ' + THRESHOLD + ' 天即进入挽救。以上数字根据当前计划与可用时间按固定规则计算；锁定任务不压缩、不放弃。选择不会立即生效。</p>';
   }
 
   function optCard(o, act, cost, extra) {
@@ -376,9 +377,31 @@ window.ZX = window.ZX || {};
   }
 
   /* ---------- 生效 ---------- */
+  function goalRemoved() {
+    if (!ZX.state.goal || ZX.state.goal.source === 'removed') {
+      if (ZX.ui) ZX.ui.toast('请先设置阶段目标，再进行中断挽救。', 'warn');
+      return true;
+    }
+    return false;
+  }
+
+  var approvedPreview = null;
+  function previewKey(option) {
+    var S = ZX.state;
+    return JSON.stringify([option, S.tasks, S.locks, S.dayAssign, S.goal, S.feas, S.week, S.avail, metrics()]);
+  }
+
   function apply() {
+    if (goalRemoved() || !approvedPreview) return;
     var S = ZX.state;
     var o = optionOf(choice);
+    if (approvedPreview !== previewKey(o)) {
+      approvedPreview = null;
+      flow.go(1);
+      ZX.ui.toast('计划已变化，请重新预览并确认。', 'warn');
+      return;
+    }
+    approvedPreview = null;
     var before = metrics();
     var stamp = Date.now();
     var zeroDays = U.num(S.consecutiveZeroDays, 0);
@@ -487,10 +510,12 @@ window.ZX = window.ZX || {};
       return;
     }
     if (act === 'next') {
+      approvedPreview = previewKey(optionOf(choice));
       flow.go(2);
       return;
     }
     if (act === 'back') {
+      approvedPreview = null;
       flow.go(1);
       return;
     }
@@ -500,7 +525,7 @@ window.ZX = window.ZX || {};
   /* ---------- 入口 ---------- */
   function open() {
     if (api) return;
-    if (!ZX.ui) return;
+    if (!ZX.ui || goalRemoved()) return;
     choice = 'compress';
 
     flow = ZX.ui.flowSheet({
@@ -528,7 +553,8 @@ window.ZX = window.ZX || {};
         });
       },
       onClose: function () {
-        /* 关闭 / 取消：不写任何状态 */
+        /* 关闭 / 取消：不写任何业务状态 */
+        approvedPreview = null;
         api = null;
         flow = null;
       }
