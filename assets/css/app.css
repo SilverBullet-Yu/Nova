@@ -1345,8 +1345,11 @@ html[data-font="l"]{--fs-body:17px;--lh-body:1.58}
 /* 字号三档（复用 .seg 原语） */
 .sd-font button{font-family:var(--mono);font-size:11.5px;letter-spacing:.04em;min-width:46px;padding:6px 10px}
 
-/* 移动端对话入口（桌面隐藏） */
+/* 移动端对话入口（桌面隐藏）。
+   对话页签下不显示：入口按钮在对话页是冗余的（已在对话页），
+   且会与顶栏同步位的离线诺瓦头像并排撞脸——只保留工作台页签的快速回入口 */
 .cp-open{display:none}
+html[data-tab="chat"] .cp-open{display:none}
 
 /* 860 移动块 5/7 · 主块：单列外壳 / 顶栏 / 任务卡 / 触控目标（Stage D 主体） */
 @media (max-width:860px){
