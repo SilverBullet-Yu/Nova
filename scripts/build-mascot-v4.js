@@ -16,7 +16,7 @@
      favicon-v4.svg         16px 最小形
    造型语言取自《赛尔号》超能NoNo 的轮廓类别（斜向细长光柱耳 / 白球机身 /
    椭圆大面罩 + 活性色描边 / 发光竖条眼 / 外挂小圆点 / 悬浮飞溅），
-   具体形状、比例与胸口朱砂「诺」印均为原创构型，非原设描摹。
+   具体形状、比例均为原创构型，非原设描摹。
    ========================================================= */
 'use strict';
 const fs = require('node:fs');
@@ -33,7 +33,7 @@ const BLUE = {
   /* 耳杆三段透明度阶梯放缓（.94/.55/.28）：根段→中段不再出现「断成两截」的读感 */
   shaft: 'rgba(76,127,208,.55)', shaft2: 'rgba(76,127,208,.28)',
   lens: 'rgba(76,127,208,.94)', lensCore: 'rgba(169,196,232,.88)',
-  joint: '#E7ECF3', seal: '#A03B2C', sealInk: '#FFFFFF',
+  joint: '#E7ECF3',
   splash: 'rgba(76,127,208,.16)', splash2: 'rgba(76,127,208,.11)',
   shadow: 'rgba(18,26,40,.11)', paper: '#FFFFFF', paperLine: '#141922'
 };
@@ -44,7 +44,7 @@ const CLASSIC = {
   glare: 'rgba(255,255,255,.5)',
   shaft: 'rgba(161,234,236,.6)', shaft2: 'rgba(161,234,236,.28)',
   lens: 'rgba(120,226,232,.94)', lensCore: 'rgba(201,244,252,.9)',
-  joint: '#FFFFFF', seal: '#A03B2C', sealInk: '#FFFFFF',
+  joint: '#FFFFFF',
   splash: 'rgba(47,227,242,.2)', splash2: 'rgba(47,227,242,.13)',
   shadow: 'rgba(43,52,64,.12)', paper: '#FFFFFF', paperLine: '#2B3440'
 };
@@ -56,7 +56,7 @@ const OFFLINE = {
   glare: 'rgba(255,255,255,.2)',
   shaft: 'rgba(18,26,40,.10)', shaft2: 'rgba(18,26,40,.06)',
   lens: 'rgba(18,26,40,.22)', lensCore: 'rgba(18,26,40,.14)',
-  joint: '#DDE2EA', seal: '#A03B2C', sealInk: '#FFFFFF',
+  joint: '#DDE2EA',
   splash: 'rgba(18,26,40,.08)', splash2: 'rgba(18,26,40,.05)',
   shadow: 'rgba(18,26,40,.08)', paper: '#F4F6F9', paperLine: '#3A424E'
 };
@@ -166,8 +166,6 @@ function body(c, o) {
   var lens = o.earLens || c.lens;
   var lensCore = o.earCore || c.lensCore;
   var rim = o.rim || c.rim;
-  var sealFill = o.sealFill || c.seal;
-  var sealInk = o.sealInk || c.sealInk;
   var face = o.face ? o.face(c, o) : faceIdle(c, o);
   var decor = o.decor ? o.decor(c, o) : '';
   if (o.earsArcs) {
@@ -228,12 +226,10 @@ function body(c, o) {
       '<ellipse cx="138" cy="141" rx="29" ry="30" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="1"/>' +
       face +
     '</g>' +
-    /* 状态装饰（在面罩之外） */
+    /* 状态装饰（在面罩之外）；专注态进度环独用 (85,171)——立绘不刻字，
+       「诺」身份锚点由消息落款印 .seal-no（DOM 绘制）承担 */
     decor +
-    /* 外挂点 → 朱砂「诺」印 */
     ring +
-    '<rect x="78" y="164" width="14" height="14" rx="2.4" fill="' + sealFill + '"/>' +
-    '<text x="85" y="175" text-anchor="middle" font-family="' + SERIF + '" font-size="9.5" font-weight="700" fill="' + sealInk + '">诺</text>' +
     /* 地面投影：双层柔化（宽浅 + 窄深），悬浮感更可信 */
     '<ellipse cx="130" cy="196" rx="41" ry="6.5" fill="' + c.shadow + '" opacity=".5"/>' +
     '<ellipse cx="130" cy="196" rx="29" ry="4.2" fill="' + c.shadow + '"/>';
