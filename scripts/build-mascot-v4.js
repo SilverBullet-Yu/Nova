@@ -197,21 +197,29 @@ function body(c, o) {
        消除旧版「耳根悬空、透镜漂离球面」的断裂读感；倾角左约 48°、右约 16°（自竖直） */
     taperShaft([98, 108], [28, 30], 11.5, 2.2, [lens, shaft, shaft2]) +
     taperShaft([128, 100], [152, 16], 9.5, 1.8, [lens, shaft, shaft2]) +
-    /* 耳根透镜：中心落在各自杆轴上（沿杆方向的窄椭圆），不再横在杆身之外 */
+    /* 耳根透镜：中心落在各自杆轴上（沿杆方向的窄椭圆），不再横在杆身之外；
+       中心一枚小白高光点提升透镜的玻璃质感 */
     '<ellipse cx="91" cy="100.2" rx="10.5" ry="5" transform="rotate(48 91 100.2)" fill="' + lens + '"/>' +
     '<ellipse cx="91" cy="100.2" rx="5.5" ry="2.8" transform="rotate(48 91 100.2)" fill="' + lensCore + '"/>' +
+    '<circle cx="90.2" cy="98.6" r="1.5" fill="rgba(255,255,255,.85)"/>' +
     '<ellipse cx="131.4" cy="88.2" rx="8" ry="4.5" transform="rotate(-74 131.4 88.2)" fill="' + lens + '"/>' +
     '<ellipse cx="131.4" cy="88.2" rx="4.2" ry="2.4" transform="rotate(-74 131.4 88.2)" fill="' + lensCore + '"/>' +
-    /* 机身 */
+    '<circle cx="130.8" cy="86.9" r="1.2" fill="rgba(255,255,255,.85)"/>' +
+    /* 机身：1px 冷边线（宪章） + 边缘内阴影环（体积感） + 左上缘光 + 下部接缝弧（机械细节） */
     '<ellipse cx="130" cy="142" rx="55" ry="47" fill="' + c.body + '" stroke="rgba(18,26,40,.10)" stroke-width="1"/>' +
+    '<ellipse cx="130" cy="142" rx="51.5" ry="43.5" fill="none" stroke="rgba(18,26,40,.06)" stroke-width="7" clip-path="url(#ballClip)"/>' +
+    '<path d="M89 111 A 52 44 0 0 1 166 108" fill="none" stroke="rgba(255,255,255,.8)" stroke-width="2.2" stroke-linecap="round" clip-path="url(#ballClip)" opacity=".75"/>' +
+    '<path d="M86 172 A 51 42 0 0 0 174 172" fill="none" stroke="rgba(18,26,40,.08)" stroke-width="1.5" clip-path="url(#ballClip)"/>' +
     '<ellipse cx="148" cy="170" rx="34" ry="16" fill="' + c.bodySh + '" clip-path="url(#ballClip)"/>' +
     '<ellipse cx="108" cy="119" rx="18" ry="9" fill="' + c.bodyHi + '" transform="rotate(-22 108 119)"/>' +
-    /* 耳根关节：白盘落在光柱穿出球面的交点上（左 (95.5,105.5)、右 (129.5,95.5)，均贴球面） */
-    '<circle cx="95.5" cy="105.5" r="5.5" fill="' + c.joint + '"/>' +
-    '<circle cx="129.5" cy="95.5" r="5" fill="' + c.joint + '"/>' +
-    /* 面罩 */
+    /* 耳根关节：白盘带细描边（金属件感），落在光柱穿出球面的交点上（左 (95.5,105.5)、右 (129.5,95.5)，均贴球面） */
+    '<circle cx="95.5" cy="105.5" r="5.5" fill="' + c.joint + '" stroke="rgba(18,26,40,.14)" stroke-width="1"/>' +
+    '<circle cx="129.5" cy="95.5" r="5" fill="' + c.joint + '" stroke="rgba(18,26,40,.14)" stroke-width="1"/>' +
+    /* 面罩：玻璃舱质感——顶部内侧反光带 + 底部压暗弧，叠在纯色底上（不污染各涂装的面罩色） */
     '<g transform="rotate(20 138 141)">' +
       '<ellipse cx="138" cy="141" rx="34" ry="35" fill="' + c.visor + '"/>' +
+      '<path d="M114 127 A 27 26 0 0 1 162 127" fill="none" stroke="rgba(255,255,255,.13)" stroke-width="7" stroke-linecap="round"/>' +
+      '<path d="M120 163 A 26 24 0 0 0 156 163" fill="none" stroke="rgba(0,0,0,.3)" stroke-width="5" stroke-linecap="round"/>' +
       '<ellipse cx="138" cy="141" rx="34" ry="35" fill="none" stroke="' + rim + '" stroke-width="5"/>' +
       '<ellipse cx="138" cy="141" rx="29" ry="30" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="1"/>' +
       face +
@@ -222,8 +230,9 @@ function body(c, o) {
     ring +
     '<rect x="78" y="164" width="14" height="14" rx="2.4" fill="' + sealFill + '"/>' +
     '<text x="85" y="175" text-anchor="middle" font-family="' + SERIF + '" font-size="9.5" font-weight="700" fill="' + sealInk + '">诺</text>' +
-    /* 地面投影 */
-    '<ellipse cx="130" cy="196" rx="34" ry="5" fill="' + c.shadow + '"/>';
+    /* 地面投影：双层柔化（宽浅 + 窄深），悬浮感更可信 */
+    '<ellipse cx="130" cy="196" rx="41" ry="6.5" fill="' + c.shadow + '" opacity=".5"/>' +
+    '<ellipse cx="130" cy="196" rx="29" ry="4.2" fill="' + c.shadow + '"/>';
 
   var wrap = tilt
     ? '<g transform="rotate(' + tilt + ' 130 142)">' + inner + '</g>'
