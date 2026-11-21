@@ -164,8 +164,8 @@ window.ZX = window.ZX || {};
     if (act === 'done') { ZX.assistant.finishTask(b.dataset.id, true); return; }
     if (act === 'buffer') { ZX.assistant.toggleBuffer(); return; }
     if (act === 'review-plan') { ZX.reviewPendingPlan(true); return; }
-    if (act === 'confirm-replan') { if (b.dataset.draft) ZX.assistant.confirmReplan(b.dataset.draft); return; }
-    if (act === 'undo') { ZX.assistant.undoReplan(); return; }
+    if (act === 'confirm-replan') { if (b.dataset.draft && ZX.flows.replan) ZX.flows.replan.confirmReplan(b.dataset.draft); return; }
+    if (act === 'undo') { if (ZX.flows.replan) ZX.flows.replan.undoReplan(); return; }
     if (act === 'tired') { ZX.assistant.adoptTired(); return; }
     if (act === 'preset') { ZX.assistant.togglePreset(); return; }
     if (act === 'tg') { ZX.assistant.toggleNotif(b.dataset.key); return; }

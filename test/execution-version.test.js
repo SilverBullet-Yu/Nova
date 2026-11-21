@@ -53,7 +53,11 @@ test('本地重排快照跨刷新恢复，清除后不再恢复', () => {
     window: { ZX: page.ZX, Rhythm: { workflow: require('../shared/workflow.js') } },
     document: { createElement: () => ({}) }
   });
-  page.ZX.assistant.undoReplan();
+  vm.runInNewContext(readFileSync(require.resolve('../assets/js/flows/replan.js'), 'utf8'), {
+    window: { ZX: page.ZX, Rhythm: { workflow: require('../shared/workflow.js') } },
+    document: { createElement: () => ({}) }
+  });
+  page.ZX.flows.replan.undoReplan();
   assert.equal(page.ops[0].value.day, '日');
   assert.equal(boot(storage).ZX.state.dayAssign[taskId], undefined);
   assert.equal(boot(storage).ZX.state.replanHistory[0].undone, true);

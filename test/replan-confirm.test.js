@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const H = require('./helpers');
 const source = fs.readFileSync(require.resolve('../assets/js/assistant.js'), 'utf8');
+const replanSource = fs.readFileSync(require.resolve('../assets/js/flows/replan.js'), 'utf8');
 function setup(storage = new Map(), persist = false) {
   const messages = [], ops = [];
   let state = { tasks: [{ id: 't', est: 50 }], week: [], replanInput: () => ({}) };
@@ -23,17 +24,18 @@ function setup(storage = new Map(), persist = false) {
   }
   win.Rhythm = Object.assign({}, win.Rhythm, { workflow: require('../shared/workflow.js') });
   vm.runInNewContext(source, sandbox);
+  vm.runInNewContext(replanSource, sandbox);   /* 重排域在 flows/replan.js */
   return { ZX, state, messages, ops };
 }
 test('对话普通重排先预览，确认只写一次', async () => {
   const { ZX, state, messages, ops } = setup();
-  ZX.assistant.replanFlow();
+  ZX.flows.replan.replanFlow();
   await Promise.resolve();
   assert.equal(state.tasks[0].est, 50);
   assert.equal(ops.length, 0);
   assert.match(messages.at(-1), /重排待确认/);
-  ZX.assistant.confirmReplan();
-  ZX.assistant.confirmReplan();
+  ZX.flows.replan.confirmReplan();
+  ZX.flows.replan.confirmReplan();
   assert.equal(state.tasks[0].est, 35);
   assert.equal(ops.length, 1);
 });
@@ -48,10 +50,10 @@ test('在线重排等待服务端草案确认后才修改本地计划', async ()
     calls++;
     return new Promise(resolve => { release = resolve; });
   };
-  ZX.assistant.replanFlow();
+  ZX.flows.replan.replanFlow();
   await Promise.resolve();
-  const request = ZX.assistant.confirmReplan();
-  ZX.assistant.confirmReplan();
+  const request = ZX.flows.replan.confirmReplan();
+  ZX.flows.replan.confirmReplan();
   assert.equal(state.tasks[0].est, 50);
   assert.equal(ops.length, 0);
   assert.equal(calls, 1);
@@ -69,9 +71,9 @@ for (const rejected of [false, true]) {
     ZX.engine.confirmReplan = () => new Promise((resolve, reject) => {
       settle = () => rejected ? reject(new Error('conflict')) : resolve(preview);
     });
-    ZX.assistant.replanFlow();
+    ZX.flows.replan.replanFlow();
     await Promise.resolve();
-    const request = ZX.assistant.confirmReplan();
+    const request = ZX.flows.replan.confirmReplan();
     state.tasks[0].est = 60;
     settle();
     await request;
@@ -82,11 +84,11 @@ for (const rejected of [false, true]) {
 test('预览不落盘，失效后仅写脱敏结案记录', async () => {
   const storage = new Map();
   const { ZX, state } = setup(storage);
-  ZX.assistant.replanFlow();
+  ZX.flows.replan.replanFlow();
   await Promise.resolve();
   assert.equal(storage.size, 0);
   state.tasks[0].est = 60;
-  ZX.assistant.confirmReplan();
+  ZX.flows.replan.confirmReplan();
   const events = JSON.parse(storage.get('zx.replanTrace') || '[]');
   assert.deepEqual(events.map(e => e.status), ['stale']);
   assert.deepEqual(Object.keys(events[0]).sort(), ['at', 'id', 'planVersion', 'rulesVersion', 'status', 'tool']);
@@ -94,14 +96,14 @@ test('预览不落盘，失效后仅写脱敏结案记录', async () => {
 test('被新预览替换的草案记为拒绝，新草案重复确认只记一次提交', async () => {
   const storage = new Map();
   const { ZX, state, ops } = setup(storage);
-  ZX.assistant.replanFlow();
+  ZX.flows.replan.replanFlow();
   await Promise.resolve();
-  ZX.assistant.replanFlow();
+  ZX.flows.replan.replanFlow();
   await Promise.resolve();
   assert.equal(state.tasks[0].est, 50);
   assert.equal(ops.length, 0);
-  ZX.assistant.confirmReplan();
-  ZX.assistant.confirmReplan();
+  ZX.flows.replan.confirmReplan();
+  ZX.flows.replan.confirmReplan();
   const events = JSON.parse(storage.get('zx.replanTrace'));
   assert.deepEqual(events.map(e => e.status), ['rejected', 'committed']);
   assert.notEqual(events[0].id, events[1].id);
@@ -111,11 +113,11 @@ test('被新预览替换的草案记为拒绝，新草案重复确认只记一�
 test('提交前异常仅记失败，不写业务数据或异常正文', async () => {
   const storage = new Map();
   const { ZX, state, ops } = setup(storage);
-  ZX.assistant.replanFlow();
+  ZX.flows.replan.replanFlow();
   await Promise.resolve();
   ZX.util.clone = () => { throw new Error('private test detail'); };
-  ZX.assistant.confirmReplan();
-  ZX.assistant.confirmReplan();
+  ZX.flows.replan.confirmReplan();
+  ZX.flows.replan.confirmReplan();
   const raw = storage.get('zx.replanTrace');
   assert.deepEqual(JSON.parse(raw).map(e => e.status), ['failed']);
   assert.doesNotMatch(raw, /private test detail/);
@@ -128,7 +130,7 @@ test('重排引擎失败提示用户且不写计划', async () => {
   const { ZX, state, messages, ops } = setup(storage);
   state.currentPlanVersion = () => 'plan-at-request';
   ZX.engine.replan = async () => { throw new Error('private detail'); };
-  ZX.assistant.replanFlow();
+  ZX.flows.replan.replanFlow();
   await Promise.resolve();
   assert.match(messages.join(''), /无法生成重排预览/);
   assert.doesNotMatch(messages.join(''), /private detail/);
@@ -145,27 +147,27 @@ test('旧重排请求迟到失败，不覆盖新草案或增加失败记录', as
   const replan = ZX.engine.replan;
   let rejectOld;
   ZX.engine.replan = () => new Promise((resolve, reject) => { rejectOld = reject; });
-  ZX.assistant.replanFlow();
+  ZX.flows.replan.replanFlow();
   ZX.engine.replan = replan;
-  ZX.assistant.replanFlow();
+  ZX.flows.replan.replanFlow();
   await Promise.resolve();
   assert.match(messages.at(-1), /重排待确认/);
   rejectOld(new Error('obsolete'));
   await Promise.resolve();
   assert.doesNotMatch(messages.join(''), /无法生成重排预览/);
   assert.equal(storage.has('zx.replanTrace'), false);
-  ZX.assistant.confirmReplan();
+  ZX.flows.replan.confirmReplan();
   assert.equal(state.tasks[0].est, 35);
   assert.deepEqual(JSON.parse(storage.get('zx.replanTrace')).map(event => event.status), ['committed']);
 });
 
 test('计划变化使预览失效', async () => {
   const { ZX, state, ops } = setup();
-  ZX.assistant.replanFlow();
+  ZX.flows.replan.replanFlow();
   await Promise.resolve();
   assert.equal(ops.length, 0);
   state.tasks[0].est = 60;
-  ZX.assistant.confirmReplan();
+  ZX.flows.replan.confirmReplan();
   assert.equal(state.tasks[0].est, 60);
   assert.equal(ops.length, 0);
 });
@@ -177,13 +179,13 @@ test('确认单日顺延更新落点，撤销恢复并发送逆向改期', async
   ZX.util.tsHM = () => '';
   ZX.engine.undo = async snap => snap;
   ZX.engine.replan = async () => ({ accepted: true, strategies: [{ level: 1, applied: true }], diff: [{ taskId: 't', op: 'defer', from: '二', to: '三' }], guards: {} });
-  ZX.assistant.replanFlow();
+  ZX.flows.replan.replanFlow();
   await Promise.resolve();
   assert.equal(state.dayAssign.t, '二');
-  ZX.assistant.confirmReplan();
+  ZX.flows.replan.confirmReplan();
   assert.equal(state.dayAssign.t, '三');
   assert.equal(ops.find(o => o.field === 'moved').value.day, '三');
-  ZX.assistant.undoReplan();
+  ZX.flows.replan.undoReplan();
   assert.equal(state.dayAssign.t, '二');
   assert.equal(ops.filter(o => o.field === 'moved').at(-1).value.day, '二');
 });
@@ -192,29 +194,29 @@ test('不能把跨日拆分静默写成单日顺延', async () => {
   const { ZX, state, ops } = setup();
   state.dayAssign = { t: '二' };
   ZX.engine.replan = async () => ({ accepted: true, strategies: [{ level: 1, applied: true }], diff: [{ taskId: 't', op: 'defer', to: '三/四' }], guards: {} });
-  ZX.assistant.replanFlow();
+  ZX.flows.replan.replanFlow();
   await Promise.resolve();
-  ZX.assistant.confirmReplan();
+  ZX.flows.replan.confirmReplan();
   assert.equal(state.dayAssign.t, '二');
   assert.equal(ops.length, 0);
 });
 
 test('旧预览卡不能确认新草案', async () => {
   const { ZX, state, messages, ops } = setup();
-  ZX.assistant.replanFlow();
+  ZX.flows.replan.replanFlow();
   await Promise.resolve();
   const oldCard = messages.at(-1);
-  ZX.assistant.replanFlow();
+  ZX.flows.replan.replanFlow();
   await Promise.resolve();
   const newCard = messages.at(-1);
   const id = card => card.match(/data-draft="([^"]+)"/)?.[1];
   assert.match(oldCard, /data-act="confirm-replan"/);
   assert.ok(id(oldCard) && id(newCard));
   assert.notEqual(id(oldCard), id(newCard));
-  ZX.assistant.confirmReplan(id(oldCard));
+  ZX.flows.replan.confirmReplan(id(oldCard));
   assert.equal(state.tasks[0].est, 50);
   assert.equal(ops.length, 0);
-  ZX.assistant.confirmReplan(id(newCard));
+  ZX.flows.replan.confirmReplan(id(newCard));
   assert.equal(state.tasks[0].est, 35);
   assert.equal(ops.length, 1);
 });
@@ -222,10 +224,10 @@ test('旧预览卡不能确认新草案', async () => {
 test('已确认重排保留提交前后计划版本及关联 ID', async () => {
   const { ZX, state } = setup();
   state.currentPlanVersion = () => state.tasks[0].est === 50 ? 'plan-before' : 'plan-after';
-  ZX.assistant.replanFlow();
+  ZX.flows.replan.replanFlow();
   await Promise.resolve();
   assert.equal(state.replanHistory, undefined);
-  ZX.assistant.confirmReplan();
+  ZX.flows.replan.confirmReplan();
   const entry = state.replanHistory[0];
   assert.equal(entry.planVersionBefore, 'plan-before');
   assert.equal(entry.planVersionAfter, 'plan-after');
@@ -241,17 +243,17 @@ test('撤销保留提交版本并记录撤销时间与结果版本', async () =>
   ZX.engine.undo = async snap => snap;
   let version = 'plan-before';
   state.currentPlanVersion = () => state.tasks[0].est === 35 ? 'plan-applied' : version;
-  ZX.assistant.replanFlow();
+  ZX.flows.replan.replanFlow();
   await Promise.resolve();
-  ZX.assistant.confirmReplan();
+  ZX.flows.replan.confirmReplan();
   version = 'plan-restored';
-  ZX.assistant.undoReplan();
+  ZX.flows.replan.undoReplan();
   const entry = state.replanHistory[0];
   assert.equal(entry.planVersionAfter, 'plan-applied');
   assert.equal(entry.planVersionAfterUndo, 'plan-restored');
   assert.ok(entry.undoneAt >= entry.at);
   assert.equal(entry.undone, true);
-  ZX.assistant.undoReplan();
+  ZX.flows.replan.undoReplan();
   const events = JSON.parse(storage.get('zx.replanTrace'));
   assert.deepEqual(events.map(e => e.status), ['committed', 'undone']);
   assert.deepEqual(events[1], { id: entry.requestId, tool: 'replan', at: entry.undoneAt,
@@ -271,7 +273,7 @@ test('真实引擎超载预览展示压缩、负载与约束，确认前不写�
   state.replanInput = () => ({ tasks: state.tasks, locks: state.locks, week: state.week, timestamp: 1000 });
   ZX.engine.replan = async input => replan(input);
   const before = structuredClone([state.tasks, state.week, state.locks]);
-  ZX.assistant.replanFlow();
+  ZX.flows.replan.replanFlow();
   await Promise.resolve();
   const card = messages.at(-1);
   assert.match(card, /140 → 105 min/);
@@ -296,7 +298,7 @@ test('弹性位冲突阻断重排时，不误报连续未改善', async () => {
   state.noImproveCount = () => 0;
   state.replanInput = () => ({ tasks: state.tasks, week: [{ date: '一', minutes: 400, buffer: 60 }], timestamp: 1000 });
   ZX.engine.replan = async input => replan(input);
-  ZX.assistant.replanFlow();
+  ZX.flows.replan.replanFlow();
   await Promise.resolve();
   const card = messages.at(-1);
   assert.match(card, /重排已停止/);
@@ -312,11 +314,11 @@ test('重排追踪保留最近 100 条，新事件只含白名单字段', async 
   const old = Array.from({ length: 100 }, (_, i) => ({ id: 'old-' + i, at: i }));
   const storage = new Map([[key, JSON.stringify(old)]]);
   const { ZX, state, ops } = setup(storage);
-  ZX.assistant.replanFlow();
+  ZX.flows.replan.replanFlow();
   await Promise.resolve();
   assert.deepEqual(JSON.parse(storage.get(key)), old);
   state.tasks[0].est = 60;
-  ZX.assistant.confirmReplan();
+  ZX.flows.replan.confirmReplan();
   const events = JSON.parse(storage.get(key));
   assert.equal(events.length, 100);
   assert.deepEqual(events.slice(0, -1), old.slice(1));
@@ -340,7 +342,7 @@ test('局部中断：只顺延待调整项，预览不写入且可确认', async
   state.replanInput = () => ({ tasks: state.tasks, locks: state.locks, week: state.week, timestamp: 1000 });
   ZX.engine.replan = async input => replan(input);
   const before = structuredClone(state.tasks);
-  ZX.assistant.replanFlow();
+  ZX.flows.replan.replanFlow();
   await Promise.resolve();
   const card = messages.at(-1);
   assert.match(card, /重排待确认/);
@@ -352,7 +354,7 @@ test('局部中断：只顺延待调整项，预览不写入且可确认', async
   assert.deepEqual(state.tasks, before);
   assert.equal(storage.size, 0);
   assert.equal(ops.length, 0);
-  ZX.assistant.confirmReplan();
+  ZX.flows.replan.confirmReplan();
   assert.deepEqual({ ...state.dayAssign }, { done: '一', move: '二', fixed: '三' });
   assert.deepEqual(ops.filter(op => op.field === 'moved').map(op => [op.value.taskId, op.value.day]), [['move', '二']]);
 });
@@ -374,7 +376,7 @@ test('可提交的超载重排：确认前不落盘，确认后应用压缩和�
     window: { ZX }, document: { readyState: 'loading', documentElement: { dataset: {} }, addEventListener() {} }
   });
   state.tab = 'chat';
-  ZX.assistant.replanFlow();
+  ZX.flows.replan.replanFlow();
   await Promise.resolve();
   assert.equal(state.tab, 'plan');
   const card = messages.at(-1);
@@ -388,14 +390,14 @@ test('可提交的超载重排：确认前不落盘，确认后应用压缩和�
   assert.equal(state.dayAssign.open, '一');
   assert.equal(storage.size, 0);
   assert.equal(ops.length, 0);
-  ZX.assistant.confirmReplan();
+  ZX.flows.replan.confirmReplan();
   assert.equal(state.tasks[0].est, 30);
   assert.equal(state.dayAssign.open, '二');
   assert.deepEqual(ops.filter(op => op.field === 'moved').map(op => [op.value.taskId, op.value.day]), [['open', '二']]);
   const refreshed = setup(storage, true);
   assert.equal(refreshed.state.tasks[0].est, 30);
   assert.equal(refreshed.state.dayAssign.open, '二');
-  refreshed.ZX.assistant.undoReplan();
+  refreshed.ZX.flows.replan.undoReplan();
   const restored = setup(storage, true).state;
   assert.equal(restored.tasks[0].est, 40);
   assert.equal(restored.dayAssign.open, '一');

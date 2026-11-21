@@ -313,9 +313,9 @@ window.ZX = window.ZX || {};
     var vt = e.target.closest('[data-veto]');
     if (vt) { veto(vt.dataset.veto, vt.dataset.vop, vt); return; }
 
-    /* 计划页头部「重新安排」：走既有 replanFlow，不复制重排逻辑 */
+    /* 计划页头部「重新安排」：走重排域 flows/replan.js，不复制重排逻辑 */
     if (e.target.closest('[data-replan-run]')) {
-      if (ZX.assistant && ZX.assistant.replanFlow) ZX.assistant.replanFlow();
+      if (ZX.flows && ZX.flows.replan) ZX.flows.replan.replanFlow();
     }
   });
 

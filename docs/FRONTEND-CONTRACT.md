@@ -20,19 +20,20 @@
 | `assets/js/api.js` | 后端通信、超时降级、凭证与 op 写队列（`ZX.api`） |
 | `assets/js/engine.js` | 引擎桥接：后端优先 → 本地产物兜底（`ZX.engine`） |
 | `assets/js/state.js` | 全局状态与派生计算（`ZX.state`）；种子来自 `shared/data/seed.js` |
-| `assets/js/assistant.js` | 对话消息、意图路由与对话内流程（`ZX.assistant`） |
+| `assets/js/assistant.js` | 对话消息、意图路由与对话内流程（`ZX.assistant`）；重排域路由转发到 `flows/replan.js` |
 | `assets/js/main.js` | 引导、事件委托、页签切换、启动序列（`ZX.render` / `ZX.setTab` / `ZX.renderRail`） |
 | `assets/css/app.css` | 唯一样式来源；顶部 `:root` 块为视觉配置区 |
 | `assets/js/rhythm.build.js` | 生成产物（`scripts/build-engine.js` → `shared/engine/*.js`），禁止手改 |
 | `assets/img/*.svg` | 生成产物（`scripts/build-mascot-v4.js`），禁止手改 |
 | `assets/js/mascot-inline.js` | 生成产物（`scripts/build-mascot-v4.js`），待机 / 聆听 / 离线三枚头像的 base64 data URI 内联副本，导出 `window.ZX_MASCOT.idleAvatar` / `listenAvatar` / `offlineAvatar`，禁止手改 |
 
-`index.html` 的脚本顺序固定：`shared/data/seed.js` → `assets/js/rhythm.build.js` → `assets/js/mascot-inline.js` → `assets/js/util.js` → `assets/js/ui.js` → `assets/js/api.js` → `assets/js/engine.js` → `assets/js/state.js` → `assets/js/views/today.js` → `assets/js/views/plan.js` → `assets/js/views/data.js` → `assets/js/views/me.js` → `shared/workflow.js` → `assets/js/assistant.js` → `assets/js/flows/goal.js` → `assets/js/flows/rescue.js` → `assets/js/flows/exec.js` → `assets/js/flows/planedit.js` → `assets/js/flows/settings.js` → `assets/js/main.js`。改顺序前先确认依赖链（util → ui → state → 视图 → workflow → assistant → flows → main）。
+`index.html` 的脚本顺序固定：`shared/data/seed.js` → `assets/js/rhythm.build.js` → `assets/js/mascot-inline.js` → `assets/js/util.js` → `assets/js/ui.js` → `assets/js/api.js` → `assets/js/engine.js` → `assets/js/state.js` → `assets/js/views/today.js` → `assets/js/views/plan.js` → `assets/js/views/data.js` → `assets/js/views/me.js` → `shared/workflow.js` → `assets/js/assistant.js` → `assets/js/flows/replan.js` → `assets/js/flows/goal.js` → `assets/js/flows/rescue.js` → `assets/js/flows/exec.js` → `assets/js/flows/planedit.js` → `assets/js/flows/settings.js` → `assets/js/main.js`。改顺序前先确认依赖链（util → ui → state → 视图 → workflow → assistant → flows → main）。
 
 ### 2.2 流程模块 `assets/js/flows/`
 
 | 模块 | 挂载点 | 职责 | 关键常量 |
 |---|---|---|---|
+| `replan.js` | `ZX.flows.replan` | 重排域：四级重排预览（后端优先 → 本地引擎）、草案生命周期（`shared/workflow.js`）、在线草案确认、快照撤销；留痕 `zx.replanTrace`；`replanFlow` / `confirmReplan` / `undoReplan` 由意图路由与 `data-act` 委托消费 | `REPLAN_RULES_VERSION` `nova-replan-p0-1`；24h 重跑去重窗口 |
 | `goal.js` | `ZX.flows.goal` | 新建目标：设定 → 可行性 →（R<0.70 校准）→ 拆解草案 → 确认生效；生效后走 `ZX.engine.schedule` 排程 | `BASE_HOURS` 考研 913 / 考公 660 / 项目导学 520；`BASE_COEF` 零基础 1.30 / 一轮 1.00 / 二轮 0.75 / 多战 0.60；`DISCOUNT` 0.85；`GATE` 0.70；`TARGET_R` 0.90；`MIN_EST` 15；`MAX_EST` 240；`STEP` 15；`OVER_RATIO` 1.15；`AMP_LIMIT` 0.30 |
 | `rescue.js` | `ZX.flows.rescue` | 连续无记录天数识别、中断横幅、三步挽救（压缩 / 顺延 / 降级）与生效 | `THRESHOLD` 3 天；`DEMO_ZERO_DAYS` 4；`COMPRESS_RATE` 0.40；`MIN_EST` 15；`DEFER_DAYS` 7；`DOWN_POINTS` 30 |
 | `exec.js` | `ZX.flows.exec` | 执行记录：暂停 / 继续、部分完成、跳过与恢复、补录；`metrics()` 是全站 KPI 唯一口径 | `PCTS` 25 / 50 / 75 / 100；`FEELS` 顺利 / 吃力 / 分心 / 疲惫；`REASONS` 临时有事 / 状态不好 / 任务过难 / 其他；`MIN_EST` 15 |
