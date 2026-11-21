@@ -347,9 +347,18 @@ module.exports = {
       notifications: getNotifications(userId)
     };
   },
+  getPlanBaseline: function (userId) {
+    const p = partitionOf(userId);
+    const b = p.planBaseline;
+    return b ? { version: b.version, stale: b.seq !== p.seq } : null;
+  },
   getNotifications: getNotifications,
   getLatestReplan: getLatestReplan,
   recordReplan: recordReplan,
+  recordSchedule: function (userId, version, result) {
+    const p = partitionOf(userId);
+    p.planBaseline = { version, seq: p.seq, record: clone(result) };
+  },
   applyOps: applyOps,
   mergeField: mergeField,
   policyOf: policyOf,

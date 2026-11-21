@@ -63,7 +63,7 @@
 
 ### 4.3 服务端分区结构
 
-`../server/store/memory.js` 每分区持有 `{ userId, seq, state, entities, opIndex, replanRecords, replanSeq }`：`state` 为种子副本，`entities` 存字段级合并结果，`opIndex` 为 `opId` 到 `serverSeq` 的幂等索引。
+`../server/store/memory.js` 每分区持有 `{ userId, seq, state, entities, opIndex, replanRecords, replanSeq, planBaseline }`：`state` 为种子副本，`entities` 存字段级合并结果，`opIndex` 为 `opId` 到 `serverSeq` 的幂等索引。
 
 ## 5. 引擎实现
 
@@ -128,12 +128,12 @@
 | 项 | 现状 |
 | --- | --- |
 | 鉴权 | `Authorization: Bearer <token>`；凭证形态 `nj1.<payloadBase64url>.<sigBase64url>`，HMAC-SHA256 签名，密钥取 `NOVA_AUTH_SECRET`（至少 32 字节），有效期 7 天（`TOKEN_TTL_MS`）；身份只从凭证解析，请求体 `userId` 与凭证不一致返回 `E4030` |
-| 限流 | 固定窗口、单进程内存，按「身份 + 路由」隔离，未认证路由按来源 IP 隔离。阈值：`POST /api/auth/session` 60/60 s（按 IP）、`POST /api/sync/ops` 60/60 s、`POST /api/replan` 与 `/replan/confirm` 与 `/replan/undo` 12/60 s、`POST /api/feasibility` 与 `/schedule` 与 `/attribute` 30/60 s；超限返回 429 与 `Retry-After`，不排队也不自动重试 |
+| 限流 | 固定窗口、单进程内存，按「身份 + 路由」隔离，未认证路由按来源 IP 隔离。阈值：`POST /api/auth/session` 60/60 s（按 IP）、`POST /api/sync/ops` 60/60 s、`POST /api/replan` 与 `/replan/confirm` 与 `/replan/undo` 12/60 s、`POST /api/feasibility` 与 `/schedule` 与 `/plan/review` 与 `/attribute` 30/60 s；超限返回 429 与 `Retry-After`，不排队也不自动重试 |
 | CORS | 放行本机来源（`127.0.0.1`/`localhost`/`null`）与同源（`Origin` 的 host 等于请求 `Host`），其余不放行；允许方法 `GET, POST, OPTIONS`，允许头 `Content-Type, Authorization`，`Max-Age 600`，带 `Vary: Origin` |
 | 静态资源 | 白名单 `/`、`/index.html`、`/assets/*`、`/shared/*`；非 GET/HEAD 返回 405 |
 | 请求体 | 上限 1 MiB（`MAX_BODY_BYTES = 1048576`），超限 `E4002`；JSON 非法 `E1001` |
-| 前端降级 | 请求超时 3000 ms；引擎调用失败或结构不合约时回退本地产物（`ZX.engine.source` 记为 `local`）；收到 HTTP 响应即视为在线，仅网络失败或超时判离线；离线时顶栏同步位换为诺瓦的离线褪色头像，取自 `assets/js/mascot-inline.js` 的内联 data URI（不依赖网络），待上行数量以角标显示；输入台头像在用户输入时切聆听形象，同样取自内联副本 |
-| 体积 | `assets/css/app.css` 100352 字节；`assets/js/rhythm.build.js` 48410 字节；`assets/js/mascot-inline.js` 3247 字节；仓内 `js`/`css`/`html`/`svg` 共 48 个文件、617661 字节 |
+| 前端降级 | 请求超时 3000 ms；引擎调用失败或结构不合约时回退本地产物（`ZX.engine.source` 记为 `local`）；收到 HTTP 响应即视为在线，仅网络失败或超时判离线；离线时顶栏同步位换为诺瓦的离线褪色头像，取自 `assets/js/mascot-inline.js` 的内联 data URI（不依赖网络），待上行数量以角标显示；输入台头像在用户输入时切聆听形象，同样取自内联副本；计划复核（`/api/plan/review`）离线时挂起为待复核态（`zx.pending_plan`），恢复联网后自动补审 |
+| 体积 | `assets/css/app.css` 100696 字节；`assets/js/rhythm.build.js` 47228 字节；`assets/js/mascot-inline.js` 3247 字节；仓内 `js`/`css`/`html`/`svg` 共 65 个文件、699580 字节 |
 | 第三方资源 | 无第三方脚本、字体、CDN 与埋点；`../index.html` 不引用任何外部 URL，图标与插画均为仓内 SVG |
 
 ## 9. 附录
@@ -147,6 +147,7 @@
 | `GET /api/state` | 是 | 无 | `{ seed, replan, notifications, planBaseline }` |
 | `POST /api/feasibility` | 是 | `weeklyH`/`weeks`/`discount`/`demand` | 可行性结果 |
 | `POST /api/schedule` | 是 | `tasks`/`slots`/`params?` | `{ blocks, unplanned, version }` |
+| `POST /api/plan/review` | 是 | `id`/`base`/`input`/`result`/`ticket?` | `{ status: 'committed', version }` 或 `{ status: 'conflict', reason, version, ticket? }` |
 | `POST /api/replan` | 是 | `tasks`/`week`/`params?`/`history?`/`locks?`/`timestamp?` | 重排预览；可提交时返回 `draftId`，不落业务库 |
 | `POST /api/replan/confirm` | 是 | `draftId` | 校验身份及版本后写入业务记录、更新计划基线并返回结果 |
 | `POST /api/replan/undo` | 是 | `snapshot` | `{ tasks, week }` |
@@ -155,7 +156,7 @@
 
 已下线端点（返回 404 / `E2001`，见 `../test/api.test.js`）：`POST /api/sessions`、`GET /api/sync`、`GET /api/reports/weekly`。
 
-在线重排确认成功后，按凭证身份记录进程内基线，引用确认结果并保存锁定与引擎参数。读接口仅新增基线元数据 `null` 或 `{ version, stale }`。同一分区有新同步操作登记时保守标记过期；重复操作不会推进分区序号。重启清空，普通新建计划不建立基线。当前未接入离线复核。
+计划基线有两条建立路径：在线重排确认成功（`/api/replan/confirm`）按凭证身份记录进程内基线，引用确认结果并保存锁定与引擎参数；新建计划排程生效（`/api/plan/review` 返回 `committed`）写入排程版本基线。读接口仅新增基线元数据 `null` 或 `{ version, stale }`。同一分区有新同步操作登记时保守标记过期；重复操作不会推进分区序号。离线复核已接入：前端经 `/api/plan/review` 上送排程结果，服务端重算比对，基线不一致时返回 `ticket` 升级重交，收据幂等（同签名 24 小时内）。重启清空。
 
 ### 9.2 错误码
 

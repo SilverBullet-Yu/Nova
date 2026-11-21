@@ -11,11 +11,12 @@
 |---|---|---|
 | `shared/engine/*.js` | 后端（前端只读） | 四个纯函数引擎，UMD 双模，唯一实现 |
 | `shared/data/seed.js` | 后端（前端只读） | 共享种子数据，深度冻结 |
+| `shared/workflow.js` | 后端（前端只读） | 重排草案生命周期工厂（preview / confirm / reject），仅 `assets/js/assistant.js` 与 `test/workflow.test.js` 消费 |
 | `server/**` | 后端 | HTTP 入口、路由、鉴权、内存存储 |
 | `assets/**` | 前端 | 页面脚本与样式 |
 | `index.html` | 前端 | 页面骨架与资源引用清单 |
 | `scripts/**` | 后端 | `scripts/build-engine.js`、`scripts/css-audit.mjs`、`scripts/build-mascot-v4.js` |
-| `test/**` | 后端 | `test/engine.test.js`、`test/api.test.js` |
+| `test/**` | 后端 | 全部测试：引擎单测、HTTP 冒烟、前端 VM 单测、资产门禁（当前 21 个文件） |
 | `docs/**` | 管理者 | 契约与说明文档 |
 
 跨目录改动规则：
@@ -117,9 +118,10 @@
 |---|---|---|---|---|---|
 | GET | `/api/health` | 免 | 无 | `{ ok, version, uptimeMs }` | 无 |
 | POST | `/api/auth/session` | 免 | 无（不接受任何身份字段） | `{ token, userId, expiresAt }` | E4290 |
-| GET | `/api/state` | 需 | 无 | `{ seed, replan, notifications, planBaseline }`；`planBaseline` 为 `null`（无已确认重排）或 `{ version, stale }`（进程内基线；任意新入库同步操作保守标脏，不代表已执行离线复核） | E4010 |
+| GET | `/api/state` | 需 | 无 | `{ seed, replan, notifications, planBaseline }`；`planBaseline` 为 `null`（无基线）或 `{ version, stale }`（进程内基线；任意新入库同步操作保守标脏；前端据其执行计划离线复核，见 `/api/plan/review`） | E4010 |
 | POST | `/api/feasibility` | 需 | `weeklyH`、`weeks`、`discount`、`demand` 均必填且须为有限数值 | `feasibility()` 返回 | E4010, E1001, E4290 |
 | POST | `/api/schedule` | 需 | `tasks`、`slots` 必填数组；`params` 可选对象 | `{ blocks, unplanned, version }` | E4010, E1001, E4290 |
+| POST | `/api/plan/review` | 需 | `id`（UUID）、`base`、`input`（schedule 入参）、`result`（客户端排程结果）；`ticket` 可选 | `{ status: 'committed', version }` 或 `{ status: 'conflict', reason, version, ticket? }`；同签名重放 24 小时内返回首次收据 | E4010, E1001, E3001, E4290 |
 | POST | `/api/replan` | 需 | `tasks`、`week` 必填数组；`params`、`history`、`locks` 可选对象；`timestamp` 可选 | `replan()` 返回；可提交结果附 `draftId`，不写业务记录 | E4010, E1001, E4290 |
 | POST | `/api/replan/confirm` | 需 | 仅 `draftId` 字符串 | 已确认重排结果；草案同身份、5 分钟内且仍在缓存中，重复确认不重写 | E4010, E1001, E2001, E3001, E4290 |
 | POST | `/api/replan/undo` | 需 | `snapshot` 必填对象 | `{ tasks, week }` | E4010, E1001, E4290 |
@@ -134,7 +136,7 @@
 |---|---|---|---|
 | E1001 | 400 | 请求参数非法或缺失 | 是 |
 | E2001 | 404 | 资源不存在 | 是 |
-| E3001 | 409 | 状态冲突 | 否，仅保留定义 |
+| E3001 | 409 | 状态冲突 | 是（重排草案版本过期 / 计划复核请求 ID 冲突） |
 | E3002 | 409 | 资源已存在 | 否，仅保留定义 |
 | E4001 | 200 | 幂等键重复，已返回首次结果 | 否，幂等命中直接返回 200 |
 | E4002 | 400 | 请求体过大或单批超过上限 200 | 是 |
@@ -144,7 +146,7 @@
 | E5001 | 500 | 服务内部错误 | 是 |
 | E9001 | 500 | 未分类异常 | 是 |
 
-限流（`server/auth.js` 的 `WRITE_LIMITS`，单进程固定窗口，单位 次/60 秒）：`POST /api/auth/session` 60（按来源 IP 隔离）、`POST /api/sync/ops` 60、`POST /api/replan` 与 `POST /api/replan/confirm` 与 `POST /api/replan/undo` 各 12、`POST /api/feasibility` 与 `POST /api/schedule` 与 `POST /api/attribute` 各 30；`GET /api/health` 与 `GET /api/state` 不限流。超限返回 `E4290` 与 `Retry-After` 响应头，不排队、不自动重试。
+限流（`server/auth.js` 的 `WRITE_LIMITS`，单进程固定窗口，单位 次/60 秒）：`POST /api/auth/session` 60（按来源 IP 隔离）、`POST /api/sync/ops` 60、`POST /api/replan` 与 `POST /api/replan/confirm` 与 `POST /api/replan/undo` 各 12、`POST /api/feasibility` 与 `POST /api/schedule` 与 `POST /api/plan/review` 与 `POST /api/attribute` 各 30；`GET /api/health` 与 `GET /api/state` 不限流。超限返回 `E4290` 与 `Retry-After` 响应头，不排队、不自动重试。
 
 ## 6. 前端到后端通信约定
 
@@ -158,7 +160,7 @@
 - 幂等键是 `opId`，分区内唯一；重复提交不再次写入，`accepted` 仍含该 `opId`。非空批次的 `serverSeq` 对应最后一条操作（若重复则为首次写入的序号），不是分区最新序号，也不能作为单调游标。客户端以 `accepted` 确认队列；上行 `baseSeq` 当前不参与服务端字段合并。
 - 字段级合并（`server/store/memory.js` 的 `policyOf`）：墓碑类 `deleted`、`isDeleted`、`deletedAt` 墓碑优先不可翻转；计数类 `count`、`sessionCount`、`sessions`、`times` 求和；`actual`、`durationMin`、`minutes`、`duration` 取最大值；其余字段最后写入优先（同 `clientTs` 时 `serverSeq` 大者为准）。
 
-- 基线 `version` 为服务端生成的版本标识，区别于浏览器执行事件关联的计划版本；`stale` 不是联网复核结果。普通新建计划不建立基线，服务进程重启后基线清空。
+- 基线 `version` 为服务端生成的版本标识，区别于浏览器执行事件关联的计划版本；`stale` 是新同步操作登记后的保守标脏标记。计划离线复核：前端把排程结果经 `POST /api/plan/review` 上送，服务端重算比对；基线缺失或不一致返回 `conflict`（附 `ticket`），携 `ticket` 重交直至 `committed`；收据幂等（同签名 24 小时内重放返回首次结果）。新建计划排程生效即建立基线，服务进程重启后基线与收据清空。
 
 ## 7. 兼容性硬要求
 
@@ -174,8 +176,8 @@
 
 | 检查项 | 命令 | 判定标准 |
 |---|---|---|
-| 引擎单测 + HTTP 冒烟 + 形象门禁 | `npm test` | 退出码 0，输出 `pass 62 fail 0`（当前 62 项全绿，来自 `test/engine.test.js`、`test/api.test.js` 与 `test/mascot.test.js`） |
+| 引擎单测 + HTTP 冒烟 + 前端 VM 单测 + 资产门禁 | `npm test` | 退出码 0，输出 `pass 126 fail 0`（当前 126 项全绿，覆盖引擎单测、HTTP 冒烟、前端 VM 单测与资产门禁） |
 | CSS 审计 | `npm run audit` | 退出码 0；存在 error 时退出码 1，仅 warn 仍为 0 |
-| 引擎产物重建校验 | `npm run build:engine` 后重算 `assets/js/rhythm.build.js` 的 SHA256 | 重建前后哈希一致（构建不写时间戳）；当前值 `0f3206b196acd8d72f220e28acdb1026127ff5139ebd908d96ff6cede7434242` |
-| 资源引用全量扫描 | 提取 `index.html` 中 `src`/`href` 的相对路径并逐个检查文件存在 | 缺失数为 0（当前 21 个引用） |
+| 引擎产物重建校验 | `npm run build:engine` 后重算 `assets/js/rhythm.build.js` 的 SHA256 | 重建前后哈希一致（构建不写时间戳）；当前值 `5cdc674e3af022a9f9c23a8f8a6f12847745a22c2acf29e50ca4329e8bd55986` |
+| 资源引用全量扫描 | 提取 `index.html` 中 `src`/`href` 的相对路径并逐个检查文件存在 | 缺失数为 0（当前 25 个引用） |
 | 服务冒烟 | `node server/main.js` 后请求 `GET /api/health` | HTTP 200 且 `ok` 为 `true` |

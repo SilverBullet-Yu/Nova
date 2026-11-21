@@ -203,6 +203,7 @@ window.ZX = window.ZX || {};
 
   function dropOverlay() {
     if (ZX.api && ZX.api.invalidatePendingSync) ZX.api.invalidatePendingSync();
+    try { if (ZX.api && ZX.api.clearPendingPlan) ZX.api.clearPendingPlan(); } catch (e) { /* 忽略 */ }
     try { window.localStorage.removeItem(OVERLAY_KEY); } catch (e) { /* 忽略 */ }
     try { window.localStorage.removeItem('zx.replanTrace'); } catch (e) { /* 忽略 */ }
     try { window.localStorage.removeItem('zx.scheduleTrace'); } catch (e) { /* 忽略 */ }

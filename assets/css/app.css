@@ -174,7 +174,8 @@ button{font-family:inherit;color:inherit}
 
 .topbar{
   position:relative;
-  height:56px;flex:0 0 56px;display:flex;align-items:center;gap:18px;
+  height:56px;flex:none;display:grid;align-items:center;column-gap:18px;
+  grid-template-columns:auto auto minmax(0,1fr) auto auto auto;
   padding:0 18px 0 16px;border-bottom:2px solid var(--txt);
   background:var(--topbar-bg);
 }
@@ -199,6 +200,8 @@ button{font-family:inherit;color:inherit}
 .ctx-bench b{color:var(--txt2);font-weight:500}
 .ctx-bench .r{font-size:11px}
 .spacer{flex:1}
+#syncMain{grid-column:4}
+#syncPlanner{margin-left:6px}
 .sync{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--txt3);letter-spacing:.02em}
 /* 状态点：圆形呼吸点（日漫语气） */
 .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);position:relative}
@@ -225,7 +228,7 @@ html[data-tab="chat"] .copilot{display:flex}
 html[data-tab="chat"] .bench{display:none}
 
 /* ---------- 顶栏导航 ---------- */
-.tnav{display:flex;align-items:stretch;height:56px;margin-left:12px;flex:0 0 auto}
+.tnav{grid-column:2;grid-row:1;display:flex;align-items:stretch;height:56px;margin-left:12px;flex:0 0 auto}
 .tnav button{
   position:relative;border:0;background:none;color:var(--txt3);cursor:pointer;
   display:flex;align-items:center;gap:7px;padding:0 13px;
@@ -1342,18 +1345,25 @@ html[data-font="l"]{--fs-body:17px;--lh-body:1.58}
 /* 字号三档（复用 .seg 原语） */
 .sd-font button{font-family:var(--mono);font-size:11.5px;letter-spacing:.04em;min-width:46px;padding:6px 10px}
 
-/* 移动端外壳：底部导航与对话入口（桌面隐藏） */
-.sd-mnav{display:none}
+/* 移动端对话入口（桌面隐藏） */
 .cp-open{display:none}
 
 /* 860 移动块 5/7 · 主块：单列外壳 / 顶栏 / 任务卡 / 触控目标（Stage D 主体） */
 @media (max-width:860px){
   /* 单列：只保留工作台 */
   .shell{grid-template-columns:minmax(0,1fr)}
-  .tnav{display:none}
 
   /* 顶栏精简 */
-  .topbar{height:52px;flex:0 0 52px;padding:0 14px;gap:12px}
+  .app .topbar{
+    --topbar-inset:12px;
+    --topbar-row:54px;
+    --nav-row:54px;
+    height:auto;flex:none;padding:0 var(--topbar-inset);gap:0 10px;
+    grid-template-columns:minmax(0,1fr) auto auto;
+    grid-template-rows:var(--topbar-row) var(--nav-row);
+    border-bottom:0;
+  }
+  .topbar #syncMain{grid-column:auto}
   .topbar .kbd{display:none}
   .topbar .brand{min-width:0;gap:9px}
   .brand-cn{font-size:14px}
@@ -1390,30 +1400,30 @@ html[data-font="l"]{--fs-body:17px;--lh-body:1.58}
   .sd-cell{height:30px}
 
   /* 顶部导航条（≤860）：位于顶栏下方，随页面滚动；活性色指示条在标签下缘 */
-  .sd-mnav{
+  .topbar .tnav{
     display:grid;grid-template-columns:repeat(5,minmax(0,1fr));
-    position:relative;flex:0 0 52px;
-    height:52px;
+    position:relative;grid-column:1/-1;grid-row:2;
+    height:var(--nav-row);margin-inline:calc(-1 * var(--topbar-inset));
     border-top:0;border-bottom:1px solid var(--line2);
     background:var(--bg);
   }
-  .sd-mnav::before{
+  .topbar .tnav::before{
     content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;pointer-events:none;
     background:linear-gradient(90deg,transparent,var(--cy-line) 22%,var(--cy-line) 78%,transparent);
   }
-  .sd-mnav button{
+  .topbar .tnav button{
     position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
     border:0;background:none;color:var(--txt3);padding:0;cursor:pointer;
     font:inherit;font-size:10.5px;letter-spacing:.1em;
     transition:color var(--dur) var(--ease),background var(--dur) var(--ease);
   }
-  .sd-mnav button svg{
+  .topbar .tnav button svg{
     width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;
     stroke-linecap:round;stroke-linejoin:round;
   }
-  .sd-mnav button:hover{color:var(--txt2);background:color-mix(in srgb,var(--txt) 6%,transparent)}
-  .sd-mnav button.on{color:var(--ac);background:transparent}
-  .sd-mnav button.on::before{
+  .topbar .tnav button:hover{color:var(--txt2);background:color-mix(in srgb,var(--txt) 6%,transparent)}
+  .topbar .tnav button.on{color:var(--ac);background:transparent;font-weight:400}
+  .topbar .tnav button.on::before{
     content:"";position:absolute;bottom:0;left:50%;width:24px;height:2px;margin-left:-12px;
     background:var(--ac);
   }
@@ -1498,7 +1508,7 @@ html[data-font="l"]{--fs-body:17px;--lh-body:1.58}
    只加强现有视觉语言，不改变业务结构
    ========================================================= */
 .topbar{
-  height:60px;flex-basis:60px;padding:0 24px;gap:20px;
+  height:60px;padding:0 24px;column-gap:20px;
   border-bottom-width:2px;
 }
 .brand{min-width:210px}
@@ -1538,10 +1548,8 @@ h1{font-size:34px;letter-spacing:0}
 }
 
 @media (max-width:860px){
-  .topbar{height:54px;flex-basis:54px;padding:0 12px;gap:10px}
   .brand{min-width:0}
   .brand .seal{width:24px;height:24px;flex-basis:24px}
-  .sd-mnav{height:54px;flex-basis:54px}
   .bench-body{padding:20px 14px 48px}
   .cp-body{padding-top:20px}
   .vhead{gap:12px;padding-bottom:16px}
@@ -1700,11 +1708,10 @@ h1{font-size:34px;letter-spacing:0}
   .erow{font-size:13px}          /* 对话内的引擎数据卡 */
 
   /* —— 外壳：顶栏与导航条收窄，让出内容高度 —— */
-  .topbar{height:50px;flex:0 0 50px}
-  .sd-mnav{height:48px;flex:0 0 48px}
-  .sd-mnav button{gap:3px}
-  .sd-mnav button svg{width:15px;height:15px}
-  .sd-mnav button.on::before{width:20px;margin-left:-10px}
+  .app .topbar{--topbar-row:50px;--nav-row:48px}
+  .topbar .tnav button{gap:3px}
+  .topbar .tnav button svg{width:15px;height:15px}
+  .topbar .tnav button.on::before{width:20px;margin-left:-10px}
 
   /* —— 按钮分级：行内次要动作回归紧凑档，44px 只保留给主操作与任务动作 —— */
   .sa-goal-new,.sc2-replan,.sb-b-btn,.sd-restore-btn,.sd-avail-ops .btn{height:36px;min-height:36px}
@@ -1765,7 +1772,7 @@ h1{font-size:34px;letter-spacing:0}
    ========================================================= */
 @media (max-width:1080px){
   /* 顶栏减负：引擎状态与键位提示让位给主导航，状态文字禁止折行 */
-  .topbar{gap:12px;padding:0 18px}
+  .topbar{column-gap:12px;padding:0 18px}
   .brand{min-width:0}
   .tnav{margin-left:8px}
   .tnav button{padding:0 9px;letter-spacing:.02em}

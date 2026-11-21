@@ -287,7 +287,48 @@ window.ZX = window.ZX || {};
   }
 
   /* ---------- 对外接口（HANDOFF 第 6 节） ---------- */
-  function getState() { return call('GET', '/api/state'); }
+  var PLAN_KEY = 'zx.pending_plan';
+  var PLAN_BASE = 'zx.server_plan_version';
+  var planInFlight = null;
+  function readPlanKey(key) {
+    try { return JSON.parse(window.localStorage.getItem(key) || 'null'); } catch (e) { return null; }
+  }
+  function writePlanKey(key, value) {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  }
+  function pendingPlan() { return readPlanKey(PLAN_KEY); }
+  function clearPendingPlan() { window.localStorage.removeItem(PLAN_KEY); }
+  function stagePlan(input, result) {
+    var base = readPlanKey(PLAN_BASE);
+    var p = { id: crypto.randomUUID(), input: input, result: result };
+    if (base) p.base = base.version;
+    if (ZX.state && ZX.state.currentPlanVersion) p.localVersion = ZX.state.currentPlanVersion();
+    writePlanKey(PLAN_KEY, p);
+    return p;
+  }
+  function reviewPlan(ticket) {
+    var p = pendingPlan();
+    if (!p) return Promise.resolve(null);
+    if (planInFlight) return planInFlight;
+    var body = ticket ? Object.assign({}, p, { ticket: ticket }) : p;
+    planInFlight = call('POST', '/api/plan/review', body).then(function (r) {
+      var current = pendingPlan();
+      if (r && r.status === 'committed' && current && current.id === p.id) {
+        writePlanKey(PLAN_BASE, { version: r.version });
+        clearPendingPlan();
+      }
+      return r;
+    }).finally(function () { planInFlight = null; });
+    return planInFlight;
+  }
+  function getState() {
+    return call('GET', '/api/state').then(function (r) {
+      if (!pendingPlan()) {
+        try { writePlanKey(PLAN_BASE, { version: r.planBaseline ? r.planBaseline.version : null }); } catch (e) { /* 本地存储不可用 */ }
+      }
+      return r;
+    });
+  }
   function feasibility(p) { return call('POST', '/api/feasibility', p || {}); }
   function schedule(p) { return call('POST', '/api/schedule', p || {}); }
   function replan(p) { return call('POST', '/api/replan', p || {}); }
@@ -303,6 +344,10 @@ window.ZX = window.ZX || {};
 
     /* 后端通信 */
     getState: getState,
+    stagePlan: stagePlan,
+    pendingPlan: pendingPlan,
+    clearPendingPlan: clearPendingPlan,
+    reviewPlan: reviewPlan,
     feasibility: feasibility,
     schedule: schedule,
     replan: replan,

@@ -40,17 +40,14 @@
         <div class="brand-en">大学生日常助理</div>
       </div>
     </div>
-    <nav class="tnav" id="rail" aria-label="主导航"></nav>
-    <div class="spacer"></div>
     <button class="cp-open" data-act="cp-open" type="button" aria-label="打开诺瓦"><img src="assets/img/avatar-v4.svg" width="22" height="22" alt="" /></button>
-    <div class="sync" id="syncMain"><span class="dot" id="syncDot"></span><span id="syncText">本地优先 · 已同步</span></div>
-    <div class="sync" id="syncPlanner" style="margin-left:6px"><span class="dot ac" id="plannerDot"></span><span id="plannerText">日程引擎 在线</span></div>
+    <div class="sync" id="syncMain"><span class="dot hide" id="syncDot"></span><span id="syncText"></span></div>
+    <div class="sync" id="syncPlanner"><span class="dot hide" id="plannerDot"></span><span id="plannerText"></span></div>
     <span class="kbd" title="按 / 聚焦输入框" aria-label="按斜杠键聚焦输入框">/</span>
+    <nav class="tnav" id="rail" aria-label="主导航"></nav>
   </header>
 
-  <!-- 主导航条：所有屏幕尺寸都位于顶端（桌面在顶栏内，移动端为顶栏下方的横向导航条） -->
-  <nav class="sd-mnav" id="sdMnav" aria-label="主导航"></nav>
-
+  <button class="btn" id="reviewPlan" type="button" data-act="review-plan" hidden>计划待复核 · 点击重试</button>
   <div class="shell">
     <section class="copilot">
       <!-- 对话页头部（诺瓦标题 / 副题 / 在线徽章）已撤除：与顶栏品牌区、同步状态重复；
@@ -73,20 +70,18 @@
 
     <main class="bench" id="main">
       <div class="bench-head">
-        <div class="bt" id="btTitle"><b>今日</b></div>
+        <div class="bt" id="btTitle"><b></b></div>
         <div class="ctx ctx-bench">
-          <span>目标 <b id="ctxGoal">2027 考研 · 计算机</b></span>
-          <span>秋季学期 · 第 3 周</span>
-          <span class="r" id="ctxR">R 1.08</span>
+          <span>目标 <b id="ctxGoal"></b></span>
+          <span class="r" id="ctxR"></span>
         </div>
         <div class="spacer"></div>
-        <div class="hm" id="btMeta">本机优先 · 已读取 8ms</div>
+        <div class="hm" id="btMeta"></div>
       </div>
       <div class="bench-body" id="view"></div>
     </main>
   </div>
 
-  <!-- 移动端（≤860px）：导航条已上移至顶栏下方；桌面隐藏 -->
 </div>
 
 <!-- 共享双模数据与引擎产物（引擎唯一实现在 shared/engine/，此文件由 npm run build:engine 生成） -->

@@ -85,11 +85,15 @@ function checkNumericFields(obj, fields) {
 
 function createRouter(store, auth) {
   const drafts = new Map();
+  const planReviews = new Map();
+  const planReceipts = new Map();
   const draftTtlMs = 5 * 60 * 1000;
   const maxDrafts = 128;
+  const receiptTtlMs = 24 * 60 * 60 * 1000;
+  const maxReceipts = 512;
 
   function revision(userId) {
-    return [store.getSeq(userId), store.getLatestReplan(userId)?.seq || 0].join(':');
+    return [store.getSeq(userId), store.getLatestReplan(userId)?.seq || 0, store.getPlanBaseline(userId)?.version || ''].join(':');
   }
   /* ── GET /api/health ── */
   function health() {
@@ -137,6 +141,52 @@ function createRouter(store, auth) {
       throw new ApiError('E1001', 'params 必须是对象');
     }
     return schedule({ tasks: b.tasks, slots: b.slots, params: b.params || {} });
+  }
+
+  function reviewPlan(body, userId) {
+    const b = needObject(body);
+    if (typeof b.id !== 'string' || !/^[0-9a-f-]{36}$/.test(b.id)) throw new ApiError('E1001', '计划请求 ID 无效');
+    const key = userId + ':' + b.id;
+    const signature = JSON.stringify([b.base, b.input, b.result]);
+    const previous = planReceipts.get(key);
+    if (previous) {
+      if (previous.expiresAt <= Date.now()) {
+        planReceipts.delete(key); /* 过期收据视为不存在，允许重新复核 */
+      } else if (previous.signature !== signature) {
+        throw new ApiError('E3001', '请求 ID 已用于其他计划');
+      } else {
+        return previous.response;
+      }
+    }
+    const result = scheduleRoute(b.input);
+    if (!result.blocks.length) throw new ApiError('E1001', '没有可提交的排程结果');
+    const baseline = store.getPlanBaseline(userId);
+    const version = baseline ? baseline.version : null;
+    const current = revision(userId);
+    if (JSON.stringify(result) !== JSON.stringify(b.result)) {
+      return { status: 'conflict', reason: 'result-changed', version };
+    }
+    const draft = planReviews.get(key);
+    const valid = draft && draft.ticket === b.ticket && draft.signature === signature &&
+      draft.revision === current && draft.expiresAt > Date.now();
+    if (!valid && (b.ticket || b.base !== version || (baseline && baseline.stale))) {
+      const ticket = draft && draft.signature === signature && draft.revision === current && draft.expiresAt > Date.now()
+        ? draft.ticket : randomUUID();
+      for (const [k, d] of planReviews) if (d.expiresAt <= Date.now()) planReviews.delete(k);
+      if (planReviews.size >= maxDrafts && !planReviews.has(key)) planReviews.delete(planReviews.keys().next().value);
+      planReviews.set(key, { ticket, signature, revision: current, expiresAt: Date.now() + draftTtlMs });
+      return { status: 'conflict', reason: baseline ? 'baseline-changed' : 'baseline-missing', version, ticket };
+    }
+    const response = { status: 'committed', version: randomUUID() };
+    store.recordSchedule(userId, response.version, result);
+    planReviews.delete(key);
+    /* 收据限界：过期清扫 + 容量上限（FIFO 淘汰），防长驻进程无界增长（与 drafts 同构） */
+    for (const [k, r] of planReceipts) if (r.expiresAt <= Date.now()) planReceipts.delete(k);
+    if (planReceipts.size >= maxReceipts && !planReceipts.has(key)) {
+      planReceipts.delete(planReceipts.keys().next().value);
+    }
+    planReceipts.set(key, { signature, response, expiresAt: Date.now() + receiptTtlMs });
+    return response;
   }
 
   /* ── POST /api/replan ── */
@@ -254,6 +304,7 @@ function createRouter(store, auth) {
     'GET /api/state': function (ctx) { return state(ctx.userId); },
     'POST /api/feasibility': function (ctx) { return feasibilityRoute(ctx.body); },
     'POST /api/schedule': function (ctx) { return scheduleRoute(ctx.body); },
+    'POST /api/plan/review': function (ctx) { return reviewPlan(ctx.body, ctx.userId); },
     'POST /api/replan': function (ctx) { return replanRoute(ctx.body, ctx.userId); },
     'POST /api/replan/confirm': function (ctx) { return replanConfirmRoute(ctx.body, ctx.userId); },
     'POST /api/replan/undo': function (ctx) { return undoRoute(ctx.body); },

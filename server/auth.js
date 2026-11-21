@@ -121,6 +121,7 @@ const WRITE_LIMITS = {
   'POST /api/replan/undo': { limit: 12, windowMs: 60000 },
   'POST /api/feasibility': { limit: 30, windowMs: 60000 },
   'POST /api/schedule': { limit: 30, windowMs: 60000 },
+  'POST /api/plan/review': { limit: 30, windowMs: 60000 },
   'POST /api/attribute': { limit: 30, windowMs: 60000 }
 };
 

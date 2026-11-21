@@ -42,7 +42,8 @@ window.ZX = window.ZX || {};
     if (dot && text) {
       if (online) {
         dot.className = 'dot';
-        text.textContent = pending > 0 ? ('本地优先 · 待上行 ' + pending) : '本地优先 · 已同步';
+        text.textContent = pending > 0 ? ('本地优先 · 待上行 ' + pending)
+          : (ZX.api.pendingPlan && ZX.api.pendingPlan() ? '本地优先 · 计划待复核' : '本地优先 · 已同步');
       } else {
         var label = pending > 0 ? ('离线 · 待上行 ' + pending) : '离线 · 本地计算';
         dot.className = 'dot off hide';
@@ -69,35 +70,35 @@ window.ZX = window.ZX || {};
       pDot.className = online ? 'dot ac' : 'dot off';
       pText.textContent = online ? '日程引擎 在线' : '日程引擎 离线';
     }
+    var review = U.$('#reviewPlan');
+    if (review && ZX.api.pendingPlan) review.hidden = !ZX.api.pendingPlan();
     var opEl = U.$('#opPending');
     if (opEl) opEl.textContent = pending;
   }
 
   /* ---------- 工作台 ---------- */
-  ZX.renderRail = function () {
-    U.$('#rail').innerHTML =
-      TABS.map(function (t) {
-        var on = ZX.state.tab === t.id;
-        return '<button data-act="tab" data-tab="' + t.id + '" class="' + (on ? 'on' : '') + '"' +
-          (on ? ' aria-current="page"' : '') + '>' +
-          '<svg viewBox="0 0 16 16">' + t.icon + '</svg><span>' + t.label + '</span></button>';
-      }).join('');
-    renderMnav();
-  };
+  var railButtons = [];
 
-  /* 移动端导航：与桌面同体系（图标上、单字下） */
-  function renderMnav() {
-    var el = U.$('#sdMnav');
-    if (!el) return;
-    el.innerHTML = TABS.map(function (t) {
-      var on = ZX.state.tab === t.id;
-      return '<button data-act="tab" data-tab="' + t.id + '" class="' + (on ? 'on' : '') + '"' +
-        (on ? ' aria-current="page"' : '') + '>' +
+  function initRail() {
+    var rail = U.$('#rail');
+    rail.innerHTML = TABS.map(function (t) {
+      return '<button type="button" data-act="tab" data-tab="' + t.id + '">' +
         '<svg viewBox="0 0 16 16" aria-hidden="true">' + t.icon + '</svg><span>' + t.label + '</span></button>';
     }).join('');
+    railButtons = rail.querySelectorAll('[data-tab]');
+    ZX.renderRail();
   }
 
-  /* 对话是主页面签：顶栏「诺瓦」入口与底部导航都只是切到该页，无覆盖层状态。
+  ZX.renderRail = function () {
+    railButtons.forEach(function (button) {
+      var on = ZX.state.tab === button.dataset.tab;
+      button.classList.toggle('on', on);
+      if (on) button.setAttribute('aria-current', 'page');
+      else button.removeAttribute('aria-current');
+    });
+  };
+
+  /* 对话是主页面签：顶栏「诺瓦」入口与主导航都只是切到该页，无覆盖层状态。
      聊天 DOM 持久（消息历史在 #chat 内），不参与 #view 重绘。 */
   ZX.render = function (options) {
     var S = ZX.state;
@@ -106,7 +107,7 @@ window.ZX = window.ZX || {};
       var f = S.feasibility();
       var rEl = U.$('#ctxR');
       if (rEl) ZX.ui.countTo(rEl, f.R, function (v) { return 'R ' + v.toFixed(2); });
-      U.$('#btTitle').innerHTML = '<b>' + tabLabel(S.tab) + '</b>';
+      U.$('#btTitle b').textContent = tabLabel(S.tab);
       U.$('#btMeta').textContent = BT_META[S.tab] || '';
       if (S.tab !== 'chat') U.$('#view').innerHTML = ZX.views[S.tab]();
       var gEl = U.$('#ctxGoal');
@@ -162,6 +163,7 @@ window.ZX = window.ZX || {};
     if (act === 'finish') { ZX.assistant.finishTask(b.dataset.id, false); return; }
     if (act === 'done') { ZX.assistant.finishTask(b.dataset.id, true); return; }
     if (act === 'buffer') { ZX.assistant.toggleBuffer(); return; }
+    if (act === 'review-plan') { ZX.reviewPendingPlan(true); return; }
     if (act === 'confirm-replan') { if (b.dataset.draft) ZX.assistant.confirmReplan(b.dataset.draft); return; }
     if (act === 'undo') { ZX.assistant.undoReplan(); return; }
     if (act === 'tired') { ZX.assistant.adoptTired(); return; }
@@ -247,6 +249,36 @@ window.ZX = window.ZX || {};
   });
 
   /* ---------- 后端探测（启动时 + 每次 API 调用失败时更新状态，不轮询） ---------- */
+  var planReviewRunning = false;
+  var deferredReview = null;
+  ZX.reviewPendingPlan = function (manual, staged) {
+    if (staged === true) updateSync();
+    var pending = ZX.api.pendingPlan();
+    if (planReviewRunning || !pending || (manual !== true && (deferredReview === pending.id || !ZX.api.isOnline()))) return;
+    if (pending.localVersion && pending.localVersion !== ZX.state.currentPlanVersion()) {
+      deferredReview = pending.id;
+      if (manual === true) ZX.ui.toast('本机计划已变化，请重新生成并确认计划。旧排程未上传。', 'warn');
+      return;
+    }
+    planReviewRunning = true;
+    ZX.api.reviewPlan().then(async function (r) {
+      while (r && r.status === 'conflict' && ZX.api.pendingPlan()?.id === pending.id) {
+        deferredReview = pending.id;
+        if (!r.ticket) {
+          ZX.ui.toast('云端重算结果已变化，保留本机计划；请重新生成并确认计划。', 'warn');
+          return;
+        }
+        var ok = await ZX.ui.confirm({ title: '再次确认计划同步',
+          body: '<p>云端计划基线已变化或缺失。本机排程已通过服务端重算；继续将以本机确认的排程更新云端基线，取消则保留本机计划并暂不上传。</p>' });
+        if (!ok || ZX.api.pendingPlan()?.id !== pending.id ||
+            (pending.localVersion && pending.localVersion !== ZX.state.currentPlanVersion())) return;
+        r = await ZX.api.reviewPlan(r.ticket);
+      }
+      if (r && r.status === 'committed') ZX.ui.toast('计划基线已同步', 'ok');
+    }).catch(function () { ZX.ui.toast('计划保留在本机，待联网复核。', 'warn'); })
+      .finally(function () { planReviewRunning = false; updateSync(); });
+  };
+
   function probeBackend() {
     ZX.api.health().then(function () {
       return ZX.api.getState().then(function (payload) {
@@ -265,7 +297,7 @@ window.ZX = window.ZX || {};
       });
     }).then(function () {
       if (!ZX.api.isOnline()) return;
-      return ZX.api.flushQueue().catch(function () { });
+      return ZX.api.flushQueue().catch(function () { }).then(ZX.reviewPendingPlan);
     }).catch(function () {
       /* 离线：完全保持本地种子数据，功能走本地降级链路 */
     });
@@ -301,6 +333,15 @@ window.ZX = window.ZX || {};
     ZX.state.folds = ZX.ui.loadFolds();
     if (ZX.flows && ZX.flows.settings) ZX.flows.settings.init();
     ZX.api.onStatus(updateSync);
+    var wasOnline = false;
+    ZX.api.onStatus(function (status) {
+      var recovered = !wasOnline && status.online;
+      wasOnline = status.online;
+      if (recovered) setTimeout(ZX.reviewPendingPlan, 0);
+    });
+    window.addEventListener('online', function () {
+      ZX.api.health().then(function () { ZX.reviewPendingPlan(); }).catch(function () {});
+    });
     updateSync();   /* 初始同步态：离线时顶栏显示「离线 · 本地计算」 */
     updateListen(); /* 初始聆听态：输入台头像换内联副本（离线时也能显示） */
 
@@ -308,7 +349,7 @@ window.ZX = window.ZX || {};
       return '<button class="chip" data-act="say" data-say="' + c + '">' + c + '</button>';
     }).join('');
 
-    ZX.renderRail();
+    initRail();
     ZX.render();
 
     ZX.assistant.say(greetingHtml(), '日程 · 本地');

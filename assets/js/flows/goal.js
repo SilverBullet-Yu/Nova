@@ -626,6 +626,12 @@ window.ZX = window.ZX || {};
         return;
       }
       applyScheduled(res, all, stamp, d, slots);
+      if (ZX.api && ZX.api.stagePlan) {
+        try {
+          ZX.api.stagePlan({ tasks: all, slots: slots, params: {} }, res);
+          if (ZX.reviewPendingPlan) ZX.reviewPendingPlan(false, true);
+        } catch (e) { ZX.ui.toast('计划已在本机生效，但无法保存待复核请求。', 'warn'); }
+      }
     }, function () {
       if (request === scheduleRequest && S.goalDraft === d) {
         traceSchedule('failed', S.currentPlanVersion ? S.currentPlanVersion() : null);

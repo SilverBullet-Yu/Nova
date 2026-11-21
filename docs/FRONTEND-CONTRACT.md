@@ -14,7 +14,7 @@
 
 | 文件 | 职责 |
 |---|---|
-| `index.html` | 页面骨架：顶栏、对话区 `.copilot`、工作台 `.bench`、导航容器 `#rail` / `#sdMnav`；首帧前读 `zx.ui_prefs` 写 `html[data-*]` |
+| `index.html` | 页面骨架：顶栏、对话区 `.copilot`、工作台 `.bench`、单一主导航 `#rail`（CSS Grid 在窄屏换到第二行；切页只更新当前项）；首帧前读 `zx.ui_prefs` 写 `html[data-*]` |
 | `assets/js/util.js` | 通用工具与视觉偏好（`ZX.util`）：`esc` / `hm` / `num` / 日期时段 / `prefs`·`applyPrefs`·`savePrefs`·`togglePref`·`setPref` |
 | `assets/js/ui.js` | 共享 UI 原语（`ZX.ui`）：`sheet` / `confirm` / `toast` / `fold` / `flowSheet` / `footNav` / `countTo` |
 | `assets/js/api.js` | 后端通信、超时降级、凭证与 op 写队列（`ZX.api`） |
@@ -27,7 +27,7 @@
 | `assets/img/*.svg` | 生成产物（`scripts/build-mascot-v4.js`），禁止手改 |
 | `assets/js/mascot-inline.js` | 生成产物（`scripts/build-mascot-v4.js`），待机 / 聆听 / 离线三枚头像的 base64 data URI 内联副本，导出 `window.ZX_MASCOT.idleAvatar` / `listenAvatar` / `offlineAvatar`，禁止手改 |
 
-`index.html` 的脚本顺序固定：`shared/data/seed.js` → `assets/js/rhythm.build.js` → `assets/js/mascot-inline.js` → `assets/js/util.js` → `assets/js/ui.js` → `assets/js/api.js` → `assets/js/engine.js` → `assets/js/state.js` → `assets/js/views/today.js` → `assets/js/views/plan.js` → `assets/js/views/data.js` → `assets/js/views/me.js` → `assets/js/assistant.js` → `assets/js/flows/goal.js` → `assets/js/flows/rescue.js` → `assets/js/flows/exec.js` → `assets/js/flows/planedit.js` → `assets/js/flows/settings.js` → `assets/js/main.js`。改顺序前先确认依赖链（util → ui → state → 视图 → assistant → flows → main）。
+`index.html` 的脚本顺序固定：`shared/data/seed.js` → `assets/js/rhythm.build.js` → `assets/js/mascot-inline.js` → `assets/js/util.js` → `assets/js/ui.js` → `assets/js/api.js` → `assets/js/engine.js` → `assets/js/state.js` → `assets/js/views/today.js` → `assets/js/views/plan.js` → `assets/js/views/data.js` → `assets/js/views/me.js` → `shared/workflow.js` → `assets/js/assistant.js` → `assets/js/flows/goal.js` → `assets/js/flows/rescue.js` → `assets/js/flows/exec.js` → `assets/js/flows/planedit.js` → `assets/js/flows/settings.js` → `assets/js/main.js`。改顺序前先确认依赖链（util → ui → state → 视图 → workflow → assistant → flows → main）。
 
 ### 2.2 流程模块 `assets/js/flows/`
 
@@ -52,15 +52,16 @@
 
 ### 2.4 前端调用面（`assets/js/api.js`）
 
-前端只经 `assets/js/api.js` 访问后端，共 9 个调用点，全部为 JSON：
+前端只经 `assets/js/api.js` 访问后端，共 10 个调用点，全部为 JSON：
 
 | 方法 | 路径 | 前端用途 |
 |---|---|---|
 | GET | `/api/health` | 健康探测（免鉴权） |
 | POST | `/api/auth/session` | 签发 Bearer 凭证（免鉴权） |
-| GET | `/api/state` | 拉取初始状态；响应含 `planBaseline: null` 或 `{ version, stale }`，前端尚未使用该字段执行联网复核 |
+| GET | `/api/state` | 拉取初始状态；响应含 `planBaseline: null` 或 `{ version, stale }`，前端以该字段驱动计划离线复核（见 `/api/plan/review`） |
 | POST | `/api/feasibility` | 可行性评估 |
 | POST | `/api/schedule` | 排程 |
+| POST | `/api/plan/review` | 计划离线复核：排程生效后上送 `{ id, input, result, base? }`，服务端重算比对基线；`conflict` 时携 `ticket` 重交直至 `committed`，离线时挂起待恢复联网补审 |
 | POST | `/api/replan` | 四级重排预览（不写业务记录） |
 | POST | `/api/replan/confirm` | 按 `draftId` 确认在线重排（含普通和放弃项）；不兼容旧 `result` 请求 |
 | POST | `/api/replan/undo` | 撤销重排 |
@@ -89,11 +90,13 @@
 | `zx.folds` | `ui.js` | 折叠区展开态（只保留值为 `true` 的键） | 点击 `data-act="fold"` 切换后 `ZX.ui.saveFolds()` |
 | `zx.op_queue` | `api.js` | 待上行 op 数组，上限 200 条 | `ZX.api.queueOp()`；服务端确认后置 `pending: false` |
 | `zx.auth_token` | `api.js` | `{ token, userId, expiresAt }` | `POST /api/auth/session` 成功后写入；本地按 `expiresAt` 预判失效 |
+| `zx.pending_plan` | `api.js` | 待复核计划 `{ id, input, result, base?, localVersion? }` | 排程生效后 `stagePlan()` 写入；复核 `committed` 或删除全部数据时清除 |
+| `zx.server_plan_version` | `api.js` | `{ version }`，取自服务端 `planBaseline.version` | `getState()` 成功且无待复核计划时写入；复核 `committed` 后更新 |
 | `zx.ui_prefs` | `util.js` | `{ grid, glow, motion, font }` | 「我的 → 显示与动效」开关与字号切换 |
 | `zx.trash` | `settings.js` | 删除全部数据前的快照 | 「删除全部数据」时写入；超 7 天自动清除 |
 | `zx.flash` | `settings.js` | 一次性提示文案 | 删除后写入，重载时由 `settings.init()` 消费并 toast |
 
-刷新后保留：`zx.overlay` 覆盖的用户数据、`zx.folds`、`zx.ui_prefs`、`zx.op_queue`、`zx.auth_token`、7 天内的 `zx.trash`。
+刷新后保留：`zx.overlay` 覆盖的用户数据、`zx.folds`、`zx.ui_prefs`、`zx.op_queue`、`zx.auth_token`、`zx.pending_plan`、`zx.server_plan_version`、7 天内的 `zx.trash`。
 刷新后不保留：计时四元组、`snapshot` / `replanned` / `replanRecord` / `pendingReplan`、`consecutiveZeroDays` / `interrupted` / `rescueRecord`、`goalDraft` / `planDraft`、当前页签。
 
 本地优先：`applyOverlay()` 只在启动时或服务端状态被采纳后执行——`main.js` 的 `probeBackend()` 仅当 `bootOverlayLoaded()` 为真才回读，避免启动渲染写下的种子投影覆盖服务端回放。
@@ -116,7 +119,7 @@
 - 常用 token：底色 `--bg` `#FBF7EF` / `--panel` `#FFFFFF` / `--panel2` `#F7F4EC`；描边 `--line` `#141922`；文本 `--txt` `#141922` / `--txt2` `#495261` / `--txt3` `#6C7684`；活性色 `--ac` `#3161C1`；装饰 `--pink` `#F48FB1`；朱砂 `--cinnabar` `#A03B2C`；语义色 `--warn` `#8A5A1E` / `--bad` `#A03B2C` / `--ok` `#2E6A4E`；科目色 `--m-math` / `--m-en` / `--m-408` / `--m-pol`；字号 `--fs-body` 15px / `--lh-body` 1.62；圆角 `--r` 10px / `--r-xs` 4px；动效 `--ease` `cubic-bezier(.2,.7,.3,1)` / `--dur` .12s / `--dur-mid` .22s / `--dur-slow` .3s；高度 `--shadow-card` `none` / `--shadow-pop` `none`；划重点 `--hlbg` `#FFF6C9`。
 - 纸纹与网点不用类名实现：`body::before` 是网点（`radial-gradient`，`opacity: var(--grid-opacity)`，`--grid-size` 24px），`body::after` 是纸纤维（`repeating-linear-gradient`，`opacity: calc(.7 * var(--glow-opacity))`）。开关分别是 `html[data-grid="off"]` → `--grid-opacity: 0` 与 `html[data-glow="off"]` → `--glow-opacity: 0`。
 - 层级不用弥散阴影表达：`--shadow-card` 与 `--shadow-pop` 恒为 `none`，靠 2px 墨线与底色平涂分层；浮出物用 2px 墨框加遮罩压暗。
-- 断点：`@media (max-width:860px)` 为主移动断点（另有 1080px、640px、360px）。≤860px 时 `.tnav` 隐藏、`.sd-mnav` 显示为 5 列等分导航条，位于顶栏下方而非底部；`.bench-head` 隐藏；任务表隐藏 `.tt-head` 与 `.c-idx` / `.c-time` / `.c-est` / `.c-wt`，数值改由 `.tt-m` 元行承载。
+- 断点：`@media (max-width:860px)` 为主移动断点（另有 1080px、640px、360px）。≤860px 时顶栏改两行网格：第一行品牌与同步位，`.tnav`（唯一主导航 `#rail`）占满第二行（`grid-row:2`、`grid-column:1/-1`，高度 `--nav-row`）；`.bench-head` 隐藏；任务表隐藏 `.tt-head` 与 `.c-idx` / `.c-time` / `.c-est` / `.c-wt`，数值改由 `.tt-m` 元行承载。
 - 科目色不写死在 CSS：由 `state.js` 的 `SUBJ` 与 `shared/data/seed.js` 的 `subjectColors` 注入行内 `--c` 变量。
 - 新样式追加到 `app.css` 末尾对应区块，不重排既有规则；新增类名沿用现有前缀族（`.sa-` 目标、`.sb-` 挽救、`.sc-` 执行、`.sc2-` 计划交互、`.sd-` 设置）。
 
@@ -164,7 +167,7 @@
 | 检查 | 命令 | 判定标准 |
 |---|---|---|
 | 语法 | `node --check assets/js/<改动文件>.js` | 退出码 0 |
-| 单测与冒烟 | `npm test` | 62 项全过（`test/engine.test.js` + `test/api.test.js` + `test/mascot.test.js`）；`pretest` 先跑 `build:engine` |
+| 单测与冒烟 | `npm test` | 126 项全过（引擎单测 + HTTP 冒烟 + 前端 VM 单测 + 资产门禁）；`pretest` 先跑 `build:engine` |
 | 形象门禁 | `npm test`（`test/mascot.test.js`） | 素材 14 个齐全；内联副本与源素材逐字节一致；生成器幂等——重跑 `build-mascot-v4.js` 不产生差异，不一致时测试失败并自动还原工作区 |
 | 引擎产物同步 | `npm run build:engine` 后确认 `assets/js/rhythm.build.js` 无差异 | 改过 `shared/engine/*.js` 必须重跑；产物与源码字节一致 |
 | CSS 审计 | `npm run audit` | 退出码 0；仅 warn（死 token / 死类候选）可过，存在 error 必须先修 |
