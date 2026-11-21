@@ -18,7 +18,7 @@
  *
  * ── 限流 ──────────────────────────────────────────────────────────────────
  * · 固定窗口，单进程内存，按「身份 + 路由」隔离；未认证路由（签发凭证）按来源 IP 隔离。
- * · 阈值见 WRITE_LIMITS；超限返回 429 + Retry-After，不做排队与自动重试。
+ * · 阈值由 server/api/routes.js 路由注册表的 limit 字段声明；超限返回 429 + Retry-After。
  */
 
 const crypto = require('node:crypto');
@@ -107,23 +107,10 @@ function readBearer(req) {
 }
 
 /* ── 写接口限流（单进程固定窗口）──────────────────────────────────────────
- * 阈值含义：同一身份（未认证路由按 IP）在 windowMs 内最多允许 limit 次请求。
- * 触发后返回 429；窗口内不自动续期，也不做滑动窗口平滑。
+ * 各写接口的阈值由 server/api/routes.js 路由注册表的 limit 字段声明（单一事实源，
+ * 新增端点不会漏配）；本模块只提供桶机制：同一身份（未认证路由按 IP）在 windowMs
+ * 内最多允许 limit 次请求，触发后返回 429；窗口内不自动续期，也不做滑动窗口平滑。
  * ----------------------------------------------------------------------- */
-const WRITE_LIMITS = {
-  /* 签发凭证按来源 IP 限制，避免匿名刷身份。
-     来源 IP 由 clientIp() 解析：默认取 TCP 对端地址；部署在网关后设 NOVA_TRUST_PROXY=1
-     采信 X-Forwarded-For 最后一跳（网关追加的真实客户端 IP），避免全部访客共享同一桶。 */
-  'POST /api/auth/session': { limit: 60, windowMs: 60000 },
-  'POST /api/sync/ops': { limit: 60, windowMs: 60000 },
-  'POST /api/replan': { limit: 12, windowMs: 60000 },
-  'POST /api/replan/confirm': { limit: 12, windowMs: 60000 },
-  'POST /api/replan/undo': { limit: 12, windowMs: 60000 },
-  'POST /api/feasibility': { limit: 30, windowMs: 60000 },
-  'POST /api/schedule': { limit: 30, windowMs: 60000 },
-  'POST /api/plan/review': { limit: 30, windowMs: 60000 },
-  'POST /api/attribute': { limit: 30, windowMs: 60000 }
-};
 
 /** key → { count, resetAt } */
 const buckets = new Map();
@@ -180,7 +167,6 @@ module.exports = {
   issueSession: issueSession,
   verifyToken: verifyToken,
   readBearer: readBearer,
-  WRITE_LIMITS: WRITE_LIMITS,
   hitLimit: hitLimit,
   clientIp: clientIp
 };

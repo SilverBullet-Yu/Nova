@@ -248,11 +248,6 @@ function reset() {
   partitions.clear();
 }
 
-/** 静态种子：所有用户共享同一份初始数据，但分区内各自持有副本 */
-function getSeed() {
-  return clone(seed);
-}
-
 function getNotifications(userId) {
   const n = partitionOf(userId).state.notif || {};
   return [
@@ -329,10 +324,10 @@ function applyOps(userId, ops) {
 
 module.exports = {
   reset: reset,
-  getSeed: getSeed,
-  /** 该用户分区合并后的状态（契约字段名为 seed，内容是本分区的当前快照） */
+  /** 该用户分区合并后的状态快照（仅测试检查内部结构用；克隆返回，
+      避免业务代码经此引用绕过 applyOps 的幂等索引与合并策略直写分区） */
   getModel: function (userId) {
-    return partitionOf(userId).state;
+    return clone(partitionOf(userId).state);
   },
   getSeq: function (userId) {
     return partitionOf(userId).seq;
@@ -360,8 +355,5 @@ module.exports = {
     p.planBaseline = { version, seq: p.seq, record: clone(result) };
   },
   applyOps: applyOps,
-  mergeField: mergeField,
-  policyOf: policyOf,
-  MAX_SYNC_BATCH: MAX_SYNC_BATCH,
-  BASE_SEQ: BASE_SEQ
+  MAX_SYNC_BATCH: MAX_SYNC_BATCH
 };

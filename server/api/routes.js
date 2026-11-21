@@ -298,18 +298,25 @@ function createRouter(store, auth) {
     return store.applyOps(userId, ops);
   }
 
+  /* ── 路由注册表（单一事实源）───────────────────────────────────────────
+   * 路径、处理器、是否免鉴权（public）与限流阈值（limit）集中声明，
+   * main.js 的鉴权与限流编排只读本表元数据——避免「路由 / 免鉴权名单 / 限流表」
+   * 三处分散导致新增端点漏配（曾致 /api/plan/review 短暂成为唯一无限流写端点）。
+   * 未声明的路径不注册即不存在（404 E2001），无从绕过。
+   * --------------------------------------------------------------------- */
+  const L = (limit, windowMs) => ({ limit: limit, windowMs: windowMs });
   const routes = {
-    'GET /api/health': function () { return health(); },
-    'POST /api/auth/session': function () { return authSessionRoute(); },
-    'GET /api/state': function (ctx) { return state(ctx.userId); },
-    'POST /api/feasibility': function (ctx) { return feasibilityRoute(ctx.body); },
-    'POST /api/schedule': function (ctx) { return scheduleRoute(ctx.body); },
-    'POST /api/plan/review': function (ctx) { return reviewPlan(ctx.body, ctx.userId); },
-    'POST /api/replan': function (ctx) { return replanRoute(ctx.body, ctx.userId); },
-    'POST /api/replan/confirm': function (ctx) { return replanConfirmRoute(ctx.body, ctx.userId); },
-    'POST /api/replan/undo': function (ctx) { return undoRoute(ctx.body); },
-    'POST /api/attribute': function (ctx) { return attributeRoute(ctx.body); },
-    'POST /api/sync/ops': function (ctx) { return syncOpsRoute(ctx.body, ctx.userId); }
+    'GET /api/health': { public: true, limit: null, handler: function () { return health(); } },
+    'POST /api/auth/session': { public: true, limit: L(60, 60000), handler: function () { return authSessionRoute(); } },
+    'GET /api/state': { public: false, limit: null, handler: function (ctx) { return state(ctx.userId); } },
+    'POST /api/feasibility': { public: false, limit: L(30, 60000), handler: function (ctx) { return feasibilityRoute(ctx.body); } },
+    'POST /api/schedule': { public: false, limit: L(30, 60000), handler: function (ctx) { return scheduleRoute(ctx.body); } },
+    'POST /api/plan/review': { public: false, limit: L(30, 60000), handler: function (ctx) { return reviewPlan(ctx.body, ctx.userId); } },
+    'POST /api/replan': { public: false, limit: L(12, 60000), handler: function (ctx) { return replanRoute(ctx.body, ctx.userId); } },
+    'POST /api/replan/confirm': { public: false, limit: L(12, 60000), handler: function (ctx) { return replanConfirmRoute(ctx.body, ctx.userId); } },
+    'POST /api/replan/undo': { public: false, limit: null, handler: function (ctx) { return undoRoute(ctx.body); } },
+    'POST /api/attribute': { public: false, limit: L(30, 60000), handler: function (ctx) { return attributeRoute(ctx.body); } },
+    'POST /api/sync/ops': { public: false, limit: L(60, 60000), handler: function (ctx) { return syncOpsRoute(ctx.body, ctx.userId); } }
   };
 
   /**
@@ -318,14 +325,14 @@ function createRouter(store, auth) {
    */
   function handle(ctx) {
     const key = ctx.method + ' ' + ctx.pathname;
-    const handler = routes[key];
-    if (!handler) {
+    const entry = routes[key];
+    if (!entry) {
       /* 路径存在但方法不符 → E1001；路径不存在 → E2001 */
       const otherMethod = Object.keys(routes).some((k) => k.slice(k.indexOf(' ')) === key.slice(key.indexOf(' ')));
       throw new ApiError(otherMethod ? 'E1001' : 'E2001', otherMethod ? '方法不支持：' + key : '接口不存在：' + key);
     }
     try {
-      return { status: 200, body: handler(ctx) };
+      return { status: 200, body: entry.handler(ctx) };
     } catch (err) {
       if (err instanceof ApiError) throw err;
       /* 引擎入参异常统一映射为 E1001 */
@@ -336,7 +343,7 @@ function createRouter(store, auth) {
     }
   }
 
-  return { handle: handle, routes: routes, VERSION: VERSION };
+  return { handle: handle, routes: routes };
 }
 
-module.exports = { createRouter: createRouter, ApiError: ApiError, ERRORS: ERRORS, VERSION: VERSION };
+module.exports = { createRouter: createRouter, ApiError: ApiError };

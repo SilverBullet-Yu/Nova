@@ -13,37 +13,18 @@
  */
 
 const http = require('node:http');
-const fs = require('node:fs');
-const path = require('node:path');
 const { URL } = require('node:url');
 
 const { createRouter, ApiError } = require('./api/routes.js');
 const store = require('./store/memory.js');
 const auth = require('./auth.js');
+const { sendJson, sendError } = require('./resp.js');
+const { serveStatic } = require('./static.js');
 
-const ROOT = path.resolve(__dirname, '..');
 /* 绑定地址：部署环境要求 0.0.0.0 才能被反向代理访问；本地开发可用 HOST=127.0.0.1 收紧。 */
 const DEFAULT_HOST = '0.0.0.0';
 const DEFAULT_PORT = 8787;
 const MAX_BODY_BYTES = 1024 * 1024;
-
-const MIME = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.ico': 'image/x-icon',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.txt': 'text/plain; charset=utf-8',
-  '.map': 'application/json; charset=utf-8'
-};
 
 /**
  * CORS 策略：
@@ -73,21 +54,7 @@ function corsHeaders(req) {
   };
 }
 
-function sendJson(res, status, obj, extraHeaders) {
-  const payload = JSON.stringify(obj === undefined ? null : obj);
-  const headers = Object.assign({
-    'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': Buffer.byteLength(payload),
-    'Cache-Control': 'no-store'
-  }, extraHeaders || {});
-  res.writeHead(status, headers);
-  res.end(payload);
-}
-
-function sendError(res, code, message, status, extraHeaders) {
-  const st = status || 500;
-  sendJson(res, st, { error: { code: code, message: message } }, extraHeaders);
-}
+/* JSON 收发与统一错误形状在 server/resp.js；静态托管在 server/static.js。 */
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -124,48 +91,8 @@ function readBody(req) {
   });
 }
 
-/** 静态资源：仅放行 /、/index.html、/assets/*、/shared/*，并做目录穿越防护 */
-function resolveStatic(pathname) {
-  let rel = pathname;
-  if (rel === '/' || rel === '') rel = '/index.html';
-  const allowed = rel === '/index.html'
-    || rel.startsWith('/assets/')
-    || rel.startsWith('/shared/');
-  if (!allowed) return null;
-  let decoded;
-  try {
-    decoded = decodeURIComponent(rel);
-  } catch (e) {
-    return null;
-  }
-  const abs = path.resolve(ROOT, '.' + decoded);
-  if (abs !== ROOT && !abs.startsWith(ROOT + path.sep)) return null;
-  return abs;
-}
-
-function serveStatic(res, pathname) {
-  const abs = resolveStatic(pathname);
-  if (!abs) {
-    sendError(res, 'E2001', '静态资源不存在：' + pathname, 404);
-    return;
-  }
-  fs.stat(abs, (err, st) => {
-    if (err || !st.isFile()) {
-      sendError(res, 'E2001', '静态资源不存在：' + pathname, 404);
-      return;
-    }
-    const ext = path.extname(abs).toLowerCase();
-    res.writeHead(200, {
-      'Content-Type': MIME[ext] || 'application/octet-stream',
-      'Content-Length': st.size,
-      'Cache-Control': 'no-cache'
-    });
-    fs.createReadStream(abs).pipe(res);
-  });
-}
-
-/** 无需凭证即可访问的路由：健康检查与凭证签发本身 */
-const PUBLIC_ROUTES = new Set(['GET /api/health', 'POST /api/auth/session']);
+/* 静态托管与响应原语已拆至 server/static.js 与 server/resp.js；
+ * 鉴权与限流的逐路由判定以 routes.js 注册表元数据（public / limit）为单一事实源。 */
 
 function createServer() {
   const router = createRouter(store, auth);
@@ -196,10 +123,13 @@ function createServer() {
       return;
     }
 
-    /* ── 鉴权：身份只从 Bearer 凭证解析，请求体不参与身份判定 ── */
+    /* ── 鉴权：身份只从 Bearer 凭证解析，请求体不参与身份判定。
+          路由注册表 public === true 的入口（健康检查、凭证签发本身）免鉴权；
+          未注册路径与受保护路径同样要求凭证，保持 401 先于 404 的既有行为 ── */
     const routeKey = req.method + ' ' + pathname;
+    const entry = router.routes[routeKey];
     let userId = null;
-    if (!PUBLIC_ROUTES.has(routeKey)) {
+    if (!entry || !entry.public) {
       const identity = auth.verifyToken(auth.readBearer(req));
       if (!identity) {
         sendError(res, 'E4010', '未提供有效凭证，请先调用 POST /api/auth/session', 401,
@@ -209,8 +139,8 @@ function createServer() {
       userId = identity.userId;
     }
 
-    /* ── 写接口限流：已认证按 userId 隔离，签发凭证按来源 IP 隔离 ── */
-    const rule = auth.WRITE_LIMITS[routeKey];
+    /* ── 写接口限流：阈值随路由注册表 limit 字段声明；已认证按 userId 隔离，签发凭证按来源 IP 隔离 ── */
+    const rule = entry && entry.limit;
     if (rule) {
       const who = userId
         ? 'user:' + userId
@@ -281,6 +211,7 @@ if (require.main === module) {
     process.stdout.write('  GET  /api/state         初始全量状态\n');
     process.stdout.write('  POST /api/feasibility   可行性评估\n');
     process.stdout.write('  POST /api/schedule      排程\n');
+    process.stdout.write('  POST /api/plan/review   计划离线复核\n');
     process.stdout.write('  POST /api/replan        四级重排（含快照）\n');
     process.stdout.write('  POST /api/replan/undo   撤销重排\n');
     process.stdout.write('  POST /api/replan/confirm 确认放弃并落库\n');
@@ -292,4 +223,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { createServer: createServer, start: start, store: store, ROOT: ROOT, DEFAULT_PORT: DEFAULT_PORT };
+module.exports = { start: start };

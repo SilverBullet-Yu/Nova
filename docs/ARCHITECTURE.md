@@ -37,7 +37,7 @@
 
 ### 3.2 服务端分层（`../server/`）
 
-`../server/main.js`（HTTP 入口：静态托管、CORS、鉴权、限流、请求体上限）→ `../server/api/routes.js`（路由表与入参校验，错误统一形状 `{ error: { code, message } }`）→ `../server/auth.js`（凭证签发校验、写接口限流）→ `../server/store/memory.js`（用户分区、op 合并、幂等索引）。
+`../server/main.js`（HTTP 编排：CORS、鉴权与限流、请求体上限）→ `../server/api/routes.js`（路由注册表：路径 / 处理器 / `public` / `limit` 元数据单一声明，入参校验，错误统一形状 `{ error: { code, message } }`）→ `../server/auth.js`（凭证签发校验、限流桶机制）→ `../server/store/memory.js`（用户分区、op 合并、幂等索引）。响应原语与静态托管分别拆至 `../server/resp.js` 与 `../server/static.js`（白名单 `/`、`/index.html`、`/assets/*`、`/shared/*`，目录穿越防护）。
 
 静态托管白名单仅 `/`、`/index.html`、`/assets/*`、`/shared/*`，并做目录穿越防护；其余路径返回 404 / `E2001`。
 
