@@ -81,7 +81,7 @@ function shaftEar(p0, p1, wb, wt) {
     'L' + b[0].toFixed(1) + ' ' + b[1].toFixed(1) + 'Z';
 }
 
-/* 三段递减光柱：由实到淡，尖端收细 */
+/* 三段递减光柱：由实到淡，尖端收细；端点一圈低辉光晕（宪章 §2.3：单层 opacity ≤ .3，无扩散） */
 function taperShaft(p0, p1, wb, wt, fills) {
   var d1 = [p0[0] + (p1[0] - p0[0]) * 0.42, p0[1] + (p1[1] - p0[1]) * 0.42];
   var d2 = [p0[0] + (p1[0] - p0[0]) * 0.78, p0[1] + (p1[1] - p0[1]) * 0.78];
@@ -89,6 +89,7 @@ function taperShaft(p0, p1, wb, wt, fills) {
   return '<path d="' + shaftEar(p0, d1, wb, w1) + '" fill="' + fills[0] + '"/>' +
     '<path d="' + shaftEar(d1, d2, w1, w2) + '" fill="' + fills[1] + '"/>' +
     '<path d="' + shaftEar(d2, p1, w2, wt) + '" fill="' + fills[2] + '"/>' +
+    '<circle cx="' + p1[0] + '" cy="' + p1[1] + '" r="' + (wt * 2.2).toFixed(1) + '" fill="' + fills[2] + '" opacity=".3"/>' +
     '<circle cx="' + p1[0] + '" cy="' + p1[1] + '" r="' + wt + '" fill="' + fills[2] + '"/>';
 }
 
@@ -98,6 +99,9 @@ function faceIdle(c, o) {
   var lh = 24 * eyeH, rh = 22 * eyeH;
   var ly = 143 - lh / 2, ry = 133 - rh / 2;
   return '<rect x="140" y="104" width="31" height="23" rx="8" fill="' + c.glare + '"/>' +
+    /* 低辉光垫层（宪章 §2.3：单层同色 opacity ≤ .3，无扩散多层）：竖眼读作微微发光 */
+    '<rect x="114.5" y="' + (ly - 3).toFixed(1) + '" width="12" height="' + (lh + 6).toFixed(1) + '" rx="6" fill="' + c.eye + '" opacity=".2"/>' +
+    '<rect x="148.5" y="' + (ry - 3).toFixed(1) + '" width="11.5" height="' + (rh + 6).toFixed(1) + '" rx="5.75" fill="' + c.eye + '" opacity=".2"/>' +
     '<rect x="117" y="' + ly.toFixed(1) + '" width="7" height="' + lh.toFixed(1) + '" rx="3.5" fill="' + c.eye + '"/>' +
     '<rect x="151" y="' + ry.toFixed(1) + '" width="6.5" height="' + rh.toFixed(1) + '" rx="3.25" fill="' + c.eye + '"/>' +
     '<rect x="118.4" y="' + (ly + 4).toFixed(1) + '" width="2.3" height="' + (lh * 0.4).toFixed(1) + '" rx="1.15" fill="' + c.eyeHi + '"/>' +
