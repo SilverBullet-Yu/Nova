@@ -31,7 +31,7 @@
 | 引擎桥接 | `engine.js` | 后端优先、本地产物兜底的调用编排；`feasibilityNow`/`attributeNow` 为同步本地入口 |
 | 原语 | `ui.js`、`util.js` | 提示/弹层/焦点等 UI 原语与通用工具 |
 | 对话 | `assistant.js` | 意图路由，重排/撤销/降载/通知等对话动作 |
-| 流程 | `flows/goal.js`、`flows/rescue.js`、`flows/exec.js`、`flows/planedit.js`、`flows/settings.js` | 目标落地、中断挽救、执行记录、计划编辑、设置与数据清理 |
+| 流程 | `flows/replan.js`、`flows/goal.js`、`flows/rescue.js`、`flows/exec.js`、`flows/planedit.js`、`flows/settings.js` | 重排域、目标落地、中断挽救、执行记录、计划编辑、设置与数据清理 |
 | 视图 | `views/today.js`、`views/plan.js`、`views/data.js`、`views/me.js` | 四个子页渲染 |
 | 装配 | `main.js` | 页签（对话/今日/计划/数据/我的，对话为默认）、事件绑定、渲染循环与 overlay 落盘 |
 
@@ -118,7 +118,7 @@
 | 流程 | 路径 | 要点 |
 | --- | --- | --- |
 | 目标落地→可行性→拆解→排程 | `flows/goal.js` | 折扣 `DISCOUNT 0.85`；基准工时 `{ 考研 913, 考公 660, 项目导学 520 }` 小时；基础系数 `{ 零基础 1.30, 一轮 1.00, 二轮 0.75, 多战 0.60 }`；`R < 0.70` 阻断进入拆解；单计划项 `est` 限 15–240 分钟、步长 15；排程槽位为每天 18:00–22:00 每 30 分钟一格（8 格）加 22:00–23:00 两个 30 分钟弹性位；结果写 `tasks`/`week`/`weekShift`/`buffer` |
-| 重排→逐条否决/撤销 | `assistant.js`、`flows/planedit.js` | 重排走 `ZX.engine.replan`；`verdict='blocked'` 即停止并转目标校准；`needsConfirmation` 需 `confirmReplan` 后才落库；否决 `veto` 中压缩项从快照取回原工时并清 `degraded`，顺延项清 `deferred`；撤销 `undoReplan` 反向应用快照 |
+| 重排→逐条否决/撤销 | `flows/replan.js`、`flows/planedit.js` | 重排走 `ZX.engine.replan`；`verdict='blocked'` 即停止并转目标校准；`needsConfirmation` 需 `confirmReplan` 后才落库；否决 `veto` 中压缩项从快照取回原工时并清 `degraded`，顺延项清 `deferred`；撤销 `undoReplan` 反向应用快照 |
 | 中断挽救 | `flows/rescue.js` | 由 `sessions` 算连续无记录天数，达 3 天（`THRESHOLD 3`）判定中断；剩余天数 = 7 减断更天数（下限 1）；三选一压缩（`COMPRESS_RATE 0.40`，下限 15 分钟）/顺延/降级，两屏完成（缺口与方式→确认摘要），确认前不写状态 |
 | 执行记录→偏差归因 | `flows/exec.js` | 记录 `status` 取 `done`/`partial`/`skip`/`backfill`，感受词独立存 `feel`；完成度 100% 置 `done=true` 且 `actual=minutes`，不足 100% 则累加 `actual` 并按部分完成折算 `est`；记录后立即跑 `attributeNow`，命中结果计入 `attrCounts` |
 | 归因→周报 | `views/data.js`、`flows/exec.js` | 周报与归因的数据源是本地执行记录真算，`attrCounts` 与 `replanHistory` 为卡片真实数据源 |
@@ -133,7 +133,7 @@
 | 静态资源 | 白名单 `/`、`/index.html`、`/assets/*`、`/shared/*`；非 GET/HEAD 返回 405 |
 | 请求体 | 上限 1 MiB（`MAX_BODY_BYTES = 1048576`），超限 `E4002`；JSON 非法 `E1001` |
 | 前端降级 | 请求超时 3000 ms；引擎调用失败或结构不合约时回退本地产物（`ZX.engine.source` 记为 `local`）；收到 HTTP 响应即视为在线，仅网络失败或超时判离线；离线时顶栏同步位换为诺瓦的离线褪色头像，取自 `assets/js/mascot-inline.js` 的内联 data URI（不依赖网络），待上行数量以角标显示；输入台头像在用户输入时切聆听形象，同样取自内联副本；计划复核（`/api/plan/review`）离线时挂起为待复核态（`zx.pending_plan`），恢复联网后自动补审 |
-| 体积 | `assets/css/app.css` 100696 字节；`assets/js/rhythm.build.js` 47228 字节；`assets/js/mascot-inline.js` 3247 字节；仓内 `js`/`css`/`html`/`svg` 共 65 个文件、699580 字节 |
+| 体积 | `assets/css/app.css` 100696 字节；`assets/js/rhythm.build.js` 47228 字节；`assets/js/mascot-inline.js` 3247 字节；仓内 `js`/`css`/`html`/`svg` 共 70 个文件、707584 字节 |
 | 第三方资源 | 无第三方脚本、字体、CDN 与埋点；`../index.html` 不引用任何外部 URL，图标与插画均为仓内 SVG |
 
 ## 9. 附录

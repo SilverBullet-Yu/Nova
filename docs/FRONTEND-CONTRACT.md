@@ -168,7 +168,7 @@
 | 检查 | 命令 | 判定标准 |
 |---|---|---|
 | 语法 | `node --check assets/js/<改动文件>.js` | 退出码 0 |
-| 单测与冒烟 | `npm test` | 126 项全过（引擎单测 + HTTP 冒烟 + 前端 VM 单测 + 资产门禁）；`pretest` 先跑 `build:engine` |
+| 单测与冒烟 | `npm test` | 130 项全过（引擎单测 + HTTP 冒烟 + 前端 VM 单测 + 资产门禁）；`pretest` 先跑 `build:engine` |
 | 形象门禁 | `npm test`（`test/mascot.test.js`） | 素材 14 个齐全；内联副本与源素材逐字节一致；生成器幂等——重跑 `build-mascot-v4.js` 不产生差异，不一致时测试失败并自动还原工作区 |
 | 引擎产物同步 | `npm run build:engine` 后确认 `assets/js/rhythm.build.js` 无差异 | 改过 `shared/engine/*.js` 必须重跑；产物与源码字节一致 |
 | CSS 审计 | `npm run audit` | 退出码 0；仅 warn（死 token / 死类候选）可过，存在 error 必须先修 |
