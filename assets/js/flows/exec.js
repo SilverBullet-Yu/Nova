@@ -113,15 +113,10 @@ window.ZX = window.ZX || {};
       isBackfill: !!o.isBackfill
     };
     S.sessions.push(sess);
-    try {
-      var store = window.localStorage;
-      var key = 'zx.executionTrace';
-      var events = JSON.parse(store.getItem(key) || '[]');
-      store.setItem(key, JSON.stringify((Array.isArray(events) ? events : []).slice(-99).concat([{
-        id: sess.id, tool: 'execution', at: sess.endAt, planVersion: sess.planVersion,
-        rulesVersion: 'nova-execution-p0-1', status: 'recorded-local'
-      }])));
-    } catch (e) { /* 留痕失败不阻断执行记录 */ }
+    U.appendTrace('zx.executionTrace', {
+      id: sess.id, tool: 'execution', at: sess.endAt, planVersion: sess.planVersion,
+      rulesVersion: 'nova-execution-p0-1', status: 'recorded-local'
+    });
     try {
       ZX.api.queueOp({ entity: 'session', entityId: o.taskId, field: 'recorded', value: sess });
     } catch (e) { /* 离线写队列失败不影响本地记录 */ }
@@ -439,14 +434,8 @@ window.ZX = window.ZX || {};
 
       if (act === 'reason') {
         reason = b.dataset.v || REASONS[0];
-        var group = ctl.root.querySelector('.sc-opts');
-        if (group) {
-          Array.prototype.forEach.call(group.querySelectorAll('[data-sc="reason"]'), function (x) {
-            var on = x.dataset.v === reason;
-            x.classList.toggle('on', on);
-            x.setAttribute('aria-checked', String(on));
-          });
-        }
+        /* 与记录弹层共用同一分段同步原语（aria-checked / .on 切换一致） */
+        syncSeg(ctl.root, '.sc-opts', reason, false);
         return;
       }
 
@@ -600,23 +589,15 @@ window.ZX = window.ZX || {};
   });
 
   ZX.flows = ZX.flows || {};
+  /* 仅导出跨模块消费面（视图 / assistant / 测试锚点 record）；
+     弹层装配件（openSkip / commitSkip / 补录族）由本文件 [data-sc] 委托内部使用 */
   ZX.flows.exec = {
     metrics: metrics,
     activeTasks: activeTasks,
-    backfillMin: backfillMin,
-    partialEst: partialEst,
     elapsedMin: elapsedMin,
     record: record,
-    applyRecord: applyRecord,
-    togglePause: togglePause,
     openRecord: openRecord,
-    commitRecord: commitRecord,
-    openSkip: openSkip,
-    commitSkip: commitSkip,
-    restoreTask: restoreTask,
-    toggleSkipped: toggleSkipped,
-    openBackfill: openBackfill,
-    commitBackfill: commitBackfill
+    commitRecord: commitRecord
   };
 
   /* 供其他模块（assistant）复用的小工具 */

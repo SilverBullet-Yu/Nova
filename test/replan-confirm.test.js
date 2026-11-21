@@ -3,22 +3,26 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
+const H = require('./helpers');
 const source = fs.readFileSync(require.resolve('../assets/js/assistant.js'), 'utf8');
 function setup(storage = new Map(), persist = false) {
   const messages = [], ops = [];
   let state = { tasks: [{ id: 't', est: 50 }], week: [], replanInput: () => ({}) };
-  const ZX = { state, util: { $: () => ({ children: [], appendChild: e => messages.push(e.innerHTML) }), nowStr: () => '', pct: String, esc: String, clone: structuredClone, num: (v, fallback) => Number.isFinite(v) ? v : fallback }, render() {}, setTab() {}, api: { queueOp: o => ops.push(o) }, engine: { replan: async () => ({ accepted: true, strategies: [{ level: 2, applied: true }], diff: [{ taskId: 't', op: 'compress', from: 50, to: 35 }], guards: {} }) } };
+  const ZX = { state, render() {}, setTab() {}, api: { queueOp: o => ops.push(o) }, engine: { replan: async () => ({ accepted: true, strategies: [{ level: 2, applied: true }], diff: [{ taskId: 't', op: 'compress', from: 50, to: 35 }], guards: {} }) } };
+  const win = { ZX, localStorage: { getItem: k => storage.get(k), setItem: (k, v) => storage.set(k, v) } };
+  const sandbox = { window: win, document: { createElement: () => ({}) } };
+  H.installUtil(sandbox);   /* 真实 util：appendTrace / pct / esc 与生产同源 */
+  ZX.util.$ = () => ({ children: [], appendChild: e => messages.push(e.innerHTML) });
   if (persist) {
-    vm.runInNewContext(fs.readFileSync(require.resolve('../assets/js/state.js'), 'utf8'), {
-      crypto, window: { ZX, Rhythm: { seed: require('../shared/data/seed.js') },
-        localStorage: { getItem: k => storage.get(k), setItem: (k, v) => storage.set(k, v) } }
-    });
+    win.Rhythm = { seed: require('../shared/data/seed.js') };
+    vm.runInNewContext(fs.readFileSync(require.resolve('../assets/js/state.js'), 'utf8'), sandbox);
     state = ZX.state;
     ZX.render = () => state.saveOverlay();
     ZX.engine.undo = async snapshot => require('../shared/engine/replan.js').undoReplan(snapshot);
     ZX.util.tsHM = () => '';
   }
-  vm.runInNewContext(source, { window: { ZX, localStorage: { getItem: k => storage.get(k), setItem: (k, v) => storage.set(k, v) }, Rhythm: { workflow: require('../shared/workflow.js') } }, document: { createElement: () => ({}) } });
+  win.Rhythm = Object.assign({}, win.Rhythm, { workflow: require('../shared/workflow.js') });
+  vm.runInNewContext(source, sandbox);
   return { ZX, state, messages, ops };
 }
 test('对话普通重排先预览，确认只写一次', async () => {

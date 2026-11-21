@@ -14,6 +14,7 @@ window.ZX = window.ZX || {};
 
   var TRASH_KEY = 'zx.trash';
   var FLASH_KEY = 'zx.flash';
+  /* 与 api.js 的 QUEUE_KEY 同键（本文件会被 VM 测试单独装配，故不引用 ZX.api） */
   var QUEUE_KEY = 'zx.op_queue';
   var TTL = 7 * 86400000;
 

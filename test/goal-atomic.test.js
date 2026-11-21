@@ -3,14 +3,22 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
+const H = require('./helpers');
 const src = fs.readFileSync(require.resolve('../assets/js/flows/goal.js'), 'utf8');
+/* 沙箱公共装配：真实 util.js（trace 随机 id / 日期口径与生产同源）+ 固定星期三 */
+function goalSandbox(ZX, disk) {
+  const sandbox = { window: { ZX, localStorage: { getItem: k => disk.get(k), setItem: (k, v) => disk.set(k, v) } }, document: { addEventListener() {} } };
+  H.installUtil(sandbox);
+  ZX.util.todayDow = () => '三';
+  return sandbox;
+}
 test('排程失败时保留旧目标和待提交草案', async () => {
   const draft = { name: 'new', weeks: 5, weeklyH: 10, demand: 10 };
   const state = { goalDraft: draft, planDraft: [{id:'a', est:30}], goal: {name:'old'}, feas:{}, resetTimer() {} };
-  const ZX = { state, render() {}, setTab() {}, ui:{toast(){}}, assistant:{say(){}}, util:{todayDow:()=> '三', num: (v,d)=> Number.isFinite(v)?v:d}, engine:{feasibilityNow:()=>({R:1}),schedule:async()=>{throw new Error('offline');}} };
+  const ZX = { state, render() {}, setTab() {}, ui:{toast(){}}, assistant:{say(){}}, engine:{feasibilityNow:()=>({R:1}),schedule:async()=>{throw new Error('offline');}} };
   const disk = new Map();
   state.currentPlanVersion = () => 'baseline';
-  vm.runInNewContext(src, {crypto, window:{ZX, localStorage:{getItem:k=>disk.get(k), setItem:(k,v)=>disk.set(k,v)}}, document:{addEventListener(){}}});
+  vm.runInNewContext(src, goalSandbox(ZX, disk));
   ZX.flows.goal.apply();
   assert.equal(disk.size, 0);
   await Promise.resolve();
@@ -33,11 +41,10 @@ test('确认后编辑草案，迟到排程只写失效追踪，不应用计划',
     planDraft: [{id:'a', s:'数学', title:'synthetic task', est:30, weight:1}],
     goal:oldGoal, currentPlanVersion:()=> 'baseline' };
   const ZX = {state, render(){renders++;}, ui:{toast(){}},
-    util:{todayDow:()=> '三', num:(v,d)=>Number.isFinite(v)?v:d},
     engine:{feasibilityNow:()=>({R:1}), schedule:input=>new Promise(resolve=>{
       release = () => resolve(schedule(input));
     })} };
-  vm.runInNewContext(src, {crypto, window:{ZX, localStorage:{getItem:k=>disk.get(k), setItem:(k,v)=>disk.set(k,v)}}, document:{addEventListener(){}}});
+  vm.runInNewContext(src, goalSandbox(ZX, disk));
   ZX.flows.goal.apply();
   assert.equal(disk.size, 0);
   state.planDraft[0].title = 'edited synthetic task';
@@ -57,10 +64,10 @@ test('连续确认后，迟到的旧排程结果不能覆盖已提交的新计�
   let resultHtml;
   let renders = 0;
   const state = { goalDraft: { name: 'first', weeks: 5, weeklyH: 10, demand: 10 }, planDraft: [{id:'a', s:'数学', title:'第一份', est:30, weight:1}], goal:{name:'old'}, feas:{}, resetTimer(){}, normTask:t=>t };
-  const ZX = { state, render(){renders++;}, setTab(){}, ui:{toast(){}}, assistant:{say(html){resultHtml = html;}}, util:{todayDow:()=> '三', num:(v,d)=>Number.isFinite(v)?v:d, clone:structuredClone, pad2:v=>String(v).padStart(2,'0'), esc:String, hm:String}, engine:{feasibilityNow:()=>({R:1}), schedule: input => new Promise(resolve => pending.push(() => resolve(schedule(input))))} };
+  const ZX = { state, render(){renders++;}, setTab(){}, ui:{toast(){}}, assistant:{say(html){resultHtml = html;}}, engine:{feasibilityNow:()=>({R:1}), schedule: input => new Promise(resolve => pending.push(() => resolve(schedule(input))))} };
   const disk = new Map();
   state.currentPlanVersion = () => state.goal.name === 'old' ? 'baseline' : 'applied-version';
-  vm.runInNewContext(src, {crypto, window:{ZX, localStorage:{getItem:k=>disk.get(k), setItem:(k,v)=>disk.set(k,v)}}, document:{addEventListener(){}}});
+  vm.runInNewContext(src, goalSandbox(ZX, disk));
   ZX.flows.goal.apply();
   state.goalDraft.name = 'second';
   state.planDraft[0].title = '第二份';

@@ -15,7 +15,8 @@ window.ZX = window.ZX || {};
 
   var U = ZX.util;
 
-  /* 对话输出统一走 assistant（goal.js 在 assistant.js 之前加载） */
+  /* 对话输出统一走 assistant。index.html 中 assistant.js 先于 flows 加载，
+     正常装配下 ZX.assistant 已就绪；防御包装只为 VM 测试的部分装配兜底 */
   function say(html, eng) {
     if (ZX.assistant && typeof ZX.assistant.say === 'function') ZX.assistant.say(html, eng);
   }
@@ -59,12 +60,8 @@ window.ZX = window.ZX || {};
   var dragId = null;
   var overEl = null;
 
-  /* ---------- 日期与数值（parseDay / isoDay / addDays 用 util.js 共用实现） ---------- */
-  function today0() {
-    var d = new Date();
-    d.setHours(0, 0, 0, 0);
-    return d;
-  }
+  /* ---------- 日期与数值（parseDay / isoDay / addDays / today0 用 util.js 共用实现） ---------- */
+  var today0 = U.today0;
 
   /* 从今天到截止日期的整周数，至少 1 周 */
   function weeksUntil(day) {
@@ -558,8 +555,7 @@ window.ZX = window.ZX || {};
     });
     return Object.keys(byTask)
       .map(function (id) {
-        var src = null;
-        for (var i = 0; i < all.length; i++) if (all[i].id === id) { src = all[i]; break; }
+        var src = U.findById(all, id);
         return src ? { src: src, g: byTask[id] } : null;
       })
       .filter(function (x) { return x && x.g.min >= 30; })
@@ -579,17 +575,10 @@ window.ZX = window.ZX || {};
   }
 
   function traceSchedule(status, planVersion) {
-    try {
-      var store = window.localStorage;
-      var bytes = crypto.getRandomValues(new Uint8Array(16));
-      var id = 'schedule-' + Array.from(bytes, function (v) { return v.toString(16).padStart(2, '0'); }).join('');
-      var key = 'zx.scheduleTrace';
-      var events = JSON.parse(store.getItem(key) || '[]');
-      store.setItem(key, JSON.stringify((Array.isArray(events) ? events : []).slice(-99).concat([{
-        id: id, tool: 'schedule', at: Date.now(), planVersion: planVersion,
-        rulesVersion: 'nova-schedule-p0-1', status: status
-      }])));
-    } catch (err) { /* 留痕失败不影响排程 */ }
+    U.appendTrace('zx.scheduleTrace', {
+      id: 'schedule-' + U.randHex(), tool: 'schedule', at: Date.now(), planVersion: planVersion,
+      rulesVersion: 'nova-schedule-p0-1', status: status
+    });
   }
 
   var scheduleRequest = 0;

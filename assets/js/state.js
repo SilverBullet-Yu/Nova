@@ -171,8 +171,7 @@ window.ZX = window.ZX || {};
   state.currentPlanVersion = function () {
     var input = planInput();
     if (input !== versionInput || !versionId) {
-      var bytes = crypto.getRandomValues(new Uint8Array(16));
-      versionId = 'plan-' + Array.from(bytes, function (v) { return v.toString(16).padStart(2, '0'); }).join('');
+      versionId = 'plan-' + U.randHex();
       versionInput = input;
     }
     return versionId;

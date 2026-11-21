@@ -182,17 +182,24 @@ window.ZX = window.ZX || {};
     if (act === 'cp-open') { ZX.setTab('chat'); return; }
   });
 
-  U.$('#form').addEventListener('submit', async function (e) {
+  /* ---------- 发送管线（输入框提交与快捷语句共用） ---------- */
+  function sendToNova(v, delay) {
+    ZX.assistant.me(v);
+    return (async function () {
+      var t = ZX.assistant.typing();
+      await U.sleep(delay);
+      t.remove();
+      ZX.assistant.route(v);
+    })();
+  }
+
+  U.$('#form').addEventListener('submit', function (e) {
     e.preventDefault();
     var v = U.$('#input').value.trim();
     if (!v) return;
-    ZX.assistant.me(v);
     sentLock = true;   /* 已送出：诺瓦回到待机，不再处于聆听 */
     updateListen();
-    var t = ZX.assistant.typing();
-    await U.sleep(340);
-    t.remove();
-    ZX.assistant.route(v);
+    sendToNova(v, 340);
   });
 
   /* ---------- 输入台聆听态（②）：用户输入时诺瓦换聆听形象 ---------- */
@@ -238,14 +245,7 @@ window.ZX = window.ZX || {};
     if (!e.target || !e.target.closest) return;
     var c = e.target.closest('[data-say]');
     if (!c) return;
-    var v = c.dataset.say;
-    ZX.assistant.me(v);
-    (async function () {
-      var t = ZX.assistant.typing();
-      await U.sleep(320);
-      t.remove();
-      ZX.assistant.route(v);
-    })();
+    sendToNova(c.dataset.say, 320);
   });
 
   /* ---------- 后端探测（启动时 + 每次 API 调用失败时更新状态，不轮询） ---------- */
@@ -360,7 +360,6 @@ window.ZX = window.ZX || {};
 
     setInterval(function () { if (ZX.state.running) ZX.assistant.tickTimer(); }, 1000);
 
-    updateSync();
     probeBackend();
   }
 

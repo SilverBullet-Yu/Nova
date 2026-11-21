@@ -102,8 +102,7 @@ window.ZX = window.ZX || {};
     if (!S.replanned) return '未重排 · 基线';
     var rec = S.replanRecord;
     if (!rec || typeof rec.loadDelta !== 'number') return '已重排';
-    var pct = (Math.round(rec.loadDelta * 1000) / 10) + '%';
-    return '已重排 · 增幅 +' + pct;
+    return '已重排 · 增幅 +' + U.pct(rec.loadDelta);
   }
 
   /* 周图数据源：
@@ -111,6 +110,14 @@ window.ZX = window.ZX || {};
      引擎 nextWeek 只给每日总分钟数（无科目分段），故分段色块按 weekShift 的科目占比
      等比缩放到该日真实负载，保证「柱高 = 真实负载」「配色 = 科目构成」同时成立。
      Stage C-2：再叠加手工改期（state.dayAssign）的每日增量，色段按新总量等比缩放。 */
+  /* 科目分段等比缩放到目标分钟数（基线周图与改期增量两处共用） */
+  function scaleSegs(segs, real) {
+    var segSum = segs.reduce(function (a, s) { return a + (s[1] || 0); }, 0);
+    return segSum > 0
+      ? segs.map(function (s) { return [s[0], Math.round(s[1] / segSum * real)]; })
+      : segs;
+  }
+
   function baseWeekData() {
     var S = ZX.state;
     if (!S.replanned) return S.week.map(function (d) {
@@ -129,11 +136,7 @@ window.ZX = window.ZX || {};
       var ew = engineWeek[i];
       if (!ew) return d;
       var real = typeof ew.minutes === 'number' ? ew.minutes : d.total;
-      var segSum = d.segs.reduce(function (a, s) { return a + (s[1] || 0); }, 0);
-      var segs = segSum > 0
-        ? d.segs.map(function (s) { return [s[0], Math.round(s[1] / segSum * real)]; })
-        : d.segs;
-      return { d: d.d, segs: segs, buf: d.buf, total: real, today: d.today };
+      return { d: d.d, segs: scaleSegs(d.segs, real), buf: d.buf, total: real, today: d.today };
     });
   }
 
@@ -149,11 +152,7 @@ window.ZX = window.ZX || {};
       var delta = U.num(deltas[d.d], 0);
       if (!delta) return d;
       var real = Math.max(0, d.total + delta);
-      var segSum = d.segs.reduce(function (a, s) { return a + (s[1] || 0); }, 0);
-      var segs = segSum > 0
-        ? d.segs.map(function (s) { return [s[0], Math.round(s[1] / segSum * real)]; })
-        : d.segs;
-      return { d: d.d, segs: segs, buf: d.buf, total: real, today: d.today };
+      return { d: d.d, segs: scaleSegs(d.segs, real), buf: d.buf, total: real, today: d.today };
     });
   }
 

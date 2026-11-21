@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const { start } = require('../server/main');
 const seed = require('../shared/data/seed');
 
-const scripts = ['state', 'api', 'flows/exec'].map(name =>
+const scripts = ['util', 'state', 'api', 'flows/exec'].map(name =>
   fs.readFileSync(require.resolve('../assets/js/' + name + '.js'), 'utf8'));
 
 test('离线执行记录重新加载后补传，服务端仅保留一条且版本不变', async () => {
@@ -15,11 +15,12 @@ test('离线执行记录重新加载后补传，服务端仅保留一条且版�
   let offline = false;
   let uploads = 0;
   function boot() {
-    const ZX = { util: { num: (v, d) => Number.isFinite(v) ? v : d } };
+    const ZX = {};
     const window = { ZX, Rhythm: { seed }, location: { protocol: 'http:', origin: server.url },
       localStorage: { getItem: key => disk.get(key), setItem: (key, value) => disk.set(key, value) } };
     const context = vm.createContext({ window, crypto, AbortController, setTimeout, clearTimeout,
-      document: { addEventListener() {} }, fetch: (url, opts) => {
+      document: { addEventListener() {} }, localStorage: window.localStorage,
+      fetch: (url, opts) => {
         if (offline) return Promise.reject(new Error('offline'));
         if (url.endsWith('/api/sync/ops')) uploads++;
         return fetch(url, opts);

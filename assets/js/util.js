@@ -98,6 +98,29 @@ window.ZX = window.ZX || {};
     for (var i = 0; i < arr.length; i++) if (arr[i] && arr[i].id === id) return arr[i];
     return null;
   }
+  /* 今天 0 点（本地时区）：挽救缺口推演、目标周期计算共用 */
+  function today0() {
+    var d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+  /* 16 字节 crypto 随机的十六进制串：sync / 重排 / 排程 / 计划版本四条 trace 的事件 id */
+  function randHex() {
+    var bytes = crypto.getRandomValues(new Uint8Array(16));
+    return Array.from(bytes, function (v) { return v.toString(16).padStart(2, '0'); }).join('');
+  }
+  /* localStorage 留痕：追加一条事件并只保留最后 99 条 + 本次；
+     同一实现供 zx.syncTrace / zx.replanTrace / zx.scheduleTrace / zx.executionTrace 共用，
+     留痕失败静默忽略（不影响主链路）。经 window 访问存储，VM 测试的 window 桩同样可装配 */
+  function appendTrace(key, event) {
+    try {
+      var store = window.localStorage;
+      var raw = store.getItem(key);
+      var events = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(events)) events = [];
+      store.setItem(key, JSON.stringify(events.slice(-99).concat([event])));
+    } catch (e) { /* 隐私模式 / 配额不足：跳过留痕 */ }
+  }
   /* 聚焦重放：全量重绘后把焦点放回原控件；不抛错 */
   function refocus(el) {
     if (el && el.focus) { try { el.focus(); } catch (e) { /* 忽略 */ } }
@@ -163,10 +186,10 @@ window.ZX = window.ZX || {};
     nowStr: nowStr, tsHM: tsHM, isoWeek: isoWeek, todayDow: todayDow,
     parseDay: parseDay, isoDay: isoDay, addDays: addDays, retime: retime, pct: pct,
     dayKey: dayKey, todayKey: todayKey,
-    findById: findById, refocus: refocus,
+    findById: findById, refocus: refocus, today0: today0,
+    randHex: randHex, appendTrace: appendTrace,
     sleep: sleep, clone: clone, num: num,
     prefs: prefs, applyPrefs: applyPrefs, togglePref: togglePref, setPref: setPref
   };
-  ZX.$ = $;
 
 })(window.ZX);

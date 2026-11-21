@@ -201,19 +201,6 @@ window.ZX = window.ZX || {};
     return false;
   }
 
-  /* 给 views/plan.js 用：哪些科目有被否决的压缩条目 */
-  function vetoedSubjects() {
-    var rec = ZX.state.replanRecord;
-    var list = (rec && Array.isArray(rec.vetoed)) ? rec.vetoed : [];
-    var diff = (rec && Array.isArray(rec.diff)) ? rec.diff : [];
-    var out = {};
-    list.forEach(function (v) {
-      var id = (v && typeof v === 'object') ? v.taskId : v;
-      diff.forEach(function (d) { if (d.taskId === id) out[d.subject] = true; });
-    });
-    return out;
-  }
-
   function markRow(btn) {
     var line = btn.closest ? btn.closest('.sc2-diff') : null;
     if (!line) return;
@@ -344,9 +331,7 @@ window.ZX = window.ZX || {};
     moveTask: moveTask,
     toggleLock: toggleLock,
     veto: veto,
-    isVetoed: isVetoed,
-    vetoedSubjects: vetoedSubjects,
-    CAP: function () { return capMin(); }
+    isVetoed: isVetoed
   };
 
 })(window.ZX);

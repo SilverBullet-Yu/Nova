@@ -6,10 +6,12 @@ const vm = require('node:vm');
 const seed = require('../shared/data/seed.js');
 function boot(storage) {
   const ops = [];
-  const ZX = { util: { num: (v, d) => Number.isFinite(v) ? v : d }, api: { queueOp: op => ops.push(op) } };
-  const win = { ZX, Rhythm: { seed }, localStorage: { getItem: k => storage.get(k), removeItem: k => storage.delete(k), setItem: (k,v) => storage.set(k,v) } };
-  const ctx = vm.createContext({ window: win, crypto: globalThis.crypto, document: { addEventListener() {} } });
-  for (const path of ['../assets/js/state.js', '../assets/js/flows/exec.js']) vm.runInContext(readFileSync(require.resolve(path), 'utf8'), ctx);
+  const ZX = { api: { queueOp: op => ops.push(op) } };
+  const ls = { getItem: k => storage.get(k), removeItem: k => storage.delete(k), setItem: (k, v) => storage.set(k, v) };
+  const win = { ZX, Rhythm: { seed }, localStorage: ls };
+  const ctx = vm.createContext({ window: win, crypto: globalThis.crypto, document: { addEventListener() {} }, localStorage: ls });
+  /* util.js 真实装载：randHex / appendTrace / today0 与生产同源 */
+  for (const path of ['../assets/js/util.js', '../assets/js/state.js', '../assets/js/flows/exec.js']) vm.runInContext(readFileSync(require.resolve(path), 'utf8'), ctx);
   return { ZX, ops };
 }
 test('执行记录关联计划版本，刷新保留版本，改期后记录使用新版本', () => {

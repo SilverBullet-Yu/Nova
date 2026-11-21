@@ -10,6 +10,7 @@ window.ZX = window.ZX || {};
 (function (ZX) {
   'use strict';
 
+  var U = ZX.util;
   var TIMEOUT = 3000;
   var DEFAULT_BASE = 'http://127.0.0.1:8787';
   var QUEUE_KEY = 'zx.op_queue';
@@ -229,23 +230,19 @@ window.ZX = window.ZX || {};
 
   function traceSync(status, payload, acceptedIds, planVersion) {
     try {
-      var store = window.localStorage, key = 'zx.syncTrace';
-      var events = JSON.parse(store.getItem(key) || '[]');
-      var bytes = crypto.getRandomValues(new Uint8Array(16));
-      var id = 'sync-' + Array.from(bytes, function (v) { return v.toString(16).padStart(2, '0'); }).join('');
-      var event = {
-        id: id, tool: 'sync', at: Date.now(), planVersion: planVersion,
-        rulesVersion: 'nova-sync-p0-1', status: status, sent: payload.length,
-        accepted: payload.filter(function (op) { return acceptedIds.indexOf(op.opId) >= 0; }).length
-      };
       var sessions = payload.filter(function (op) {
         return op.entity === 'session' && op.field === 'recorded' && op.value &&
           typeof op.value.id === 'string' && /^s_[0-9a-z]{1,16}_[0-9]{1,16}$/.test(op.value.id);
       }).map(function (op) {
         return { id: op.value.id, confirmed: acceptedIds.indexOf(op.opId) >= 0 };
       });
+      var event = {
+        id: 'sync-' + U.randHex(), tool: 'sync', at: Date.now(), planVersion: planVersion,
+        rulesVersion: 'nova-sync-p0-1', status: status, sent: payload.length,
+        accepted: payload.filter(function (op) { return acceptedIds.indexOf(op.opId) >= 0; }).length
+      };
       if (sessions.length) event.sessions = sessions;
-      store.setItem(key, JSON.stringify((Array.isArray(events) ? events : []).slice(-99).concat([event])));
+      U.appendTrace('zx.syncTrace', event);
     } catch (e) { /* 留痕失败不影响队列 */ }
   }
 
@@ -338,9 +335,8 @@ window.ZX = window.ZX || {};
   function health() { return call('GET', '/api/health'); }
 
   ZX.api = {
-    TIMEOUT: TIMEOUT,
+    /* op 队列键名的单一事实源（settings.js 的 wipe 也按此键清队列） */
     QUEUE_KEY: QUEUE_KEY,
-    base: BASE,
 
     /* 后端通信 */
     getState: getState,
@@ -361,11 +357,11 @@ window.ZX = window.ZX || {};
     flushQueue: flushQueue,
     invalidatePendingSync: invalidatePendingSync,
     pendingCount: pendingCount,
+    /* 测试锚点：sync-recovery.test.js 用它检查队列 pending 形态 */
     loadQueue: loadQueue,
 
     /* 连接状态 */
     isOnline: function () { return status.online; },
-    status: function () { return status; },
     onStatus: function (fn) { if (typeof fn === 'function') listeners.push(fn); }
   };
 

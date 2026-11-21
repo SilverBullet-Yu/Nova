@@ -3,6 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
+const H = require('./helpers');
 
 test('周报只统计本地周一零点至下周一零点前的非补录会话', () => {
   const stamp = d => new Date(2026, 10, d).getTime();
@@ -14,10 +15,11 @@ test('周报只统计本地周一零点至下周一零点前的非补录会话',
     {taskId:'t',endAt:stamp(23),minutes:120},
     {taskId:'t',endAt:stamp(20),minutes:120,isBackfill:true}
   ]};
-  const ZX = {state, util:{num:(v,d)=>Number.isFinite(v)?v:d, isoWeek:()=>47,
-    pad2:String, nowStr:()=>'', esc:String, dayKey:t=>new Date(t).toDateString()},
-    ui:{fold:()=>''}, flows:{exec:{metrics:()=>({rate:22})}}};
-  vm.runInNewContext(fs.readFileSync(require.resolve('../assets/js/views/data.js'),'utf8'), {window:{ZX},Date:FixedDate});
+  const ZX = {state, ui:{fold:()=>''}, flows:{exec:{metrics:()=>({rate:22})}}};
+  const sandbox = {window:{ZX}, Date: FixedDate};
+  H.installUtil(sandbox);          /* 真实 util：findById / dayKey 与生产同源 */
+  ZX.util.isoWeek = () => 47;
+  vm.runInNewContext(fs.readFileSync(require.resolve('../assets/js/views/data.js'),'utf8'), sandbox);
   assert.match(ZX.views.data(), /有效学习 <b class="hl">1 小时/);
 });
 

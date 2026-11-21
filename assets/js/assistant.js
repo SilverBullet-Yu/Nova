@@ -213,12 +213,8 @@ window.ZX = window.ZX || {};
     onSettled: saveReplanTrace
   });
   function saveReplanTrace(event) {
-    try {
-      var store = window.localStorage;
-      var key = 'zx.replanTrace';
-      var events = JSON.parse(store.getItem(key) || '[]');
-      store.setItem(key, JSON.stringify((Array.isArray(events) ? events : []).slice(-99).concat([event])));
-    } catch (err) { /* 本地存储不可用时不影响草案结案 */ }
+    /* 本地存储不可用时不影响草案结案（appendTrace 内部静默吞错） */
+    U.appendTrace('zx.replanTrace', event);
   }
   var previewRequest = 0;
   function replanFlow() {

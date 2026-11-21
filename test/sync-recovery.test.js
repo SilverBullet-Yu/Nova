@@ -6,17 +6,20 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '../assets/js/api.js'), 'utf8');
 const stateSource = fs.readFileSync(require.resolve('../assets/js/state.js'), 'utf8');
+const utilSource = fs.readFileSync(require.resolve('../assets/js/util.js'), 'utf8');
 
 for (const failed of [false, true]) {
   test('清除后迟到同步不重新写入：' + (failed ? '失败' : '成功'), async () => {
     const disk = new Map();
     let release, reject, started;
     const waiting = new Promise(resolve => { started = resolve; });
-    const window = { ZX:{util:{num:(v,d)=>Number.isFinite(v)?v:d}},
+    const window = { ZX:{},
       Rhythm:{seed:require('../shared/data/seed.js')}, location:{protocol:'http:', origin:'http://localhost'},
       localStorage:{getItem:k=>disk.get(k), setItem:(k,v)=>disk.set(k,v), removeItem:k=>disk.delete(k)} };
+    /* 真实 util.js：currentPlanVersion 的 randHex 与 traceSync 的 appendTrace 与生产同源 */
+    vm.runInNewContext(utilSource, {window, crypto, localStorage: window.localStorage});
     vm.runInNewContext(stateSource, {window, crypto});
-    vm.runInNewContext(source, {crypto, window, setTimeout, clearTimeout, fetch:async url=>{
+    vm.runInNewContext(source, {crypto, window, localStorage: window.localStorage, setTimeout, clearTimeout, fetch:async url=>{
       if (url.endsWith('/api/auth/session')) return {ok:true,json:async()=>({token:'demo'})};
       return new Promise((yes,no)=>{ release=yes; reject=no; started(); });
     }});
@@ -87,7 +90,8 @@ for (const failed of [false, true]) {
     const window = { ZX: { state: { currentPlanVersion: () => 'baseline' } },
       location: { protocol: 'http:', origin: 'http://localhost' },
       localStorage: { getItem: k => disk.get(k), setItem: (k,v) => disk.set(k,v) } };
-    vm.runInNewContext(source, { crypto, window, setTimeout, clearTimeout, fetch: async url => {
+    vm.runInNewContext(utilSource, { crypto, window, localStorage: window.localStorage });
+    vm.runInNewContext(source, { crypto, window, localStorage: window.localStorage, setTimeout, clearTimeout, fetch: async url => {
       if (url.endsWith('/api/auth/session')) return { ok:true, json:async()=>({token:'synthetic-token'}) };
       assert.ok(url.endsWith('/api/sync/ops'));
       if (failed) throw new Error('synthetic-error');
@@ -113,10 +117,11 @@ for (const failed of [false, true]) {
 test('部分上行确认只清除已确认项，重试仅发送剩余项', async () => {
   const disk = new Map();
   const batches = [];
-  const window = { location: { protocol: 'http:', origin: 'http://localhost' }, localStorage: {
+  const window = { ZX: {}, location: { protocol: 'http:', origin: 'http://localhost' }, localStorage: {
     getItem: key => disk.get(key), setItem: (key, value) => disk.set(key, value)
   } };
-  vm.runInNewContext(source, { crypto, window, setTimeout, clearTimeout, fetch: async (url, opts) => {
+  vm.runInNewContext(utilSource, { crypto, window, localStorage: window.localStorage });
+  vm.runInNewContext(source, { crypto, window, localStorage: window.localStorage, setTimeout, clearTimeout, fetch: async (url, opts) => {
     if (url.endsWith('/api/auth/session')) return { ok: true, json: async () => ({ token: 'test-token' }) };
     assert.ok(url.endsWith('/api/sync/ops'));
     const ids = JSON.parse(opts.body).ops.map(op => op.opId);

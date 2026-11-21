@@ -231,8 +231,7 @@ window.ZX = window.ZX || {};
       var k = U.dayKey(s && (s.endAt || s.startAt));
       if (k) days[k] = true;
     });
-    var base = new Date();
-    base.setHours(0, 0, 0, 0);
+    var base = U.today0();
     if (days[U.isoDay(base)]) return 0;
     for (var i = 1; i <= 60; i++) {
       if (days[U.isoDay(U.addDays(base, -i))]) return i;
@@ -410,8 +409,7 @@ window.ZX = window.ZX || {};
     if (o.key === 'compress') {
       var dropIds = o.dropped.map(function (d) { return d.id; });
       S.tasks = S.tasks.filter(function (t) { return dropIds.indexOf(t.id) < 0; }).map(function (t) {
-        var hit = null;
-        for (var i = 0; i < o.items.length; i++) if (o.items[i].id === t.id) { hit = o.items[i]; break; }
+        var hit = U.findById(o.items, t.id);
         if (!hit) return t;
         var next = Object.assign({}, t, { est: hit.est, time: U.retime(t.time, hit.est), degraded: true });
         return S.normTask ? S.normTask(next) : next;
@@ -573,6 +571,7 @@ window.ZX = window.ZX || {};
   });
 
   ZX.flows = ZX.flows || {};
+  /* apply / optionOf 保留为测试锚点（rescue-no-goal / rescue-confirm） */
   ZX.flows.rescue = {
     THRESHOLD: THRESHOLD,
     DEMO_ZERO_DAYS: DEMO_ZERO_DAYS,

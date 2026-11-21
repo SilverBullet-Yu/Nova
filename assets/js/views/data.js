@@ -33,8 +33,7 @@ window.ZX = window.ZX || {};
       if (!Number.isFinite(at) || at < mon.getTime() || at >= next.getTime()) return;
       var min = U.num(s.minutes, 0);
       effMin += min;
-      var t = null;
-      for (var i = 0; i < S.tasks.length; i++) if (S.tasks[i].id === s.taskId) { t = S.tasks[i]; break; }
+      var t = U.findById(S.tasks, s.taskId);
       var key = t ? t.s : '其他';
       bySubject[key] = U.num(bySubject[key], 0) + min;
       var k = U.dayKey(at);
