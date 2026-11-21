@@ -12,6 +12,7 @@
      mascot-v4-offline.svg  ⑧ 离线（本地兜底）
      mascot-v4-unknown.svg  ⑨ 兜底（关键词未命中）
      avatar-v4.svg / avatar-v4-listen.svg / avatar-v4-offline.svg   脸形头像
+     avatar-v4-sprite.svg   品牌位 8 帧待机动画（sprite 横排，发送消息触发）
      favicon-v4.svg         16px 最小形
    造型语言取自《赛尔号》超能NoNo 的轮廓类别（斜向细长光柱耳 / 白球机身 /
    椭圆大面罩 + 活性色描边 / 发光竖条眼 / 外挂小圆点 / 悬浮飞溅），
@@ -261,6 +262,36 @@ function avatar(kind) {
     ears + '<ellipse cx="48" cy="55" rx="24" ry="21" fill="' + visor + '"/>' + eyes + extra);
 }
 
+/* 顶栏品牌位 sprite：8 帧横排（768×96，每帧 96×96）。
+   用途：发送消息时 CSS steps(7) 逐帧步进一轮「耳朵扇动 + 轻微上浮」的触发式动画。
+   第 1 帧与 avatar-v4.svg 同构（静态显示即现头像）；第 8 帧与第 1 帧同构，
+   动画播完 background-position 回 0 时无缝衔接。
+   帧 = 双耳绕耳根 (30,38)/(66,38) 对称外摆（正角向左耳外/右耳外）+ 机身整体 translate(0,dy)。 */
+function avatarSprite() {
+  var POSES = [
+    { ear: 0, dy: 0 },
+    { ear: 4, dy: -2 },
+    { ear: 8, dy: -3.5 },
+    { ear: 4, dy: -2 },
+    { ear: 0, dy: 0 },
+    { ear: -3, dy: 1 },
+    { ear: 0, dy: 0 },
+    { ear: 0, dy: 0 }
+  ];
+  var frames = POSES.map(function (p, i) {
+    var ears = '<path d="M30 38L20 6L26.5 8.5L34 34Z" fill="#4C7FD0"' +
+        (p.ear ? ' transform="rotate(' + (-p.ear) + ' 30 38)"' : '') + '/>' +
+      '<path d="M66 38L76 6L69.5 8.5L62 34Z" fill="#4C7FD0"' +
+        (p.ear ? ' transform="rotate(' + p.ear + ' 66 38)"' : '') + '/>';
+    var face = '<g' + (p.dy ? ' transform="translate(0 ' + p.dy + ')"' : '') + '>' +
+      '<ellipse cx="48" cy="55" rx="24" ry="21" fill="#1A2230"/>' +
+      '<rect x="39" y="46" width="6.5" height="19" rx="3.25" fill="#4C7FD0"/>' +
+      '<rect x="52.5" y="46" width="6.5" height="19" rx="3.25" fill="#4C7FD0"/></g>';
+    return '<g transform="translate(' + (i * 96) + ' 0)">' + ears + face + '</g>';
+  });
+  return svg(768, 96, '诺瓦 v4 品牌位精灵图：8 帧待机动画（耳朵扇动 + 轻微上浮）', frames.join(''));
+}
+
 /* 应用图标（favicon）：产品「脸」的最小形 —— 奶油纸底 + 深色面罩 + 墨蓝竖眼 + 双耳尖。
    不沿用章式头像的墨底方章：章式头像用墨底是产品内的「印章」语言，
    而标签页与手机桌面图标在产品之外，墨底会变成一块认不出的小黑砖。
@@ -313,6 +344,7 @@ const files = {
   'avatar-v4.svg': avatar(''),
   'avatar-v4-listen.svg': avatar('listen'),
   'avatar-v4-offline.svg': avatar('offline'),
+  'avatar-v4-sprite.svg': avatarSprite(),
   'favicon-v4.svg': favicon()
 };
 

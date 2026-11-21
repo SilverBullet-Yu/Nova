@@ -30,11 +30,11 @@ function sha(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
-test('assets/img 素材齐全：10 个 mascot-v4* + 3 个 avatar-v4* + favicon-v4', () => {
+test('assets/img 素材齐全：10 个 mascot-v4* + 4 个 avatar-v4*（含 sprite）+ favicon-v4', () => {
   const files = fs.readdirSync(IMG).filter((f) => f.endsWith('.svg')).sort();
-  assert.equal(files.length, 14, '素材总数应为 14：' + files.join(', '));
+  assert.equal(files.length, 15, '素材总数应为 15：' + files.join(', '));
   assert.equal(files.filter((f) => f.startsWith('mascot-v4')).length, 10);
-  assert.equal(files.filter((f) => f.startsWith('avatar-v4')).length, 3);
+  assert.equal(files.filter((f) => f.startsWith('avatar-v4')).length, 4);
   assert.ok(files.includes('favicon-v4.svg'));
 });
 

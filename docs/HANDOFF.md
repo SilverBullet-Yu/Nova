@@ -179,5 +179,5 @@
 | 引擎单测 + HTTP 冒烟 + 前端 VM 单测 + 资产门禁 | `npm test` | 退出码 0，输出 `pass 130 fail 0`（当前 130 项全绿，覆盖引擎单测、HTTP 冒烟、前端 VM 单测与资产门禁） |
 | CSS 审计 | `npm run audit` | 退出码 0；存在 error 时退出码 1，仅 warn 仍为 0 |
 | 引擎产物重建校验 | `npm run build:engine` 后重算 `assets/js/rhythm.build.js` 的 SHA256 | 重建前后哈希一致（构建不写时间戳）；当前值 `5cdc674e3af022a9f9c23a8f8a6f12847745a22c2acf29e50ca4329e8bd55986` |
-| 资源引用全量扫描 | 提取 `index.html` 中 `src`/`href` 的相对路径并逐个检查文件存在 | 缺失数为 0（当前 26 个引用） |
+| 资源引用全量扫描 | 提取 `index.html` 中 `src`/`href` 的相对路径并逐个检查文件存在 | 缺失数为 0（当前 24 个引用） |
 | 服务冒烟 | `node server/main.js` 后请求 `GET /api/health` | HTTP 200 且 `ok` 为 `true` |

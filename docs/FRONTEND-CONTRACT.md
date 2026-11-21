@@ -152,7 +152,8 @@
 | `mascot-v4-rescue.svg` | 挽救（今日页中断横幅，32×28） | `assets/js/flows/rescue.js` `banner()` |
 | `mascot-v4-warn.svg` | 提醒（数据页偏差归因、计划页负载预警，22×19） | `assets/js/views/data.js`、`assets/js/views/plan.js` |
 | `mascot-v4-unknown.svg` | 兜底（关键词未命中，32×28） | `assets/js/assistant.js` `fallback()` |
-| `avatar-v4.svg` | 顶栏 `.seal`（26×26）与 `.cp-open`（22×22） | `index.html` |
+| `avatar-v4.svg` | 输入台聆听/待机头像（24×24）与 JS 回退路径 | `index.html` `#cpListen`、`assets/js/main.js` `avatarSrc()` |
+| `avatar-v4-sprite.svg` | 顶栏品牌位 `.seal`（26×26，8 帧横排 768×96） | `assets/css/app.css`：静态显示第 1 帧；`ZX` 发送管线加 `.play` 触发 `steps(7)` 逐帧动画（耳朵扇动 + 轻微上浮，0.7s 一轮，750ms 定时清理）；`html[data-motion="off"]` 下停格第 1 帧 |
 | `avatar-v4-offline.svg` | 顶栏离线指示（24×24，褪色涂装） | `assets/js/main.js` `updateSync()`，经 `assets/js/mascot-inline.js` 的内联副本加载 |
 | `avatar-v4-listen.svg` | 输入台聆听指示（24×24，用户输入时） | `assets/js/main.js` `updateListen()`，经 `assets/js/mascot-inline.js` 的内联副本加载 |
 | `favicon-v4.svg` | 站点图标（16px） | `index.html` |
@@ -169,7 +170,7 @@
 |---|---|---|
 | 语法 | `node --check assets/js/<改动文件>.js` | 退出码 0 |
 | 单测与冒烟 | `npm test` | 130 项全过（引擎单测 + HTTP 冒烟 + 前端 VM 单测 + 资产门禁）；`pretest` 先跑 `build:engine` |
-| 形象门禁 | `npm test`（`test/mascot.test.js`） | 素材 14 个齐全；内联副本与源素材逐字节一致；生成器幂等——重跑 `build-mascot-v4.js` 不产生差异，不一致时测试失败并自动还原工作区 |
+| 形象门禁 | `npm test`（`test/mascot.test.js`） | 素材 15 个齐全（含品牌位 sprite）；内联副本与源素材逐字节一致；生成器幂等——重跑 `build-mascot-v4.js` 不产生差异，不一致时测试失败并自动还原工作区 |
 | 引擎产物同步 | `npm run build:engine` 后确认 `assets/js/rhythm.build.js` 无差异 | 改过 `shared/engine/*.js` 必须重跑；产物与源码字节一致 |
 | CSS 审计 | `npm run audit` | 退出码 0；仅 warn（死 token / 死类候选）可过，存在 error 必须先修 |
 | 服务冒烟 | `npm start`（默认 `127.0.0.1:8787`） | `GET /api/health` 返回 200 且含 `"ok":true`；首页返回 200 |

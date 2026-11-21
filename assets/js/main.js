@@ -179,12 +179,25 @@ window.ZX = window.ZX || {};
     if (act === 'wipe') { ZX.flows.settings.confirmWipe(); return; }
     if (act === 'trash-restore') { ZX.flows.settings.restore(); return; }
     if (act === 'font') { ZX.flows.settings.setFont(b.dataset.v); return; }
-    if (act === 'cp-open') { ZX.setTab('chat'); return; }
   });
 
   /* ---------- 发送管线（输入框提交与快捷语句共用） ---------- */
+  /* 品牌位 sprite 触发：用户每说一句话，左上角诺瓦播一轮「耳朵扇动 + 轻微上浮」。
+     清理用定时器而非 animationend——后台标签页动画冻结时事件不来，class 会挂死 */
+  var sealEl = U.$('.seal');
+  var sealTimer = 0;
+  function playSeal() {
+    if (!sealEl) return;
+    sealEl.classList.remove('play');
+    void sealEl.offsetWidth;   /* 重排打断动画：连续发送也能整轮重播 */
+    sealEl.classList.add('play');
+    clearTimeout(sealTimer);
+    sealTimer = setTimeout(function () { sealEl.classList.remove('play'); }, 750);
+  }
+
   function sendToNova(v, delay) {
     ZX.assistant.me(v);
+    playSeal();
     return (async function () {
       var t = ZX.assistant.typing();
       await U.sleep(delay);

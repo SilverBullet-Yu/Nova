@@ -181,12 +181,14 @@ button{font-family:inherit;color:inherit}
 }
 
 .brand{display:flex;align-items:center;gap:11px;min-width:200px}
-/* 品牌标记：诺瓦 v4 脸形头像（透明底 + 深色面罩 + 主色竖眼 + 双耳尖） */
+/* 品牌标记：诺瓦 v4 脸形头像（透明底 + 深色面罩 + 主色竖眼 + 双耳尖）。
+   素材是 8 帧横排 sprite（scripts/build-mascot-v4.js 生成，禁止手改）：
+   发送消息时加 .play 播一轮「耳朵扇动 + 轻微上浮」，第 1 帧即静态头像 */
 .seal{
-  width:26px;height:26px;flex:0 0 26px;display:grid;place-items:center;
-  background:transparent;overflow:hidden;
+  width:26px;height:26px;flex:0 0 26px;overflow:hidden;
+  transition:transform .22s ease;
+  background:url('../img/avatar-v4-sprite.svg') 0 0 / 208px 26px no-repeat;
 }
-.seal img{width:100%;height:100%;display:block}
 .brand-cn{font-family:var(--display);font-size:18px;font-weight:800;letter-spacing:.03em;line-height:1.15}
 .brand-en{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;color:var(--txt3);margin-top:3px}
 
@@ -1345,12 +1347,6 @@ html[data-font="l"]{--fs-body:17px;--lh-body:1.58}
 /* 字号三档（复用 .seg 原语） */
 .sd-font button{font-family:var(--mono);font-size:11.5px;letter-spacing:.04em;min-width:46px;padding:6px 10px}
 
-/* 移动端对话入口（桌面隐藏）。
-   对话页签下不显示：入口按钮在对话页是冗余的（已在对话页），
-   且会与顶栏同步位的离线诺瓦头像并排撞脸——只保留工作台页签的快速回入口 */
-.cp-open{display:none}
-html[data-tab="chat"] .cp-open{display:none}
-
 /* 860 移动块 5/7 · 主块：单列外壳 / 顶栏 / 任务卡 / 触控目标（Stage D 主体） */
 @media (max-width:860px){
   /* 单列：只保留工作台 */
@@ -1445,17 +1441,8 @@ html[data-tab="chat"] .cp-open{display:none}
   .send{flex:0 0 40px;width:40px;height:40px}
 }
 
-/* 移动端顶栏的对话入口：不遮挡任务操作区 */
-/* 860 移动块 6/7 · 顶栏「诺瓦」入口 / 输入 16px / stage·item 收列 / 小交互件放大 */
+/* 860 移动块 6/7 · 输入 16px / stage·item 收列 / 小交互件放大 */
 @media (max-width:860px){
-  .cp-open{
-    display:grid;place-items:center;flex:0 0 40px;width:40px;height:40px;
-    margin-left:6px;border:1px solid var(--ac-a35);border-radius:var(--r);
-    background:var(--ac-a08);color:var(--ac);font-size:13px;line-height:1;
-    letter-spacing:0;cursor:pointer;
-  }
-  .cp-open:active{background:var(--acbg)}
-  .cp-open img{width:22px;height:22px;display:block}
   /* iOS Safari：聚焦字号 <16px 的输入框会强制放大页面 */
   .composer input,.input{font-size:16px}
 
@@ -1515,7 +1502,7 @@ html[data-tab="chat"] .cp-open{display:none}
   border-bottom-width:2px;
 }
 .brand{min-width:210px}
-.brand:hover .seal img{opacity:.85}
+.brand:hover .seal{opacity:.85}
 .tnav{height:60px;margin-left:18px}
 .tnav button{padding:0 15px;font-size:12.5px;letter-spacing:.04em}
 .tnav button.on{font-weight:600}
@@ -1852,10 +1839,16 @@ h1{font-size:34px;letter-spacing:0}
 .warn-flag{animation:novaShake .65s ease-in-out .15s both}
 .msg.a .seal-no{animation:novaStamp .32s cubic-bezier(.2,.9,.3,1.1) both}
 
-/* —— 顶栏品牌回应：hover 时小幅点头歪身（transition 走总闸的降级） —— */
-.seal img,.cp-open img{transition:transform .22s ease}
-.brand:hover .seal img{transform:scale(1.08) rotate(-4deg)}
-.cp-open:hover img{transform:scale(1.08) rotate(4deg)}
+/* —— 顶栏品牌回应 ——
+   hover 时小幅点头歪身；发送消息时 .play 触发 sprite 逐帧动画
+   （8 帧横排，第 8 帧与第 1 帧同构，steps(7) 播完回 0 无缝；
+   html[data-motion="off"] 归零时长后停在第 1 帧，不破版） */
+.brand:hover .seal{transform:scale(1.08) rotate(-4deg)}
+@keyframes sealSprite{
+  from{background-position:0 0}
+  to{background-position:-182px 0}
+}
+.seal.play{animation:sealSprite .7s steps(7,end) both}
 
 /* —— 聊天流（2026-11-15 二次扩展） ——
    消息气泡入场：助理上浮、用户右滑，各播一次（chat DOM 持久不重绘，
