@@ -10,6 +10,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 const crypto = require('node:crypto');
 
@@ -61,27 +62,22 @@ test('index.html 按序加载内联副本，并挂载输入台聆听头像', () 
     '输入台缺少 #cpListen 聆听头像');
 });
 
-test('生成器幂等：重跑 build-mascot-v4.js 不改变任何产物', () => {
-  /* 先把全部产物读进内存，跑生成器后逐个比对；不一致时写回原字节，保证工作区不被污染 */
-  const before = new Map();
-  for (const f of fs.readdirSync(IMG)) before.set(path.join(IMG, f), fs.readFileSync(path.join(IMG, f)));
-  before.set(INLINE, fs.readFileSync(INLINE));
-  const beforeHash = new Map([...before].map(([k, v]) => [k, crypto.createHash('sha256').update(v).digest('hex')]));
-
-  const r = spawnSync(process.execPath, [BUILDER], { cwd: ROOT, encoding: 'utf8' });
-  assert.equal(r.status, 0, '生成器执行失败：' + (r.stderr || '').slice(0, 300));
-
-  const changed = [];
-  for (const [file, hash] of beforeHash) {
-    if (!fs.existsSync(file)) { changed.push(path.basename(file) + '（被删除）'); continue; }
-    if (sha(file) !== hash) changed.push(path.basename(file));
-  }
-  const extra = fs.readdirSync(IMG).filter((f) => !beforeHash.has(path.join(IMG, f)));
-  changed.push(...extra.map((f) => f + '（新增）'));
-
-  if (changed.length) {
-    /* 还原工作区，再失败：门禁只报错，不留脏状态 */
-    for (const [file, buf] of before) fs.writeFileSync(file, buf);
-    assert.fail('重跑生成器后产物发生变化，说明仓库内素材与生成脚本不同步：' + changed.join(', '));
+test('生成器幂等：在临时目录重建并比对，不写工作区', () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'nova-mascot-'));
+  try {
+    const scripts = path.join(temp, 'scripts');
+    fs.mkdirSync(scripts);
+    const builder = path.join(scripts, 'build-mascot-v4.js');
+    fs.copyFileSync(BUILDER, builder);
+    const r = spawnSync(process.execPath, [builder], { cwd: temp, encoding: 'utf8' });
+    assert.equal(r.status, 0, '生成器执行失败：' + (r.stderr || '').slice(0, 300));
+    const generated = path.join(temp, 'assets', 'img');
+    assert.deepEqual(fs.readdirSync(generated).sort(), fs.readdirSync(IMG).sort());
+    for (const file of fs.readdirSync(IMG)) {
+      assert.equal(sha(path.join(generated, file)), sha(path.join(IMG, file)), file + ' 与生成器不同步');
+    }
+    assert.equal(sha(path.join(temp, 'assets', 'js', 'mascot-inline.js')), sha(INLINE));
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
   }
 });

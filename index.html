@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-tab="chat" data-grid="on" data-glow="on" data-motion="on">
+<html lang="zh-CN" data-tab="chat" data-grid="on" data-glow="on" data-motion="on" data-3d="on">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-<meta name="theme-color" content="#FBF7EF" />
+<meta name="theme-color" content="#EFE9F7" />
 <meta name="description" content="诺瓦 Nova：面向大学生的私人日常助理。以课表为硬骨架，把作业 DDL 与考试节点排进空档；自然语言排程、四级重排与中断挽救，全部由确定性引擎计算，可解释、可复现、零惩罚。" />
 <meta property="og:title" content="诺瓦 Nova · 大学生日常助理" />
 <meta property="og:description" content="以课表为硬骨架，说一句话就能排程、重排、复盘。确定性引擎驱动，同一输入必得同一输出。" />
@@ -13,7 +13,9 @@
 <link rel="icon" href="assets/img/favicon-v4.svg" type="image/svg+xml" />
 <script>
   /* 首帧前应用本地视觉偏好，避免主题闪烁（与 assets/js/util.js 共用同一存储键）。
-     动效裁决：显式选择（true/false）优先；从未选择时才跟随系统 reduce-motion。 */
+     动效裁决：显式选择（true/false）优先；从未选择时才跟随系统 reduce-motion。
+     3D 裁决（prefs.gl3d）：显式 false 关闭 WebGL 舞台（回 DOM 模式）；默认 on，
+     运行期 WebGL 不可用时由 gl/engine.js 再降级为 data-3d="off"。 */
   (function () {
     try {
       var p = JSON.parse(localStorage.getItem('zx.ui_prefs') || '{}') || {};
@@ -24,33 +26,42 @@
         : p.motion === true ? 'on'
         : (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches ? 'off' : 'on');
       r.dataset.font = (p.font === 'm' || p.font === 'l') ? p.font : '';
+      r.dataset.gl3d = p.gl3d === false ? 'off' : 'on';
     } catch (e) { /* 隐私模式禁用 localStorage 时保持默认 */ }
   })();
 </script>
 <link rel="stylesheet" href="assets/css/app.css" />
 </head>
 <body>
-<a class="skip-link" href="#main">跳到主内容</a>
+<a class="skip-link" href="#input">跳到输入框</a>
+
+<!-- ── WebGL 舞台（底层画布）：氛围纸面 / 3D 页签 / 诺瓦形象 / 脉冲粒子 ── -->
+<canvas id="gl" aria-hidden="true"></canvas>
+<!-- ── CSS3D 内容层：对话气泡卡 / 工作台面板（真实 DOM 进入同一相机，事件委托照常） ── -->
+<div id="css3d" aria-hidden="false"></div>
+
 <div class="app">
   <header class="topbar">
     <div class="brand">
       <div class="seal" aria-hidden="true"></div>
       <div>
-        <div class="brand-cn">Nova诺瓦</div>
+        <div class="brand-cn">Nova诺瓦<span class="brand-stamp" aria-hidden="true">诺</span></div>
         <div class="brand-en">大学生日常助理</div>
       </div>
     </div>
     <div class="sync" id="syncMain"><span class="dot hide" id="syncDot"></span><span id="syncText"></span></div>
     <div class="sync" id="syncPlanner"><span class="dot hide" id="plannerDot"></span><span id="plannerText"></span></div>
     <span class="kbd" title="按 / 聚焦输入框" aria-label="按斜杠键聚焦输入框">/</span>
+    <!-- 主导航：GL 模式下页签由 3D 卡渲染，本 nav 是读屏/键盘语义源（sr-only），
+         DOM 模式下降级为可见导航（app.css 尾段 .gl-off 覆盖） -->
     <nav class="tnav" id="rail" aria-label="主导航"></nav>
   </header>
 
   <button class="btn" id="reviewPlan" type="button" data-act="review-plan" hidden>计划待复核 · 点击重试</button>
+
+  <!-- 语义源树：GL 模式下被场景克隆呈现（display:none），降级模式原样可见 -->
   <div class="shell">
     <section class="copilot">
-      <!-- 对话页头部（诺瓦标题 / 副题 / 在线徽章）已撤除：与顶栏品牌区、同步状态重复；
-           形象由欢迎语主立绘承担，状态由顶栏同步指示承担 -->
       <div class="cp-body" id="chat" role="log" aria-live="polite" aria-relevant="additions" aria-label="与诺瓦的对话记录"></div>
       <div class="cp-foot">
         <div class="cp-acts-h"><span>一站式指令</span><span>关键词匹配 · 确定性计算</span></div>
@@ -87,6 +98,15 @@
 <script src="shared/data/seed.js"></script>
 <script src="assets/js/rhythm.build.js"></script>
 
+<!-- WebGL 舞台（全量重构）：vendored three UMD（file:// 经典 script，见 scripts/build-vendor-three.mjs） -->
+<script src="assets/vendor/three.min.js"></script>
+<script src="assets/vendor/three-css3d.js"></script>
+<script src="assets/js/gl/engine.js"></script>
+<script src="assets/js/gl/background.js"></script>
+<script src="assets/js/gl/nav.js"></script>
+<script src="assets/js/gl/mascot3d.js"></script>
+<script src="assets/js/gl/stage.js"></script>
+
 <!-- 前端脚本（经典 script，非 ESM：保证 file:// 双击直接打开） -->
 <script src="assets/js/mascot-inline.js"></script>
 <script src="assets/js/util.js"></script>
@@ -101,6 +121,7 @@
 <script src="shared/workflow.js"></script>
 <script src="assets/js/assistant.js"></script>
 <script src="assets/js/flows/replan.js"></script>
+<script src="assets/js/flows/clarify.js"></script>
 <script src="assets/js/flows/goal.js"></script>
 <script src="assets/js/flows/rescue.js"></script>
 <script src="assets/js/flows/exec.js"></script>

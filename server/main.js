@@ -18,6 +18,7 @@ const { URL } = require('node:url');
 const { createRouter, ApiError } = require('./api/routes.js');
 const store = require('./store/memory.js');
 const auth = require('./auth.js');
+const llm = require('./llm.js');
 const { sendJson, sendError } = require('./resp.js');
 const { serveStatic } = require('./static.js');
 
@@ -164,7 +165,8 @@ function createServer() {
         req: req,
         userId: userId
       };
-      const out = router.handle(ctx);
+      return router.handle(ctx);
+    }).then((out) => {
       sendJson(res, out.status, out.body, cors);
     }).catch((err) => {
       if (err instanceof ApiError) {
@@ -217,6 +219,11 @@ if (require.main === module) {
     process.stdout.write('  POST /api/replan/confirm 确认放弃并落库\n');
     process.stdout.write('  POST /api/attribute     偏差归因\n');
     process.stdout.write('  POST /api/sync/ops      批量上行（≤200）\n');
+    process.stdout.write('  POST /api/llm/clarify   对话式需求澄清（LLM）\n');
+    process.stdout.write('  POST /api/llm/analyze   计划拆解建议（LLM）\n');
+    if (!llm.configured()) {
+      process.stdout.write('  ⚠ LLM 未配置（LLM_BASE_URL / LLM_API_KEY / LLM_MODEL）：智能澄清不可用，前端自动降级为表单流程\n');
+    }
   }).catch((e) => {
     process.stderr.write('启动失败：' + (e && e.message ? e.message : String(e)) + '\n');
     process.exit(1);

@@ -96,6 +96,7 @@ window.ZX = window.ZX || {};
         demand: U.num(feas.demand, 0)
       },
       tasks: (Array.isArray(r.tasks) ? r.tasks : []).map(normTask),
+      sessions: U.clone(Array.isArray(r.sessions) ? r.sessions : []),
       buffer: Object.assign({}, r.buffer || {}),
       week: normWeek(r.week),
       weekShift: normWeek(r.weekShift),
@@ -140,7 +141,7 @@ window.ZX = window.ZX || {};
     movedOut: null,
     presetActive: true,
 
-    sessions: [],
+    sessions: seed.sessions,
 
     /* 环节⑧归因计数：执行记录后由 attribute 引擎回写 {类型: 次数}，数据页消费 */
     attrCounts: {},
@@ -201,6 +202,7 @@ window.ZX = window.ZX || {};
   }
 
   function dropOverlay() {
+    serverSessionsBlocked = true; /* 删除后晚到的响应不能恢复已清空记录 */
     if (ZX.api && ZX.api.invalidatePendingSync) ZX.api.invalidatePendingSync();
     try { if (ZX.api && ZX.api.clearPendingPlan) ZX.api.clearPendingPlan(); } catch (e) { /* 忽略 */ }
     try { window.localStorage.removeItem(OVERLAY_KEY); } catch (e) { /* 忽略 */ }
@@ -215,6 +217,13 @@ window.ZX = window.ZX || {};
      · 换设备 / 已清空（false）：启动渲染会把「采纳前内存」写进 overlay，那份快照
        只是种子投影，不得覆盖服务端回放值——否则回放永远活不过启动序列 */
   var bootOverlayLoaded = false;
+  /* 旧 overlay 没有 session 删除墓碑 / 清空版本，不能把缺失记录当作待合并新增。
+     仅无 overlay、无清空痕迹且本机会话未变更时采纳远端全集；其余保留本地。
+     捕获启动回收标记，避免 settings.init 清理过期回收站后误读旧远端记录。 */
+  var serverSessionsBlocked = false;
+  try { serverSessionsBlocked = !!window.localStorage.getItem('zx.trash'); }
+  catch (e) { serverSessionsBlocked = true; }
+  var serverSessionsBaseline = JSON.stringify(state.sessions);
 
   function applyOverlay() {
     var o = null;
@@ -271,8 +280,16 @@ window.ZX = window.ZX || {};
       demand: state.feas.demand
     };
   };
+  /* 无目标不是 R=0，也没有可行性结论；调用方须先处理 null。
+     有目标但参数非法时仍由引擎报错，不把损坏数据伪装成空态。 */
+  state.hasGoal = function () {
+    return !!(state.goal && state.goal.source !== 'removed' &&
+      typeof state.goal.name === 'string' && state.goal.name.trim());
+  };
   /* 渲染路径：同步本地确定性纯函数（与后端同语义，不产生 UI 抖动） */
-  state.feasibility = function () { return ZX.engine.feasibilityNow(state.feasInput()); };
+  state.feasibility = function () {
+    return state.hasGoal() ? ZX.engine.feasibilityNow(state.feasInput()) : null;
+  };
   state.weekInput = function () {
     return state.week.map(function (d) { return { date: d.d, minutes: U.num(d.total, 0), buffer: U.num(d.buf, 0) }; });
   };
@@ -313,6 +330,11 @@ window.ZX = window.ZX || {};
       var s = normSeed(payload.seed);
       state.user = s.user; state.goal = s.goal; state.feas = s.feas;
       state.tasks = s.tasks; state.buffer = s.buffer; state.week = s.week;
+      if (!bootOverlayLoaded && !serverSessionsBlocked &&
+          JSON.stringify(state.sessions) === serverSessionsBaseline) {
+        state.sessions = s.sessions;
+        serverSessionsBaseline = JSON.stringify(state.sessions);
+      }
       state.weekShift = s.weekShift; state.notif = s.notif; state.weekStats = s.weekStats;
       /* 服务端回放的改期 / 锁定并入；随后 applyOverlay() 覆写（本地优先） */
       state.dayAssign = s.dayAssign;

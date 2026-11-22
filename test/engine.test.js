@@ -204,6 +204,129 @@ test('schedule：返回结构完整且版本固定', () => {
   assert.ok(res.blocks[0].reason.length > 0);
 });
 
+test('schedule：连续限制扫描跳过右侧不相接的同科目簇', () => {
+  for (const withLeft of [false, true]) {
+    const tasks = [
+      { id: 'right', subject: '数学', estMin: 30, date: '一', startMin: 720 },
+      { id: 'flex', subject: '数学', estMin: 60 }
+    ];
+    const slots = [
+      { date: '一', startMin: 600, durMin: 60 },
+      { date: '一', startMin: 720, durMin: 30 }
+    ];
+    if (withLeft) {
+      tasks.push({ id: 'left', subject: '数学', estMin: 30, date: '一', startMin: 570 });
+      slots.push({ date: '一', startMin: 570, durMin: 30 });
+    }
+    const res = schedule({ tasks, slots, params: { bufferRatio: 0, maxContiguousMin: 60 } });
+    assert.deepEqual(res.blocks.filter(b => b.taskId === 'flex').map(b => [b.startMin, b.durMin]),
+      [[600, withLeft ? 30 : 60]]);
+    assert.deepEqual(res.unplanned, withLeft
+      ? [{ taskId: 'flex', reason: '单科目连续上限 60 min 限制，剩余 30 min 未排入' }]
+      : []);
+  }
+});
+
+test('schedule：固定起点已占用时不移到槽尾或后续时段', () => {
+  for (const [firstMin, dailyCapMin] of [[30, 300], [60, 300], [30, 30]]) {
+    const res = schedule({
+      tasks: [
+        { id: 'a', subject: '数学', estMin: firstMin, date: '一', startMin: 600 },
+        { id: 'b', subject: '英语', estMin: 30, date: '一', startMin: 600 }
+      ],
+      slots: [
+        { date: '一', startMin: 600, durMin: 60 },
+        { date: '一', startMin: 660, durMin: 60, isBuffer: true }
+      ],
+      params: { bufferRatio: 0, dailyCapMin }
+    });
+    assert.deepEqual(res.blocks.map(b => [b.taskId, b.startMin, b.durMin, b.locked]),
+      [['a', 600, firstMin, true]]);
+    assert.deepEqual(res.unplanned,
+      [{ taskId: 'b', reason: '指定时段已被占用（一 10:00），固定起点冲突' }]);
+  }
+});
+
+test('schedule：规范化边界拒绝同日期重叠的可用时段', () => {
+  const overlapping = [
+    [{ date: '一', startMin: 630, durMin: 60 }, { date: '一', startMin: 600, durMin: 60 }],
+    [{ date: '一', startMin: 600, durMin: 120 }, { date: '一', startMin: 630, durMin: 30 }],
+    [{ date: '一', startMin: 600, durMin: 60 }, { date: '一', startMin: 600, durMin: 60, isBuffer: true }],
+    [{ date: 1, startMin: 600, durMin: 60 }, { date: '1', startMin: 630, durMin: 60 }]
+  ];
+  for (const slots of overlapping) {
+    const input = {
+      tasks: [{ id: 'a', subject: '数学', estMin: 60 }, { id: 'b', subject: '英语', estMin: 60 }],
+      slots, params: { bufferRatio: 0 }
+    };
+    const before = structuredClone(input);
+    assert.throws(() => schedule(input), { name: 'TypeError', message: /同日期的可用时段不能重叠/ });
+    assert.deepEqual(input, before);
+    assert.throws(() => schedule({ tasks: [], slots }), TypeError);
+  }
+});
+
+test('schedule：相接时段合法且保留原始候选顺序和输入', () => {
+  const input = {
+    tasks: [{ id: 'a', subject: '数学', estMin: 60 }],
+    slots: [
+      { date: '一', startMin: 630, durMin: 30 },
+      { date: '一', startMin: 600, durMin: 30 }
+    ],
+    params: { bufferRatio: 0, maxContiguousMin: 60 }
+  };
+  const before = structuredClone(input);
+  const res = schedule(input);
+  assert.deepEqual(res.blocks.map(b => [b.startMin, b.durMin]), [[630, 30], [600, 30]]);
+  assert.deepEqual(res.unplanned, []);
+  assert.deepEqual(input, before);
+});
+
+test('schedule：不同日期相同时段合法，不可用时段不参与重叠校验', () => {
+  const res = schedule({
+    tasks: [{ id: 'a', subject: '数学', estMin: 120 }],
+    slots: [
+      { date: '一', startMin: 590, durMin: 90, available: false },
+      { date: '一', startMin: 600, durMin: 60 },
+      { date: '二', startMin: 600, durMin: 60 }
+    ],
+    params: { bufferRatio: 0 }
+  });
+  assert.deepEqual(res.blocks.map(b => [b.date, b.startMin, b.durMin]), [['一', 600, 60], ['二', 600, 60]]);
+  assert.deepEqual(res.unplanned, []);
+});
+
+test('schedule：固定任务受连续限制时不跳过起点且理由准确', () => {
+  const res = schedule({
+    tasks: [
+      { id: 'a', subject: '数学', estMin: 30, date: '一', startMin: 570 },
+      { id: 'b', subject: '数学', estMin: 30, date: '一', startMin: 600 }
+    ],
+    slots: [570, 600, 630].map(startMin => ({ date: '一', startMin, durMin: 30 })),
+    params: { bufferRatio: 0, maxContiguousMin: 30 }
+  });
+  assert.deepEqual(res.blocks.map(b => [b.taskId, b.startMin, b.durMin]), [['a', 570, 30]]);
+  assert.deepEqual(res.unplanned,
+    [{ taskId: 'b', reason: '单科目连续上限 30 min 限制，剩余 30 min 未排入' }]);
+});
+
+test('schedule：固定任务的日上限、连续上限和容量不足分别归因', () => {
+  const cases = [
+    { params: { dailyCapMin: 30 }, reason: '日上限 30 min 已满，剩余 30 min 未排入' },
+    { params: { maxContiguousMin: 30 }, reason: '单科目连续上限 30 min 限制，剩余 30 min 未排入' },
+    { params: {}, reason: '指定时段之后可用余量不足，剩余 30 min 未排入', durMin: 30 }
+  ];
+  for (const c of cases) {
+    const res = schedule({
+      tasks: [{ id: 'a', subject: '数学', estMin: 60, date: '一', startMin: 600 }],
+      slots: [{ date: '一', startMin: 600, durMin: c.durMin || 60 }],
+      params: { bufferRatio: 0, ...c.params }
+    });
+    assert.deepEqual(res.blocks.map(b => [b.startMin, b.durMin, b.locked]), [[600, 30, true]]);
+    assert.deepEqual(res.unplanned, [{ taskId: 'a', reason: c.reason }]);
+  }
+});
+
 /* ── 重排 ─────────────────────────────────────────────────────────────── */
 
 test('replan：确定性（同输入两次全等）', () => {

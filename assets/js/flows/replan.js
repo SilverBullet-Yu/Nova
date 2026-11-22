@@ -168,13 +168,27 @@ window.ZX = window.ZX || {};
     var level = res.needsConfirmation ? 4 : res.strategies.reduce(function (max, item) {
       return item.applied ? Math.max(max, item.level) : max;
     }, 0);
-    var changes = new Map(res.diff.filter(function (d) { return d.op !== 'defer'; }).map(function (d) { return [d.taskId, d]; }));
+    /* diff 同一任务可有多种操作，按字段合并，不能用最后一条覆盖前面的操作。 */
+    var changes = new Map();
+    res.diff.forEach(function (d) {
+      if (d.op !== 'compress' && d.op !== 'abandon') return;
+      var patch = changes.get(d.taskId) || {};
+      if (d.op === 'compress') { patch.est = Number(d.to); patch.compressed = true; }
+      if (d.op === 'abandon') patch.abandoned = true;
+      changes.set(d.taskId, patch);
+    });
+    /* 替代关系只取引擎的结构化字段；不解析 diff 展示文本，也不覆盖本地标题/时段。 */
+    (res.nextTasks || []).forEach(function (next) {
+      var patch = changes.get(next.id) || {};
+      ['substituted', 'substitutedBy', 'replaces'].forEach(function (key) {
+        if (Object.prototype.hasOwnProperty.call(next, key)) patch[key] = next[key];
+      });
+      changes.set(next.id, patch);
+    });
     var tasks = S.tasks.map(function (t) {
-      var d = changes.get(t.id);
-      if (!d || t.done || (S.locks && S.locks[t.id])) return t;
-      if (d.op === 'compress') return Object.assign({}, t, { est: Number(d.to), compressed: true });
-      if (d.op === 'abandon') return Object.assign({}, t, { abandoned: true });
-      return t;
+      var patch = changes.get(t.id);
+      if (!patch || t.done || (S.locks && S.locks[t.id])) return t;
+      return Object.assign({}, t, patch);
     });
     var dayAssign = Object.assign({}, S.dayAssign);
     var moved = [];

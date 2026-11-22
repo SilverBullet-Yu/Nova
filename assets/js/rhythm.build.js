@@ -138,6 +138,23 @@
     };
   }
 
+  /* 每个可用时段独立记账，规范化后拒绝同日重叠；只排序副本，保留候选优先级。 */
+  function validateSlots(slots) {
+    var available = slots.filter(function (s) { return s.available && s.durMin > 0; });
+    available.sort(function (a, b) {
+      if (a.date < b.date) return -1;
+      if (a.date > b.date) return 1;
+      return a.startMin - b.startMin || a.idx - b.idx;
+    });
+    for (var i = 1; i < available.length; i++) {
+      var prev = available[i - 1];
+      var cur = available[i];
+      if (cur.date === prev.date && cur.startMin < prev.startMin + prev.durMin) {
+        throw new TypeError('同日期的可用时段不能重叠（' + cur.date + '，slots[' + prev.idx + '] / slots[' + cur.idx + ']）');
+      }
+    }
+  }
+
   /* ---------- 区间工具（用于单科目连续约束） ---------- */
 
   function mergeIntervals(list) {
@@ -175,6 +192,7 @@
     /* 左侧紧邻簇链 */
     for (i = clusters.length - 1; i >= 0; i--) {
       var c = clusters[i];
+      if (c[0] > lo) continue;
       if (c[1] === lo) lo = c[0];
       else if (c[1] > lo) { /* 理论不会出现重叠 */ lo = Math.min(lo, c[0]); hi = Math.max(hi, c[1]); break; }
       else break;
@@ -241,11 +259,18 @@
   function fillInto(st, task, need, candIdx) {
     var placed = 0;
     var segs = [];
-    var cause = { unavailable: false, noTail: false, dayFull: false, bufferFull: false, contiguous: false };
+    var cause = { unavailable: false, noTail: false, dayFull: false, bufferFull: false, contiguous: false, anchorOccupied: false };
+    var anchored = task.date !== null && task.startMin !== null;
 
     for (var i = 0; i < candIdx.length && placed < need; i++) {
+      /* 固定任务必须从锚点起排，首槽失败不得跳到后续槽。 */
+      if (anchored && placed === 0 && i > 0) break;
       var si = candIdx[i];
       var slot = st.slots[si];
+      if (anchored && placed === 0 && st.slotUsed[si] > 0) {
+        cause.anchorOccupied = true;
+        break;
+      }
       if (!slot.available) { cause.unavailable = true; continue; }
       var tail = slot.durMin - st.slotUsed[si];
       if (tail <= 0) { cause.noTail = true; continue; }
@@ -263,6 +288,11 @@
       var take = Math.min(tail, need - placed, room, allow);
       if (slot.isBuffer) take = Math.min(take, day.bufferCap - day.bufferUsed);
       if (take <= 0) { cause.bufferFull = true; continue; }
+      if (take < need - placed) {
+        if (take === room) cause.dayFull = true;
+        if (take === allow) cause.contiguous = true;
+        if (slot.isBuffer && take === day.bufferCap - day.bufferUsed) cause.bufferFull = true;
+      }
 
       st.slotUsed[si] += take;
       day.total += take;
@@ -292,6 +322,9 @@
   }
 
   function reasonOf(cause, task, remaining, P) {
+    if (cause.anchorOccupied) {
+      return '指定时段已被占用（' + task.date + ' ' + fmtMin(task.startMin) + '），固定起点冲突';
+    }
     if (task.date && task.startMin !== null && cause.unavailable && !cause.dayFull && !cause.contiguous) {
       return '指定时段不可用或不存在（' + task.date + ' ' + fmtMin(task.startMin) + '）';
     }
@@ -300,6 +333,9 @@
       return '单科目连续上限 ' + P.maxContiguousMin + ' min 限制，剩余 ' + remaining + ' min 未排入';
     }
     if (cause.dayFull) return '日上限 ' + P.dailyCapMin + ' min 已满，剩余 ' + remaining + ' min 未排入';
+    if (task.date !== null && task.startMin !== null) {
+      return '指定时段之后可用余量不足，剩余 ' + remaining + ' min 未排入';
+    }
     return '无可用时段，剩余 ' + remaining + ' min 未排入';
   }
 
@@ -314,6 +350,7 @@
     var P = normalizeParams(src.params);
     var tasks = (src.tasks || []).map(normalizeTask);
     var slots = (src.slots || []).map(normalizeSlot);
+    validateSlots(slots);
     var st = initState(slots, P);
 
     /* 排序：指定时段的刚性任务优先（先入箱 → 可优先占用弹性位），
@@ -406,7 +443,7 @@
       if (res.placed < task.estMin) {
         unplanned.push({
           taskId: task.id,
-          reason: '指定时段之后可用余量不足，剩余 ' + (task.estMin - res.placed) + ' min 未排入'
+          reason: reasonOf(res.cause, task, task.estMin - res.placed, P)
         });
       }
     });
@@ -531,7 +568,9 @@
       compressedShareCap: num(p.compressedShareCap, 0.30),
       consecutiveNoImproveCap: num(p.consecutiveNoImproveCap, 3),
       bufferRatio: num(p.bufferRatio, 0.15),
-      dailyCapMin: num(p.dailyCapMin, 300)
+      dailyCapMin: num(p.dailyCapMin, 300),
+      maxTasks: num(p.maxTasks, 500),
+      maxOperations: num(p.maxOperations, 50000)
     };
   }
 
@@ -913,6 +952,13 @@
     var tasks = clone(src.tasks || []);
     var weekRaw = clone(src.week || []);
     var days = normalizeDays(weekRaw, P);
+    if (tasks.length > P.maxTasks) {
+      throw new RangeError('重排任务规模超过上限：' + P.maxTasks);
+    }
+    var estimatedOperations = tasks.length * Math.max(1, days.length) * 8;
+    if (estimatedOperations > P.maxOperations) {
+      throw new RangeError('重排计算预算不足：预计 ' + estimatedOperations + ' 次操作，预算 ' + P.maxOperations);
+    }
     /* 锁定集合：硬约束，直接参与各等级判定，不做事后过滤 */
     var locks = normalizeLocks(src.locks);
 

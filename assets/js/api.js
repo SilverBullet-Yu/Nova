@@ -12,6 +12,10 @@ window.ZX = window.ZX || {};
 
   var U = ZX.util;
   var TIMEOUT = 3000;
+  function llmTimeout() {
+    var value = Number(window.__ZX_LLM_TIMEOUT_MS__);
+    return isFinite(value) && value > 0 ? Math.max(5000, Math.min(125000, value)) : 35000;
+  }
   var DEFAULT_BASE = 'http://127.0.0.1:8787';
   var QUEUE_KEY = 'zx.op_queue';
   var MAX_QUEUE = 200;
@@ -53,12 +57,29 @@ window.ZX = window.ZX || {};
     }
   }
 
-  function request(method, path, body, token) {
+  function request(method, path, body, token, options) {
+    options = options || {};
+    var signal = options.signal;
     var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-    var timer = setTimeout(function () {
-      if (ctrl) { try { ctrl.abort(); } catch (e) {} }
-    }, TIMEOUT);
-
+    var stopped = null, httpStatus;
+    var rejectStop;
+    var interruption = new Promise(function (_, reject) { rejectStop = reject; });
+    function stop(timeout) {
+      if (stopped) return;
+      stopped = new Error(timeout ? '请求超时，请稍后重试。' : '已取消请求');
+      stopped.name = 'AbortError';
+      if (timeout) {
+        stopped.code = 'ETIMEDOUT';
+        if (httpStatus) stopped.status = httpStatus;
+      }
+      rejectStop(stopped);
+      if (ctrl) ctrl.abort();
+    }
+    function cancel() { stop(false); }
+    if (signal) {
+      signal.addEventListener('abort', cancel, { once: true });
+      if (signal.aborted) cancel();
+    }
     var headers = { 'Content-Type': 'application/json' };
     if (token) headers.Authorization = 'Bearer ' + token;
 
@@ -71,18 +92,32 @@ window.ZX = window.ZX || {};
     if (body !== undefined) opts.body = JSON.stringify(body);
     if (ctrl) opts.signal = ctrl.signal;
 
-    return fetch(BASE + path, opts).then(function (res) {
-      clearTimeout(timer);
-      if (!res.ok) {
-        var err = new Error('HTTP ' + res.status);
-        err.status = res.status;
+    var timer = setTimeout(function () { stop(true); }, options.timeout || TIMEOUT);
+    var network = Promise.resolve().then(function () {
+      if (stopped) throw stopped;
+      return fetch(BASE + path, opts);
+    }).then(function (res) {
+      if (stopped) throw stopped;
+      httpStatus = res.status;
+      if (res.ok) return res.json();
+      var err = new Error('HTTP ' + res.status);
+      err.status = res.status;
+      return Promise.resolve().then(function () { return res.json(); }).then(function (data) {
+        if (data && data.error) {
+          err.code = data.error.code;
+          if (data.error.message) err.message = data.error.message;
+        }
         throw err;
-      }
-      return res.json();
-    }, function (e) {
+      }, function () {
+        /* 空正文 / 非 JSON 错误页也保留 HTTP 状态，供 401 重签与在线判断使用。 */
+        throw err;
+      });
+    }).finally(function () {
+      /* 截止时间覆盖响应正文读取，而非仅等待响应头。 */
       clearTimeout(timer);
-      throw e;
     });
+    var pending = Promise.race([interruption, network]);
+    return pending;
   }
 
   /* ---------- 凭证读写 ---------- */
@@ -118,20 +153,7 @@ window.ZX = window.ZX || {};
     if (rec) return Promise.resolve(rec.token);
     if (authPromise) return authPromise;
 
-    var pending = fetch(BASE + AUTH_PATH, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: '{}',
-      cache: 'no-store',
-      mode: 'cors'
-    }).then(function (res) {
-      if (!res.ok) {
-        var err = new Error('HTTP ' + res.status);
-        err.status = res.status;
-        throw err;
-      }
-      return res.json();
-    }).then(function (r) {
+    var pending = request('POST', AUTH_PATH, {}).then(function (r) {
       if (!r || typeof r.token !== 'string' || !r.token) throw new Error('凭证签发失败');
       saveToken({ token: r.token, userId: r.userId, expiresAt: r.expiresAt });
       return r.token;
@@ -192,7 +214,12 @@ window.ZX = window.ZX || {};
   }
 
   function saveQueue(arr) {
-    try { window.localStorage.setItem(QUEUE_KEY, JSON.stringify(arr.slice(-MAX_QUEUE))); }
+    /* 只裁剪已确认历史，未确认写入不得因队列长度丢失。 */
+    var history = 0;
+    var kept = arr.slice().reverse().filter(function (op) {
+      return op.pending || ++history <= MAX_QUEUE;
+    }).reverse();
+    try { window.localStorage.setItem(QUEUE_KEY, JSON.stringify(kept)); }
     catch (e) { /* 隐私模式 / 配额不足：不影响主链路 */ }
   }
 
@@ -247,40 +274,56 @@ window.ZX = window.ZX || {};
   }
 
   var syncGeneration = 0;
-  function invalidatePendingSync() { syncGeneration++; }
+  var syncInFlight = null;
+  function invalidatePendingSync() { syncGeneration++; syncInFlight = null; }
 
   function flushQueue() {
+    if (syncInFlight) return syncInFlight;
     var generation = syncGeneration;
-    var q = loadQueue();
-    var pending = [];
-    for (var i = 0; i < q.length; i++) if (q[i].pending) pending.push(q[i]);
-    if (!pending.length) {
-      return Promise.resolve({ accepted: [], serverSeq: (ZX.state ? ZX.state.serverSeq : 0) });
-    }
-    var payload = pending.map(function (o) {
-      return {
-        opId: o.opId, entity: o.entity, entityId: o.entityId,
-        field: o.field, value: o.value, clientTs: o.clientTs, baseSeq: o.baseSeq
-      };
-    });
-    var planVersion = ZX.state && ZX.state.currentPlanVersion ? ZX.state.currentPlanVersion() : null;
-    return syncOps(payload).then(function (res) {
-      if (generation !== syncGeneration) return res;
-      var accepted = (res && res.accepted) || [];
-      var cur = loadQueue();
-      for (var j = 0; j < cur.length; j++) {
-        if (accepted.indexOf(cur[j].opId) >= 0) cur[j].pending = false;
+    var attempted = new Set();
+    function batch(last) {
+      if (generation !== syncGeneration) return Promise.resolve(last);
+      /* 每轮重新读盘，合并传输期间新增项；本轮未确认项留待下次 flush 重试。 */
+      var pending = loadQueue().filter(function (op) {
+        return op.pending && !attempted.has(op.opId);
+      }).slice(0, MAX_QUEUE);
+      if (!pending.length) {
+        return Promise.resolve(last || { accepted: [], serverSeq: (ZX.state ? ZX.state.serverSeq : 0) });
       }
-      saveQueue(cur);
-      if (res && typeof res.serverSeq === 'number' && ZX.state) ZX.state.serverSeq = res.serverSeq;
-      var count = payload.filter(function (op) { return accepted.indexOf(op.opId) >= 0; }).length;
-      traceSync(count === payload.length ? 'accepted' : count ? 'partial' : 'unconfirmed', payload, accepted, planVersion);
-      emit();
-      return res;
-    }, function (err) {
-      if (generation === syncGeneration) traceSync('failed', payload, [], planVersion);
-      throw err;
+      var payload = pending.map(function (o) {
+        attempted.add(o.opId);
+        return {
+          opId: o.opId, entity: o.entity, entityId: o.entityId,
+          field: o.field, value: o.value, clientTs: o.clientTs, baseSeq: o.baseSeq
+        };
+      });
+      var planVersion = ZX.state && ZX.state.currentPlanVersion ? ZX.state.currentPlanVersion() : null;
+      return syncOps(payload).then(function (res) {
+        if (generation !== syncGeneration) return res;
+        var ids = (res && Array.isArray(res.accepted)) ? res.accepted : [];
+        var accepted = payload.filter(function (op) { return ids.indexOf(op.opId) >= 0; })
+          .map(function (op) { return op.opId; });
+        var cur = loadQueue();
+        for (var j = 0; j < cur.length; j++) {
+          if (accepted.indexOf(cur[j].opId) >= 0) cur[j].pending = false;
+        }
+        saveQueue(cur);
+        if (res && typeof res.serverSeq === 'number' && ZX.state) ZX.state.serverSeq = res.serverSeq;
+        var count = accepted.length;
+        traceSync(count === payload.length ? 'accepted' : count ? 'partial' : 'unconfirmed', payload, accepted, planVersion);
+        emit();
+        /* 零确认立即停止，不对未确认项忙循环。 */
+        return count ? batch(res) : res;
+      }, function (err) {
+        if (generation === syncGeneration) traceSync('failed', payload, [], planVersion);
+        throw err;
+      });
+    }
+    var running = Promise.resolve().then(function () { return batch(); }).finally(function () {
+      if (syncInFlight === running) syncInFlight = null;
     });
+    syncInFlight = running;
+    return running;
   }
 
   /* ---------- 对外接口（HANDOFF 第 6 节） ---------- */
@@ -333,6 +376,9 @@ window.ZX = window.ZX || {};
   function undo(snapshot) { return call('POST', '/api/replan/undo', { snapshot: snapshot }); }
   function syncOps(ops) { return call('POST', '/api/sync/ops', { ops: ops || [] }); }
   function health() { return call('GET', '/api/health'); }
+  /* LLM 理解与分析层：失败/未配置由服务端以 E5010/5011/5012 报出，调用方按码降级 */
+  function llmClarify(p) { return call('POST', '/api/llm/clarify', p || {}); }
+  function llmAnalyze(p) { return call('POST', '/api/llm/analyze', p || {}); }
 
   ZX.api = {
     /* op 队列键名的单一事实源（settings.js 的 wipe 也按此键清队列） */
@@ -351,6 +397,8 @@ window.ZX = window.ZX || {};
     undo: undo,
     syncOps: syncOps,
     health: health,
+    llmClarify: llmClarify,
+    llmAnalyze: llmAnalyze,
 
     /* op 队列 */
     queueOp: queueOp,

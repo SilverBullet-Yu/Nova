@@ -61,7 +61,9 @@ window.ZX = window.ZX || {};
   function startTask(id) {
     var S = ZX.state;
     var t = S.tasks.filter(function (x) { return x.id === id; })[0];
-    var restored = !!(t && t.skipped);
+    /* 旧卡片不能复活退役任务，也不能覆盖其他任务的计时。 */
+    if (!t || t.done || t.abandoned || t.substituted) return;
+    var restored = !!t.skipped;
     if (restored) { t.skipped = false; t.skipReason = null; }
     S.running = id;
     S.timerStart = Date.now();
@@ -85,7 +87,7 @@ window.ZX = window.ZX || {};
   function finishTask(id, useEst) {
     var S = ZX.state;
     var t = S.tasks.filter(function (x) { return x.id === id; })[0];
-    if (!t) return;
+    if (!t || t.done || t.abandoned || t.substituted) return;
     var exec = ZX.flows.exec;
 
     /* 结束（有计时）→ 记录弹层：完成度 / 状态；按预估记录 → 直接 100% */
@@ -150,6 +152,9 @@ window.ZX = window.ZX || {};
   ];
 
   function route(text) {
+    /* 对话式澄清激活时接管一切输入（退出词/画像追问），关键词路由在其后 */
+    if (ZX.flows && ZX.flows.clarify && ZX.flows.clarify.active() &&
+        typeof ZX.flows.clarify.hook === 'function' && ZX.flows.clarify.hook(text)) return;
     var t = text.toLowerCase().replace(/\s/g, '');
     var hit = null;
     for (var i = 0; i < INTENTS.length; i++) {
@@ -159,14 +164,20 @@ window.ZX = window.ZX || {};
       }
       if (hit) break;
     }
-    if (hit) hit.run();
+    if (hit) hit.run(text);
     else fallback();
   }
 
-  /* ---------- flow：新建目标（Stage A · 目标落地） ---------- */
-  function goalFlow() {
+  /* ---------- flow：新建目标（Stage A · 目标落地） ----------
+     优先走对话式澄清（LLM 驱动，clarify.js 内部自带降级链：
+     未配置 / 离线 / 失败时自动回落四步表单），clarify 未装配时直接开表单 */
+  function goalFlow(trigger) {
     if (!ZX.flows || !ZX.flows.goal) {
       say('<p>目标流程还没加载完成，刷新页面后再试一次。</p>', '目标 · 待加载');
+      return;
+    }
+    if (ZX.flows.clarify && typeof ZX.flows.clarify.start === 'function') {
+      ZX.flows.clarify.start(trigger);
       return;
     }
     say('<p>目标分四步落地：设定 → 可行性 → 拆解 → 生效。R 低于 0.70 时会先给三条校准路径，不直接砍计划。</p>',
@@ -196,6 +207,11 @@ window.ZX = window.ZX || {};
   function feasibilityFlow() {
     var S = ZX.state;
     var f = S.feasibility();
+    if (!f) {
+      say('<p>还没有阶段目标，先新建目标，再评估可行性。</p>', '可行性 · 未设定');
+      ZX.setTab('plan');
+      return;
+    }
     say('<div class="ecard">' +
       '<div class="ecard-h"><b>可行性评估</b><span class="tag ' + (f.R >= 0.9 ? 'ok' : 'warn') + '">' + f.verdict + '</span></div>' +
       '<div class="ecard-b">' +
@@ -227,6 +243,11 @@ window.ZX = window.ZX || {};
     var AMP_CAP = 0.30;                    /* 与拆解草案同一修改幅度阈值 */
     var before = U.num(S.feas.demand, 0);
     var beforeFeas = S.feasibility();
+    if (!beforeFeas) {
+      say('<p>还没有阶段目标，先设定目标后再调整科目投入。</p>', '拆解 · 未设定');
+      ZX.setTab('plan');
+      return;
+    }
     var amp = before > 0 ? ADD_H / before : 0;
     if (before <= 0 || amp > AMP_CAP) {
       say('<p>当前需求 <b>' + Math.round(before) + ' h</b>，再加 ' + ADD_H + ' h 的修改幅度 ' +
@@ -264,7 +285,7 @@ window.ZX = window.ZX || {};
   function lowestWeightTask() {
     var pick = null;
     ZX.state.tasks.forEach(function (x) {
-      if (x.done || x.skipped || (ZX.state.locks && ZX.state.locks[x.id]) || x.deferred) return;
+      if (x.done || x.skipped || x.abandoned || x.substituted || (ZX.state.locks && ZX.state.locks[x.id]) || x.deferred) return;
       if (!pick || U.num(x.weight, 0) < U.num(pick.weight, 0)) pick = x;
     });
     return pick;
@@ -277,7 +298,7 @@ window.ZX = window.ZX || {};
     /* 计划口径与今日页 KPI 同源（exec.metrics 过滤跳过项） */
     var before = ZX.flows.exec.metrics().planned;
     var after = before - est;
-    var keepN = S.tasks.filter(function (x) { return !x.done && !x.skipped && !x.deferred && (!pick || x.id !== pick.id); }).length;
+    var keepN = S.tasks.filter(function (x) { return !x.done && !x.skipped && !x.abandoned && !x.substituted && !x.deferred && (!pick || x.id !== pick.id); }).length;
     say('<p>今天不追加任务。状态的波动是可预期的，系统不该用计划去对抗它。</p>' +
       '<div class="ecard">' +
         '<div class="ecard-h"><b>降载建议</b><span class="tag warn">保留弹性位</span></div>' +
@@ -293,7 +314,7 @@ window.ZX = window.ZX || {};
   /* ---------- flow：今日安排 ---------- */
   function todayFlow() {
     var S = ZX.state;
-    var todo = S.tasks.filter(function (t) { return !t.done && !t.skipped; });
+    var todo = S.tasks.filter(function (t) { return !t.done && !t.skipped && !t.abandoned && !t.substituted; });
     /* 剩余量口径与今日页 KPI 同源（exec.metrics 过滤跳过项） */
     var mD = ZX.flows.exec.metrics();
     var rows = todo.map(function (t) {
@@ -312,7 +333,10 @@ window.ZX = window.ZX || {};
   function startFlow() {
     var S = ZX.state;
     var next = null;
-    for (var i = 0; i < S.tasks.length; i++) { if (!S.tasks[i].done) { next = S.tasks[i]; break; } }
+    for (var i = 0; i < S.tasks.length; i++) {
+      var t = S.tasks[i];
+      if (!t.done && !t.skipped && !t.deferred && !t.abandoned && !t.substituted) { next = t; break; }
+    }
     if (!next) { say('<p>今天的任务都记录完了。要不要留 10 分钟做一次明日预览？</p>', '执行'); return; }
     startTask(next.id);
     ZX.setTab('today');
@@ -321,8 +345,9 @@ window.ZX = window.ZX || {};
   /* ---------- flow：兜底 ---------- */
   function fallback() {
     say('<img class="msg-state state-unknown" src="assets/img/mascot-v4-unknown.svg" width="32" height="28" alt="" />' +
-      '<p>这句话我还没接住。当前 demo 的意图识别是关键词匹配，覆盖以下几类动作：</p>' +
+      '<p>这句话我还没接住。可以直接说「新建目标」进入对话式澄清，或用这些快捷指令：</p>' +
       '<div class="ecard"><div class="ecard-b">' +
+        '<div class="erow"><span class="k">定目标</span><span class="why">「新建目标」→ 对话式澄清（LLM）</span><span class="v">clarify</span></div>' +
         '<div class="erow"><span class="k">查看</span><span class="why">「今天学什么」</span><span class="v">今日</span></div>' +
         '<div class="erow"><span class="k">重排</span><span class="why">「这周落下了，帮我重排」</span><span class="v">L1–L4</span></div>' +
         '<div class="erow"><span class="k">评估</span><span class="why">「我的计划可行吗」</span><span class="v">R 值</span></div>' +
@@ -330,7 +355,7 @@ window.ZX = window.ZX || {};
         '<div class="erow"><span class="k">反馈</span><span class="why">「生成周报」/「我有点累」</span><span class="v">insight</span></div>' +
         '<div class="erow"><span class="k">计时</span><span class="why">「开始」/「撤销」</span><span class="v">session</span></div>' +
       '</div></div>' +
-      '<p style="margin-top:10px;color:var(--txt3);font-size:11px">产品上线时这一层由模型承接，但只做「把结构化结果翻译成人话」与「把自然语言转成参数修改」——排程结果本身必须可复现。</p>', '意图 · 兜底');
+      '<p style="margin-top:10px;color:var(--txt3);font-size:11px">澄清与拆解建议由 LLM 承接；R 值与排程始终由确定性引擎产出，同输入必得同输出。</p>', '意图 · 兜底');
   }
 
   /* ---------- 交互动作 ---------- */
@@ -347,7 +372,7 @@ window.ZX = window.ZX || {};
       t.deferred = true;
       t.deferredTo = '六';
     }
-    var left = S.tasks.filter(function (x) { return !x.done && !x.skipped; }).length;
+    var left = S.tasks.filter(function (x) { return !x.done && !x.skipped && !x.abandoned && !x.substituted; }).length;
     ZX.render();
     say('<p>已采纳。' + (t ? U.esc(t.s) + '（' + U.hm(t.est) + '）移到周六弹性位，今天剩 ' + left + ' 项收工。' : '今天没有需要顺延的项。') + '</p><p style="color:var(--txt3);font-size:11px">本次调整写入任务顺延状态，原因「状态不佳」；不计入断更，也不影响连续记录。</p>', '重排 · L1 顺延');
     ZX.api.queueOp({

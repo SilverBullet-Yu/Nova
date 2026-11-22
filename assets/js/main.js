@@ -8,7 +8,7 @@ window.ZX = window.ZX || {};
 
   var U = ZX.util;
 
-  /* 图标 + 文字页签：图标承载各栏的快速区分（用户反馈：纯文字 + 章号区分不足） */
+  /* 图标 + 文字页签：图标承载各栏的快速区分（用户反馈：纯文字区分不足） */
   var TABS = [
     { id: 'chat',  label: '对话', icon: '<path d="M2.6 3.4h10.8a1 1 0 0 1 1 1v5.6a1 1 0 0 1-1 1H7.6L4.8 13.4v-2.4H3.6a1 1 0 0 1-1-1V4.4a1 1 0 0 1 1-1z"/><path d="M5.4 7.4h5.2"/><path d="M5.4 5.4h3.4"/>' },
     { id: 'today', label: '今日', icon: '<path d="M1.9 12.4h12.2"/><path d="M4.1 12.4a3.9 3.9 0 0 1 7.8 0"/><path d="M8 2.3v2.1"/><path d="M3.3 4.9l1.5 1.5"/><path d="M12.7 4.9l-1.5 1.5"/>' },
@@ -24,6 +24,9 @@ window.ZX = window.ZX || {};
     data: '本周回顾 · 本机计算',
     me: '你的节奏 · 可用时段'
   };
+
+  /* GL 页签数据源：3D 页签卡（gl/nav.js）复用同一份 TABS（图标 path / 文字） */
+  ZX.glTabs = TABS;
 
   var CHIPS = ['今天怎么安排', '这周太乱，帮我重排', '我断了四天', '我的计划可行吗', '生成周报', '今天有点累'];
 
@@ -96,6 +99,8 @@ window.ZX = window.ZX || {};
       if (on) button.setAttribute('aria-current', 'page');
       else button.removeAttribute('aria-current');
     });
+    /* GL 舞台：3D 页签卡激活态联动（DOM 模式下无 ZX_GL_NAV，静默跳过） */
+    if (window.ZX_GL_NAV && ZX_GL_NAV.setActive) ZX_GL_NAV.setActive(ZX.state.tab);
   };
 
   /* 对话是主页面签：顶栏「诺瓦」入口与主导航都只是切到该页，无覆盖层状态。
@@ -106,12 +111,22 @@ window.ZX = window.ZX || {};
     try {
       var f = S.feasibility();
       var rEl = U.$('#ctxR');
-      if (rEl) ZX.ui.countTo(rEl, f.R, function (v) { return 'R ' + v.toFixed(2); });
+      if (rEl) {
+        if (f === null) {
+          /* 使 countTo 的旧帧失效，否则删除后动画仍会写回原 R 值。 */
+          rEl._ct = (rEl._ct || 0) + 1;
+          delete rEl.dataset.num;
+          rEl.textContent = 'R 未设定';
+        } else {
+          ZX.ui.countTo(rEl, f.R, function (v) { return 'R ' + v.toFixed(2); });
+        }
+      }
       U.$('#btTitle b').textContent = tabLabel(S.tab);
-      U.$('#btMeta').textContent = BT_META[S.tab] || '';
+      U.$('#btMeta').textContent = S.tab === 'plan' && f === null
+        ? '目标未设定 · 本地计算' : (BT_META[S.tab] || '');
       if (S.tab !== 'chat') U.$('#view').innerHTML = ZX.views[S.tab]();
       var gEl = U.$('#ctxGoal');
-      if (gEl) gEl.textContent = S.goal.name;
+      if (gEl) gEl.textContent = f === null ? '未设定阶段目标' : S.goal.name;
       if (S.running) ZX.assistant.tickTimer();
     } catch (e) {
       /* 单个视图异常不拖垮全局：记录错误并给出可恢复的占位 */
@@ -129,6 +144,13 @@ window.ZX = window.ZX || {};
     ZX.state.tab = id;
     ZX.renderRail();
     ZX.render(options);
+    /* 分镜硬切：切页对可见容器重触发两拍落定（连续切页用重排打断重播） */
+    var pane = U.$(id === 'chat' ? '#chat' : '#view');
+    if (pane && pane.classList) {
+      pane.classList.remove('page-cut');
+      void pane.offsetWidth;
+      pane.classList.add('page-cut');
+    }
     if (id === 'chat') {
       var body = U.$('#chat');
       if (body) body.scrollTop = body.scrollHeight;
@@ -187,6 +209,7 @@ window.ZX = window.ZX || {};
   var sealEl = U.$('.seal');
   var sealTimer = 0;
   function playSeal() {
+    if (window.ZX_GL_MASCOT && ZX_GL_MASCOT.stamp) ZX_GL_MASCOT.stamp();   /* GL 舞台：3D 诺瓦盖章 */
     if (!sealEl) return;
     sealEl.classList.remove('play');
     void sealEl.offsetWidth;   /* 重排打断动画：连续发送也能整轮重播 */
@@ -317,20 +340,22 @@ window.ZX = window.ZX || {};
   }
 
   /* ---------- 启动 ---------- */
-  /* 开场问候：时段、姓名、已记录项、剩余量与权重最高项全部取自当前 state，不写死 */
+  /* 开场问候：时段、姓名、已记录项、剩余量与权重最高项全部取自当前 state，不写死。
+     扉页化构图：问候独立大字行（.greet-hi），关键数字荧光笔划重点（.hl 静态用法），
+     立绘放大一档——开篇即漫画扉页 */
   function greetingHtml() {
     var S = ZX.state;
     var h = new Date().getHours();
     var greet = h < 11 ? '上午好' : h < 18 ? '下午好' : '晚上好';
     var done = S.tasks.filter(function (t) { return t.done; });
-    var todo = S.tasks.filter(function (t) { return !t.done && !t.skipped; });
+    var todo = S.tasks.filter(function (t) { return !t.done && !t.skipped && !t.abandoned && !t.substituted; });
     /* 剩余量口径与今日页 KPI 同源（exec.metrics 过滤跳过项） */
     var m = ZX.flows.exec.metrics();
-    var p1 = greet + '，' + U.esc(S.user.name) + '。';
+    var rest = '';
     if (done.length) {
-      p1 += U.esc(done[0].s) + '「' + U.esc(done[0].title) + '」已记录 <b>' + U.hm(done[0].actual || done[0].est) + '</b>。';
+      rest += U.esc(done[0].s) + '「' + U.esc(done[0].title) + '」已记录 <b>' + U.hm(done[0].actual || done[0].est) + '</b>。';
     }
-    p1 += '今天还剩 <b>' + todo.length + '</b> 项、<b>' + U.hm(m.remain) + '</b>' +
+    rest += '今天还剩 <b class="hl">' + todo.length + '</b> 项、<b class="hl">' + U.hm(m.remain) + '</b>' +
       (S.buffer && S.buffer.time ? '，' + U.esc(S.buffer.time) + ' 留了一个弹性位' : '') + '。';
     var heavy = null;
     todo.forEach(function (t) { if (!heavy || U.num(t.weight, 0) > U.num(heavy.weight, 0)) heavy = t; });
@@ -338,7 +363,7 @@ window.ZX = window.ZX || {};
       ? '当前未完成任务按截止时间与权重字段排序；未启用历史行为模型，不推断个人高效时段。'
       : '当前没有可执行的未完成任务。';
     return '<img class="msg-mascot" src="assets/img/mascot-v4.svg" width="132" height="116" alt="诺瓦" />' +
-      '<p>' + p1 + '</p><p>' + p2 + '要先开始，还是先说这周的情况？</p>';
+      '<p class="greet-hi">' + greet + '，' + U.esc(S.user.name) + '。</p><p>' + rest + '</p><p>' + p2 + '要先开始，还是先说这周的情况？</p>';
   }
 
   function boot() {
@@ -372,6 +397,13 @@ window.ZX = window.ZX || {};
     }, 520);
 
     setInterval(function () { if (ZX.state.running) ZX.assistant.tickTimer(); }, 1000);
+
+    /* GL 舞台（全量重构）：WebGL+CSS3D 双渲染器接管视觉层。
+       初始化失败时 engine 自动置 html[data-3d="off"]，以上 DOM 逻辑原样运行（零损失降级）。
+       业务层（state/api/engine/flows）与 GL 无耦合，两模式共用。 */
+    if (document.documentElement.dataset.gl3d === 'on' && window.ZX_GL) {
+      ZX_GL.init();
+    }
 
     probeBackend();
   }

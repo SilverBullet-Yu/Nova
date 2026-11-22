@@ -59,7 +59,7 @@ window.ZX = window.ZX || {};
 
       '<div class="sec-h"><span class="n">02</span><span class="t">通知策略</span><span class="rule"></span><span class="r">分级可关</span></div>' +
       '<div class="panel"><div class="panel-b">' +
-        swRow('每日提醒', '19:00 · 今日 ' + S.tasks.filter(function (t) { return !t.done && !t.skipped; }).length + ' 项', 'daily') +
+        swRow('每日提醒', '19:00 · 今日 ' + S.tasks.filter(function (t) { return !t.done && !t.skipped && !t.abandoned && !t.substituted; }).length + ' 项', 'daily') +
         swRow('周报', '周日 20:00 · 最少打扰', 'weekly') +
         swRow('进度预警', '必须附带补救方案', 'alert') +
         swRow('中断挽救', '连续 ' + ZX.flows.rescue.THRESHOLD + ' 天无记录时触发', 'rescue') +
@@ -70,7 +70,7 @@ window.ZX = window.ZX || {};
         title: '数据与隐私',
         meta: S.exportLog ? '上次导出 ' + S.exportLog.rows + ' 行' : '导出 · 删除 · 7 天恢复',
         body:
-          '<p class="pref-note">当前版本未接入云端模型，不向第三方模型发送对话或学习数据。联网时，相关操作会向配置的 Nova 后端发送计算所需的任务、时段与计划参数，或同步计划变更、可用时段和执行记录；离线时先在本机计算和保存。</p>' +
+          '<p class="pref-note">配置 LLM 后，目标澄清的对话文本与需求画像会经 Nova 后端发送给所配置的模型服务商，用于澄清与拆解建议。联网时，相关操作还会向配置的 Nova 后端发送计算所需的任务、时段与计划参数，或同步计划变更、可用时段和执行记录；离线时先在本机计算和保存。</p>' +
           '<div class="row2"><span class="k">待同步</span><span class="v" id="opPending">' + ZX.api.pendingCount() + '</span></div>' +
           '<div class="row2"><span class="k">同步序号</span><span class="v">' + S.serverSeq + '</span></div>' +
           '<div class="row2"><span class="k">上次同步</span><span class="v">' + U.nowStr() + '</span></div>' +

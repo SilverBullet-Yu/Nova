@@ -10,12 +10,15 @@
  */
 
 const { seed } = require('../../shared/data/seed.js');
+const fs = require('node:fs');
+const path = require('node:path');
 
 /** 演示基线 seq（与现有 demo 顶栏「seq 88123」一致） */
 const BASE_SEQ = 88123;
 
 /** 单批上行上限（契约：≤ 200） */
 const MAX_SYNC_BATCH = 200;
+const STORE_FILE = process.env.NOVA_STORE_FILE || path.join(__dirname, '..', 'data', 'nova-store.json');
 
 function clone(v) {
   return v === undefined ? undefined : JSON.parse(JSON.stringify(v));
@@ -55,14 +58,16 @@ function isDeleteValue(v) {
 /* ── 用户分区 ─────────────────────────────────────────────────────────── */
 /** userId → 分区；分区之间完全隔离 */
 const partitions = new Map();
+let persistCounter = 0;
 
 function createPartition(userId) {
   return {
     userId: userId,
     seq: BASE_SEQ,
-    state: clone(seed),
+    state: Object.assign(clone(seed), { sessionTombstones: {}, sessionsClearedAt: 0, dataClearedAt: 0 }),
     entities: {},       // entity → entityId → field → { value, tombstone, clientTs, seq }
     opIndex: new Map(), // opId → serverSeq（分区内 op_id 唯一，幂等兜底）
+    dayAssignWrites: new Map(), // taskId → 改期字段合并桶，避免不同任务互相覆盖
     replanRecords: [],
     replanSeq: 0,
     planBaseline: null
@@ -70,6 +75,60 @@ function createPartition(userId) {
 }
 
 /** 取用户分区；首次访问时以 seed 初始化。缺少身份属于调用方缺陷，直接拒绝。 */
+function persist() {
+  const payload = {};
+  for (const [userId, p] of partitions) {
+    payload[userId] = {
+      userId: p.userId, seq: p.seq, state: p.state, entities: p.entities,
+      opIndex: Array.from(p.opIndex.entries()),
+      dayAssignWrites: Array.from(p.dayAssignWrites.entries()),
+      replanRecords: p.replanRecords, replanSeq: p.replanSeq,
+      planBaseline: p.planBaseline
+    };
+  }
+  const dir = path.dirname(STORE_FILE);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = STORE_FILE + '.' + process.pid + '.' + (++persistCounter) + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(payload), 'utf8');
+  let renamed = false;
+  let lastError = null;
+  for (let attempt = 0; attempt < 5 && !renamed; attempt++) {
+    try {
+      fs.renameSync(tmp, STORE_FILE);
+      renamed = true;
+    } catch (e) {
+      lastError = e;
+      if (!['EPERM', 'EACCES', 'EBUSY'].includes(e && e.code)) throw e;
+      const wait = new Int32Array(new SharedArrayBuffer(4));
+      Atomics.wait(wait, 0, 0, 10);
+    }
+  }
+  if (!renamed) {
+    try { fs.rmSync(tmp, { force: true }); } catch (e) { /* 保留原始错误 */ }
+    throw lastError;
+  }
+}
+
+function restore() {
+  if (!fs.existsSync(STORE_FILE)) return;
+  let raw;
+  try { raw = JSON.parse(fs.readFileSync(STORE_FILE, 'utf8')); }
+  catch (e) { throw new Error('Nova 持久化文件损坏：' + STORE_FILE); }
+  if (!raw || typeof raw !== 'object') return;
+  for (const [userId, saved] of Object.entries(raw)) {
+    const p = createPartition(userId);
+    p.seq = num(saved.seq, BASE_SEQ);
+    p.state = saved.state && typeof saved.state === 'object' ? saved.state : p.state;
+    p.entities = saved.entities && typeof saved.entities === 'object' ? saved.entities : {};
+    p.opIndex = new Map(Array.isArray(saved.opIndex) ? saved.opIndex : []);
+    p.dayAssignWrites = new Map(Array.isArray(saved.dayAssignWrites) ? saved.dayAssignWrites : []);
+    p.replanRecords = Array.isArray(saved.replanRecords) ? saved.replanRecords : [];
+    p.replanSeq = num(saved.replanSeq, p.replanRecords.length);
+    p.planBaseline = saved.planBaseline || null;
+    partitions.set(String(userId), p);
+  }
+}
+
 function partitionOf(userId) {
   const id = String(userId === undefined || userId === null ? '' : userId);
   if (!id) throw new Error('缺少用户身份，无法定位分区');
@@ -80,6 +139,8 @@ function partitionOf(userId) {
   }
   return p;
 }
+
+restore();
 
 function ensureBucket(p, entity, entityId) {
   if (!p.entities[entity]) p.entities[entity] = {};
@@ -130,8 +191,10 @@ function applyToState(p, entity, entityId, field, value) {
          GET /api/state 的 seed.sessions 直接可读——闭合「后端无 session 回读接口」缺口；
          非对象 value（旧式包装）保持原样容错 */
       s.sessions = s.sessions || [];
+      const id = isPlainObject(value) && value.id !== undefined && value.id !== null ? String(value.id) : '';
+      if (id && s.sessions.some((x) => x && x.id !== undefined && x.id !== null && String(x.id) === id)) return false;
       s.sessions.push(isPlainObject(value) ? clone(value) : { entityId: entityId, field: field, value: value });
-      break;
+      return true;
     }
     case 'plan': {
       /* 回放形态：手工改期 / 锁定 / 逐条否决，GET /api/state 的 seed.dayAssign /
@@ -187,17 +250,51 @@ function applyExtra(s, entity, entityId, field, value) {
   s.extra[entity][entityId][field] = value;
 }
 
+/** max 首次合并的基线：与 applyToState 的业务字段落点一致；sum 仍按增量从 0 起算。 */
+function readStateField(p, entity, entityId, field) {
+  const s = p.state;
+  let target;
+  switch (entity) {
+    case 'task': target = (s.tasks || []).find((x) => String(x.id) === entityId); break;
+    case 'user': case 'goal': case 'feas': target = s[entity]; break;
+    case 'settings':
+      target = s.notif && Object.prototype.hasOwnProperty.call(s.notif, field) ? s.notif : s.settings;
+      break;
+    case 'week': target = s.weekState && s.weekState[entityId]; break;
+    case 'notif':
+      if (s.notif && Object.prototype.hasOwnProperty.call(s.notif, field)) {
+        target = s.notif;
+        break;
+      }
+      // 其他通知字段与 plan / buffer 的 max 字段一样落入 extra。
+    default: target = s.extra && s.extra[entity] && s.extra[entity][entityId];
+  }
+  return target && target[field];
+}
+
 /** 字段级合并：返回是否实际改写了状态 */
 function mergeField(p, record) {
   const entity = record.entity;
   const entityId = String(record.entityId === undefined ? '' : record.entityId);
   const field = record.field;
+  const value = record.value;
   const policy = policyOf(field);
-  const bucket = ensureBucket(p, entity, entityId);
+  /* session 记录是追加事件而非任务上的 LWW 字段；有 ID 按记录去重，
+     无 ID 保留旧回读形态，由 applyOps 的 opId 索引兜底；旧计数/墓碑策略不变。 */
+  if (entity === 'session' && policy === 'lastWrite') return applyToState(p, entity, entityId, field, value);
+
+  let bucket;
+  if (entity === 'plan' && entityId === 'dayAssign' && field === 'moved' &&
+      isPlainObject(value) && value.taskId !== undefined) {
+    const taskId = String(value.taskId);
+    if (!p.dayAssignWrites.has(taskId)) p.dayAssignWrites.set(taskId, {});
+    bucket = p.dayAssignWrites.get(taskId);
+  } else {
+    bucket = ensureBucket(p, entity, entityId);
+  }
   const prev = bucket[field];
   const clientTs = num(record.clientTs, 0);
   const seq = num(record.serverSeq, p.seq);
-  const value = record.value;
 
   if (policy === 'tombstone') {
     if (prev && prev.tombstone) return false;          // 墓碑优先，不可翻转
@@ -223,7 +320,7 @@ function mergeField(p, record) {
   }
 
   if (policy === 'max') {
-    const base = prev ? num(prev.value, 0) : 0;
+    const base = prev ? num(prev.value, 0) : num(readStateField(p, entity, entityId, field), 0);
     const next = Math.max(base, num(value, 0));
     if (next !== base || !prev) {
       bucket[field] = { value: next, tombstone: false, clientTs: clientTs, seq: seq };
@@ -246,6 +343,7 @@ function mergeField(p, record) {
 /** 清空全部用户分区（测试与本地重置用） */
 function reset() {
   partitions.clear();
+  persist();
 }
 
 function getNotifications(userId) {
@@ -284,6 +382,7 @@ function recordReplan(userId, result, constraints) {
     p.planBaseline = { version: constraints.version, seq: p.seq, record: rec,
       locks: clone(constraints.locks || {}), params: clone(constraints.params || {}) };
   }
+  persist();
   return clone(rec);
 }
 
@@ -319,6 +418,7 @@ function applyOps(userId, ops) {
     accepted.push(opId);
     serverSeq = seq;
   });
+  if (accepted.length) persist();
   return { accepted: accepted, serverSeq: serverSeq };
 }
 
@@ -353,6 +453,7 @@ module.exports = {
   recordSchedule: function (userId, version, result) {
     const p = partitionOf(userId);
     p.planBaseline = { version, seq: p.seq, record: clone(result) };
+    persist();
   },
   applyOps: applyOps,
   MAX_SYNC_BATCH: MAX_SYNC_BATCH

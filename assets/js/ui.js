@@ -11,7 +11,6 @@ window.ZX = window.ZX || {};
 
   var U = ZX.util;
   var current = null;
-  var lastFocus = null;
 
   function node(html) {
     var d = document.createElement('div');
@@ -44,18 +43,25 @@ window.ZX = window.ZX || {};
   }
 
   function close(result) {
-    if (!current) return;
-    var c = current;
-    current = null;
-    document.removeEventListener('keydown', onKey);
-    document.documentElement.classList.remove('no-scroll');
+    if (current) current.close(result);
+  }
+
+  function closeSheet(c, result) {
+    if (c.closed) return;
+    c.closed = true;
+    if (current === c) {
+      current = null;
+      document.removeEventListener('keydown', onKey);
+      document.documentElement.classList.remove('no-scroll');
+      /* 焦点随实例同步归还，旧动画结束时不再抢走新弹层焦点。 */
+      if (c.lastFocus && c.lastFocus.focus) { try { c.lastFocus.focus(); } catch (e) {} }
+    }
     c.root.classList.add('out');
-    var done = function () {
+    setTimeout(function () {
       if (c.root.parentNode) c.root.parentNode.removeChild(c.root);
-      if (lastFocus && lastFocus.focus) { try { lastFocus.focus(); } catch (e) {} }
-      if (c.onClose) c.onClose(result);
-    };
-    setTimeout(done, 170);
+    }, 170);
+    /* 草稿 / 异步请求的失效必须发生在关闭当下，只有 DOM 删除等待动画。 */
+    if (c.onClose) c.onClose(result);
   }
 
   /**
@@ -65,7 +71,7 @@ window.ZX = window.ZX || {};
   function sheet(opts) {
     var o = opts || {};
     if (current) close();
-    lastFocus = document.activeElement;
+    var lastFocus = document.activeElement;
 
     var root = node(
       '<div class="ovl" role="dialog" aria-modal="true" aria-label="' + U.esc(o.title || '对话框') + '">' +
@@ -91,7 +97,7 @@ window.ZX = window.ZX || {};
 
     root.addEventListener('click', function (e) {
       var t = e.target;
-      if (t && t.closest && t.closest('[data-close]')) close();
+      if (t && t.closest && t.closest('[data-close]')) instance.close();
     });
 
     function $(sel) { return root.querySelector(sel); }
@@ -110,13 +116,16 @@ window.ZX = window.ZX || {};
       }
     }
 
-    current = { root: root, close: close, onClose: o.onClose, $: $ };
+    var instance = { root: root, onClose: o.onClose, lastFocus: lastFocus, closed: false };
+    instance.close = function (result) { closeSheet(instance, result); };
+    current = instance;
     setTimeout(function () {
+      if (current !== instance || instance.closed) return;
       var target = root.querySelector('[autofocus]') || focusables(root)[0];
       if (target) { try { target.focus(); } catch (e) {} }
     }, 40);
 
-    return { root: root, $: $, close: close, setBody: setBody, setFooter: setFooter };
+    return { root: root, $: $, close: instance.close, setBody: setBody, setFooter: setFooter };
   }
 
   /** 二次确认，返回 Promise<boolean> */

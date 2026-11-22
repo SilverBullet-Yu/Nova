@@ -486,16 +486,19 @@ window.ZX = window.ZX || {};
   /* 本周可排空档取自可用时段网格，弹性槽也必须位于可用窗口内。
      「今天」排数组最前：候选按 slots 顺序评估，权重最高的任务先占今天。 */
   var DAY_ORDER = ['一', '二', '三', '四', '五', '六', '日'];
-  var STUDY_FROM = 18 * 60;        /* 18:00 */
-  var STUDY_TO = 22 * 60;          /* 22:00 */
-  var BUFFER_TIME = '22:00–23:00'; /* 与排程槽位同源（bufferRatio 预留之外的显式弹性位） */
   var BUFFER_MIN = 60;             /* 每日弹性位容量，与 seed.buf 一致 */
+
+  function futureDates() {
+    var today = U.todayDow();
+    var start = DAY_ORDER.indexOf(today);
+    if (start < 0) start = 0;
+    return DAY_ORDER.map(function (_, i) { return DAY_ORDER[(start + i) % DAY_ORDER.length]; });
+  }
 
   function fmtMin(m) { return U.pad2(Math.floor(m / 60)) + ':' + U.pad2(m % 60); }
 
   function buildSlots() {
-    var dow = U.todayDow();
-    var days = [dow].concat(DAY_ORDER.filter(function (x) { return x !== dow; }));
+    var days = futureDates();
     var slots = [];
     var grid = ZX.state.avail;
     var ranges = [[480, 720], [720, 1080], [1080, 1320]];
@@ -522,7 +525,7 @@ window.ZX = window.ZX || {};
   }
 
   /* 引擎 blocks → 周视图（segs 按科目聚合；弹性位容量单列，与周图 .buf 同语） */
-  function weekFromBlocks(blocks) {
+  function weekFromBlocks(blocks, slots) {
     var dow = U.todayDow();
     var byDay = {};
     blocks.forEach(function (b) { (byDay[b.date] = byDay[b.date] || []).push(b); });
@@ -537,11 +540,13 @@ window.ZX = window.ZX || {};
         else segs.push([b.subject, b.durMin]);
         sum += b.durMin;
       });
-      return { d: d, segs: segs, buf: BUFFER_MIN, total: sum + BUFFER_MIN, today: d === dow };
+      var bufferMin = slots.filter(function (s) { return s.date === d && s.isBuffer && s.available; })
+        .reduce(function (min, s) { return min + s.durMin; }, 0);
+      return { d: d, segs: segs, buf: bufferMin, total: sum + bufferMin, today: d === dow };
     });
   }
 
-  /* 引擎 blocks → 今日任务：今天排进 ≥30 分钟的任务按开始时间取前 4 项 */
+  /* 今日投影只计当天排入的分钟，不能把跨日任务的总工时计入今日。 */
   function todayTasksFromBlocks(blocks, all, stamp) {
     var S = ZX.state;
     var dow = U.todayDow();
@@ -558,15 +563,14 @@ window.ZX = window.ZX || {};
         var src = U.findById(all, id);
         return src ? { src: src, g: byTask[id] } : null;
       })
-      .filter(function (x) { return x && x.g.min >= 30; })
+      .filter(function (x) { return x && x.g.min > 0; })
       .sort(function (a, b) { return a.g.first - b.g.first; })
-      .slice(0, 4)
       .map(function (x, i) {
         return S.normTask({
           id: 't_' + stamp + i,
           subject: x.src.subject,
           title: x.src.title,
-          est: x.src.estMin,
+          est: x.g.min,
           time: fmtMin(x.g.first) + '–' + fmtMin(x.g.last),
           weight: x.src.weight,
           done: false
@@ -634,14 +638,21 @@ window.ZX = window.ZX || {};
     var blocks = res.blocks;
     var unplanned = res.unplanned;
     var dow = U.todayDow();
-    var week = weekFromBlocks(blocks);
+    var week = weekFromBlocks(blocks, slots);
+    var todayTasks = todayTasksFromBlocks(blocks, all, stamp);
+    var dayAssign = {};
+    if (dow !== '日') todayTasks.forEach(function (t) { dayAssign[t.id] = dow; });
+    var bufferSlots = slots.filter(function (s) { return s.date === dow && s.isBuffer && s.available; });
+    var bufferTime = bufferSlots.length
+      ? fmtMin(bufferSlots[0].startMin) + '–' + fmtMin(bufferSlots[bufferSlots.length - 1].startMin + bufferSlots[bufferSlots.length - 1].durMin)
+      : '';
     var patch = {
       goal: Object.assign({}, S.goal, { name: String(d.name || '').trim(), deadline: d.deadline, weeks: d.weeks, source: 'user' }),
       feas: { weeklyH: d.weeklyH, weeks: d.weeks, discount: DISCOUNT, demand: d.demand },
-      week: week, weekShift: U.clone(week), tasks: todayTasksFromBlocks(blocks, all, stamp),
-      buffer: { time: BUFFER_TIME, free: !blocks.some(function (b) { return b.isBuffer && b.date === dow; }) },
+      week: week, weekShift: U.clone(week), tasks: todayTasks,
+      buffer: { time: bufferTime, free: !blocks.some(function (b) { return b.isBuffer && b.date === dow; }) },
       replanned: false, snapshot: null, replanRecord: null, tiredAdopted: false, movedOut: null,
-      replanHistory: [], dayAssign: {}, locks: {}, goalDraft: null, planDraft: null
+      replanHistory: [], dayAssign: dayAssign, locks: {}, goalDraft: null, planDraft: null
     };
     S.resetTimer();
     Object.assign(S, patch);

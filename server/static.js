@@ -33,21 +33,22 @@ const MIME = {
 
 /** 静态资源：仅放行 /、/index.html、/assets/*、/shared/*，并做目录穿越防护 */
 function resolveStatic(pathname) {
-  let rel = pathname;
-  if (rel === '/' || rel === '') rel = '/index.html';
-  const allowed = rel === '/index.html'
-    || rel.startsWith('/assets/')
-    || rel.startsWith('/shared/');
-  if (!allowed) return null;
   let decoded;
   try {
-    decoded = decodeURIComponent(rel);
+    decoded = decodeURIComponent(pathname);
   } catch (e) {
     return null;
   }
+  /* URL 只接受正斜杠；跨平台拒绝 Windows 分隔符、盘符/数据流与 NUL。 */
+  if (/[\\\0:]/.test(decoded)) return null;
+  if (decoded === '/' || decoded === '') decoded = '/index.html';
+  if (!decoded.startsWith('/')) return null;
   const abs = path.resolve(ROOT, '.' + decoded);
-  if (abs !== ROOT && !abs.startsWith(ROOT + path.sep)) return null;
-  return abs;
+  /* 必须校验解码、规范化后的最终路径，而非原始 URL 或整个项目 ROOT。 */
+  const allowed = abs === path.join(ROOT, 'index.html')
+    || abs.startsWith(path.join(ROOT, 'assets') + path.sep)
+    || abs.startsWith(path.join(ROOT, 'shared') + path.sep);
+  return allowed ? abs : null;
 }
 
 function serveStatic(res, pathname) {

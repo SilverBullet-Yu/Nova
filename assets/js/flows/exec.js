@@ -41,9 +41,11 @@ window.ZX = window.ZX || {};
     return U.findById(tasks(), id);
   }
 
-  /* 参与今日统计的任务：跳过项不算计划、不算剩余、不算达成率分母 */
+  /* 退役待办不再参与今日计划；已完成历史仍保留在统计中。 */
   function activeTasks() {
-    return tasks().filter(function (t) { return !t.skipped && !t.deferred; });
+    return tasks().filter(function (t) {
+      return !t.skipped && !t.deferred && (t.done || (!t.abandoned && !t.substituted));
+    });
   }
 
   function colorOf(t) {
@@ -158,7 +160,7 @@ window.ZX = window.ZX || {};
       t.completion = completion;
     }
 
-    S.resetTimer();
+    if (id === S.running) S.resetTimer();
     return sess;
   }
 
@@ -359,13 +361,16 @@ window.ZX = window.ZX || {};
   function commitRecord(id, mins, completion, feel, startAt, endAt) {
     var S = ZX.state;
     var t = task(id);
-    if (!t) return;
+    if (!t || t.done || t.abandoned || t.substituted) return;
     var beforeEst = U.num(t.est, 0);
     var sess = applyRecord(id, {
       minutes: mins, completion: completion, feel: feel,
       startAt: startAt, endAt: endAt
     });
 
+    /* 归因回写必须先于 render 的 overlay 保存，每条记录只计算一次。 */
+    var interrupted = ZX.flows.rescue ? ZX.flows.rescue.detect() : false;
+    var attr = runAttribution(t, sess, beforeEst);
     ZX.render();
     ZX.ui.toast(completion >= 100 ? '已记录 ' + U.hm(mins) : '已记录 ' + completion + '%', 'ok');
 
@@ -384,10 +389,6 @@ window.ZX = window.ZX || {};
         ? '今日达成率 <b class="ac">' + m.rate + '%</b>，还剩 ' + left + ' 项。'
         : '今天 ' + m.total + ' 项全部记录，累计 <b class="ac">' + U.hm(m.worked) + '</b>。弹性位留空 60 分钟。';
     }
-
-    /* 内在 loop：识别偏差（断更由真实记录计算）→ 归因 → 数据回流 + 一键衔接 */
-    var interrupted = ZX.flows.rescue ? ZX.flows.rescue.detect() : false;
-    var attr = runAttribution(t, sess, beforeEst);
 
     say((completion >= 100 ? '<img class="msg-state state-done" src="assets/img/mascot-v4-done.svg" width="32" height="28" alt="" />' : '') +
       '<p>' + head + tail + '</p>' +

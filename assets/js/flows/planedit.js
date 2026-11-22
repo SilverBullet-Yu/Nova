@@ -43,7 +43,7 @@ window.ZX = window.ZX || {};
 
   /* 参与日程块的任务：未完成且未跳过（与今日页口径一致） */
   function boardTasks() {
-    return (ZX.state.tasks || []).filter(function (t) { return !t.done && !t.skipped; });
+    return (ZX.state.tasks || []).filter(function (t) { return !t.done && !t.skipped && !t.abandoned && !t.substituted; });
   }
 
   function assignOf(id) {

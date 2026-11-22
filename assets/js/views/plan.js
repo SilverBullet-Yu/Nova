@@ -12,6 +12,16 @@ window.ZX = window.ZX || {};
   function plan() {
     var S = ZX.state;
     var f = S.feasibility();
+    if (f === null) {
+      return '<div class="wrap">' +
+        '<div class="vhead"><div><div class="eyebrow">目标 · 未设定</div>' +
+          '<h1>未设定阶段目标</h1>' +
+          '<p>尚无可评估的目标，暂不计算可行性 R。已有计划与执行记录仍保留。</p>' +
+          '<div class="sa-goal-act"><button type="button" class="btn sa-goal-new" data-goal-new>新建目标</button></div>' +
+        '</div></div>' + boardHtml() +
+        '<div class="sec-h"><span class="t">已有日程负载</span><span class="rule"></span></div>' +
+        weekChart() + '</div>';
+    }
     var pos = Math.min(100, f.R / 1.6 * 100);
     var vc = f.verdict === '充裕' || f.verdict === '合理' ? '' : 'warn';
     return '<div class="wrap">' +
@@ -178,8 +188,12 @@ window.ZX = window.ZX || {};
       '<div class="week">' + data.map(function (d) {
         return '<div class="wk ' + (d.today ? 'on' : '') + '">' +
           '<div class="wk-stack">' +
-            d.segs.map(function (s) { return '<i style="height:' + (s[1] / max * H) + 'px;background:' + (SUBJ[s[0]] || { c: 'var(--txt3)' }).c + '"></i>'; }).join('') +
-            '<i class="buf" style="height:' + (d.buf / max * H) + 'px"></i>' +
+            /* 柱顶墨线（.top）：buf>0 时弹性位是顶段，否则最后一个科时段兜住 */
+            d.segs.map(function (s, i) {
+              var cls = (!d.buf && i === d.segs.length - 1) ? ' class="top"' : '';
+              return '<i' + cls + ' style="height:' + (s[1] / max * H) + 'px;background:' + (SUBJ[s[0]] || { c: 'var(--txt3)' }).c + '"></i>';
+            }).join('') +
+            '<i class="buf' + (d.buf ? ' top' : '') + '" style="height:' + (d.buf / max * H) + 'px"></i>' +
           '</div>' +
           '<div class="wk-lab">' + d.d + '</div>' +
           '<div class="wk-val">' + U.hm(d.total) + '</div>' +

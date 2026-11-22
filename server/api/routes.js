@@ -10,44 +10,15 @@ const { feasibility } = require('../../shared/engine/feasibility.js');
 const { schedule } = require('../../shared/engine/schedule.js');
 const { replan, confirmReplan, undoReplan } = require('../../shared/engine/replan.js');
 const { attribute } = require('../../shared/engine/attribute.js');
+const llm = require('../llm.js');
+
+/* 错误码表与 ApiError 在 server/api/errors.js（llm.js 与本模块相互引用，
+   集中于此会成 require 环）；此处再导出保持既有引用面不变 */
+const { ApiError } = require('./errors.js');
 
 const VERSION = require('../../package.json').version;
 
-/* 附录 B 错误码 → HTTP 状态码
- * E1001 参数非法 / 缺失        → 400
- * E2001 资源不存在             → 404
- * E3001 状态冲突               → 409
- * E3002 资源已存在             → 409
- * E4001 幂等键重复（视为成功）  → 200
- * E4002 请求体过大 / 批量超限  → 400
- * E4010 未提供或凭证无效       → 401
- * E4030 越权访问（身份不一致）  → 403
- * E4290 请求过于频繁           → 429
- * E5001 服务内部错误           → 500
- * E9001 未分类异常             → 500
- */
-const ERRORS = {
-  E1001: { status: 400, message: '请求参数非法或缺失' },
-  E2001: { status: 404, message: '资源不存在' },
-  E3001: { status: 409, message: '状态冲突' },
-  E3002: { status: 409, message: '资源已存在' },
-  E4001: { status: 200, message: '幂等键重复，已返回首次结果' },
-  E4002: { status: 400, message: '请求体过大或单批操作超过上限 200' },
-  E4010: { status: 401, message: '未提供有效凭证' },
-  E4030: { status: 403, message: '无权访问该用户数据' },
-  E4290: { status: 429, message: '请求过于频繁' },
-  E5001: { status: 500, message: '服务内部错误' },
-  E9001: { status: 500, message: '未分类异常' }
-};
-
-class ApiError extends Error {
-  constructor(code, message) {
-    super(message || (ERRORS[code] ? ERRORS[code].message : '未知错误'));
-    this.name = 'ApiError';
-    this.code = code;
-    this.status = ERRORS[code] ? ERRORS[code].status : 500;
-  }
-}
+const ERRORS = require('./errors.js').ERRORS;
 
 function isPlainObject(v) {
   return !!v && typeof v === 'object' && !Array.isArray(v);
@@ -298,6 +269,36 @@ function createRouter(store, auth) {
     return store.applyOps(userId, ops);
   }
 
+  /* ── POST /api/llm/clarify ──
+     LLM 多轮澄清一轮：入参为对话消息与当前画像，出参 { reply, profile, done, missing }。
+     handler 返回 Promise（handle 统一等待）；LLM 未配置 / 失败 / 输出非法分别
+     映射 E5010 / E5011 / E5012，前端据此降级到表单流程。 */
+  function llmClarifyRoute(body) {
+    const b = needObject(body);
+    const messages = needArray(b.messages, 'messages');
+    if (messages.length > 40) throw new ApiError('E1001', 'messages 不得超过 40 条');
+    messages.forEach((m, i) => {
+      if (!isPlainObject(m)) throw new ApiError('E1001', 'messages[' + i + '] 必须是对象');
+      if (m.role !== 'user' && m.role !== 'assistant') {
+        throw new ApiError('E1001', 'messages[' + i + '].role 必须是 user 或 assistant');
+      }
+      needString(m.content, 'messages[' + i + '].content');
+    });
+    if (b.profile !== undefined && b.profile !== null && !isPlainObject(b.profile)) {
+      throw new ApiError('E1001', 'profile 必须是对象');
+    }
+    return llm.clarifyTurn(messages, b.profile || null);
+  }
+
+  /* ── POST /api/llm/analyze ──
+     LLM 分析建议：画像（必填，槽位不齐直接 E1001）+ 可选执行历史 → 拆解建议。
+     建议只含「学什么 / 多少时间 / 风险」，不含排程块；排程仍由引擎执行。 */
+  function llmAnalyzeRoute(body) {
+    const b = needObject(body);
+    if (!isPlainObject(b.profile)) throw new ApiError('E1001', '缺少字段 profile');
+    return llm.analyzeProfile(b.profile, isPlainObject(b.history) ? b.history : null);
+  }
+
   /* ── 路由注册表（单一事实源）───────────────────────────────────────────
    * 路径、处理器、是否免鉴权（public）与限流阈值（limit）集中声明，
    * main.js 的鉴权与限流编排只读本表元数据——避免「路由 / 免鉴权名单 / 限流表」
@@ -316,12 +317,17 @@ function createRouter(store, auth) {
     'POST /api/replan/confirm': { public: false, limit: L(12, 60000), handler: function (ctx) { return replanConfirmRoute(ctx.body, ctx.userId); } },
     'POST /api/replan/undo': { public: false, limit: null, handler: function (ctx) { return undoRoute(ctx.body); } },
     'POST /api/attribute': { public: false, limit: L(30, 60000), handler: function (ctx) { return attributeRoute(ctx.body); } },
-    'POST /api/sync/ops': { public: false, limit: L(60, 60000), handler: function (ctx) { return syncOpsRoute(ctx.body, ctx.userId); } }
+    'POST /api/sync/ops': { public: false, limit: L(60, 60000), handler: function (ctx) { return syncOpsRoute(ctx.body, ctx.userId); } },
+    'POST /api/llm/clarify': { public: false, limit: L(10, 60000), handler: function (ctx) { return llmClarifyRoute(ctx.body); } },
+    'POST /api/llm/analyze': { public: false, limit: L(10, 60000), handler: function (ctx) { return llmAnalyzeRoute(ctx.body); } }
   };
 
   /**
-   * 处理一次 API 调用
-   * @returns {{status:number, body:object}}
+   * 处理一次 API 调用。
+   * 同步 handler 与异步 handler（LLM 端点返回 Promise）统一走 Promise 链，
+   * 返回 {status, body}；错误经同一映射（ApiError 直传 / TypeError·RangeError
+   * 归 E1001 / 其余 E5001），同步抛错与此等价。
+   * @returns {Promise<{status:number, body:object}>}
    */
   function handle(ctx) {
     const key = ctx.method + ' ' + ctx.pathname;
@@ -329,18 +335,19 @@ function createRouter(store, auth) {
     if (!entry) {
       /* 路径存在但方法不符 → E1001；路径不存在 → E2001 */
       const otherMethod = Object.keys(routes).some((k) => k.slice(k.indexOf(' ')) === key.slice(key.indexOf(' ')));
-      throw new ApiError(otherMethod ? 'E1001' : 'E2001', otherMethod ? '方法不支持：' + key : '接口不存在：' + key);
+      return Promise.reject(new ApiError(otherMethod ? 'E1001' : 'E2001', otherMethod ? '方法不支持：' + key : '接口不存在：' + key));
     }
-    try {
-      return { status: 200, body: entry.handler(ctx) };
-    } catch (err) {
-      if (err instanceof ApiError) throw err;
-      /* 引擎入参异常统一映射为 E1001 */
-      if (err instanceof TypeError || err instanceof RangeError) {
-        throw new ApiError('E1001', err.message);
+    return Promise.resolve().then(() => entry.handler(ctx)).then(
+      (body) => ({ status: 200, body: body }),
+      (err) => {
+        if (err instanceof ApiError) throw err;
+        /* 引擎入参异常统一映射为 E1001 */
+        if (err instanceof TypeError || err instanceof RangeError) {
+          throw new ApiError('E1001', err.message);
+        }
+        throw new ApiError('E5001', err && err.message ? err.message : '服务内部错误');
       }
-      throw new ApiError('E5001', err && err.message ? err.message : '服务内部错误');
-    }
+    );
   }
 
   return { handle: handle, routes: routes };

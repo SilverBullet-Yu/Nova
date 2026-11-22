@@ -2,7 +2,7 @@
 
 > `server/`（后端）与 `assets/`（前端）之间的唯一接口依据。字段名、错误码、限额、默认值一律以源码为准；契约变更顺序：先改本文件，再改代码，最后改测试。
 
-- 运行时：Node.js 22+（验证于 v24.15.0），零第三方依赖，只用 `node:` 内置模块
+- 服务端运行时：Node.js 22+，零第三方运行时依赖，只用 Node 内置能力；实际版本以 `node --version` 为准。前端使用本地 vendored Three.js r152（包版本 `0.152.2`）与 CSS3DRenderer，不依赖 CDN，不属于全栈零第三方。
 - 参考文档：`docs/ARCHITECTURE.md`、`docs/FRONTEND-CONTRACT.md`、`docs/IP-DESIGN.md`
 
 ## 1. 文档定位与硬边界
@@ -13,10 +13,10 @@
 | `shared/data/seed.js` | 后端（前端只读） | 共享种子数据，深度冻结 |
 | `shared/workflow.js` | 后端（前端只读） | 重排草案生命周期工厂（preview / confirm / reject），仅 `assets/js/assistant.js` 与 `test/workflow.test.js` 消费 |
 | `server/**` | 后端 | HTTP 入口、路由、鉴权、内存存储 |
-| `assets/**` | 前端 | 页面脚本与样式 |
-| `index.html` | 前端 | 页面骨架与资源引用清单 |
-| `scripts/**` | 后端 | `scripts/build-engine.js`、`scripts/css-audit.mjs`、`scripts/build-mascot-v4.js` |
-| `test/**` | 后端 | 全部测试：引擎单测、HTTP 冒烟、前端 VM 单测、资产门禁（当前 21 个文件） |
+| `assets/**` | 前端 | 页面脚本与样式；`assets/js/gl/` 为 GL 视觉层，`assets/vendor/` 为本地 Three.js / CSS3DRenderer 产物 |
+| `index.html` | 前端 | 页面骨架、首帧 `gl3d` 等偏好闸门与资源引用清单；加载顺序见 `FRONTEND-CONTRACT.md` §2 |
+| `scripts/**` | 后端 | 引擎 / 形象构建与 CSS 审计；`scripts/build-vendor-three.mjs` 从 Three.js `0.152.2` 包生成本地 vendor |
+| `test/**` | 后端 | 引擎单测、HTTP 冒烟、前端 Node VM 单测、资产门禁等；测试持续新增，文件清单以 `node -e 'console.log(require("node:fs").readdirSync("test").filter(p=>p.endsWith(".test.js")).sort().join("\n"))'` 实时输出为准 |
 | `docs/**` | 管理者 | 契约与说明文档 |
 
 跨目录改动规则：
@@ -127,10 +127,12 @@
 | POST | `/api/replan/undo` | 需 | `snapshot` 必填对象 | `{ tasks, week }` | E4010, E1001, E4290 |
 | POST | `/api/attribute` | 需 | 请求体不得为空；6 个数值字段均可选 | `attribute()` 返回 | E4010, E1001, E4290 |
 | POST | `/api/sync/ops` | 需 | `ops` 必填数组；每条须有非空字符串 `opId`、`entity`、`field` 与非空 `entityId`；`clientTs` 可选有限数值 | `{ accepted: [opId], serverSeq }` | E4010, E1001, E4002, E4030, E4290 |
+| POST | `/api/llm/clarify` | 需 | `messages` 必填数组（≤40 条，每条 `role` 为 `user`/`assistant`，`content` 非空字符串）；`profile` 可选对象（需求画像） | `{ reply, profile, done, missing }`；`profile` 为服务端归一后的画像（白名单槽位）；`done=true` 时槽位必齐（服务端复核，防幻觉放行） | E4010, E1001, E5010, E5011, E5012, E4290 |
+| POST | `/api/llm/analyze` | 需 | `profile` 必填对象（槽位齐备：goalName/deadline/weeklyH/goalType）；`history` 可选对象（执行记录摘要） | `{ summary, demandH, weeklyH, tasks[{s,title,est,weight}], risks[], advice }`；建议仅含科目拆解与时长，不含排程块；`est` 15–240、`weight` 0–1、条目 ≤8 | E4010, E1001, E5010, E5011, E5012, E4290 |
 
 路径不存在返回 `E2001`；路径存在但方法不符返回 `E1001`。
 
-错误码（定义在 `server/api/routes.js` 的 `ERRORS`）：
+错误码（定义在 `server/api/errors.js` 的 `ERRORS`，`routes.js` 原样再导出）：
 
 | code | HTTP | 含义 | 当前是否抛出 |
 |---|---|---|---|
@@ -144,9 +146,12 @@
 | E4030 | 403 | 无权访问该用户数据 | 是 |
 | E4290 | 429 | 请求过于频繁 | 是 |
 | E5001 | 500 | 服务内部错误 | 是 |
+| E5010 | 503 | LLM 服务未配置（LLM_BASE_URL / LLM_API_KEY / LLM_MODEL 缺任一） | 是（前端据此降级表单流程） |
+| E5011 | 502 | LLM 调用失败或超时 | 是 |
+| E5012 | 502 | LLM 输出无法解析为合法结构 | 是 |
 | E9001 | 500 | 未分类异常 | 是 |
 
-限流（`server/auth.js` 的 `WRITE_LIMITS`，单进程固定窗口，单位 次/60 秒）：`POST /api/auth/session` 60（按来源 IP 隔离）、`POST /api/sync/ops` 60、`POST /api/replan` 与 `POST /api/replan/confirm` 与 `POST /api/replan/undo` 各 12、`POST /api/feasibility` 与 `POST /api/schedule` 与 `POST /api/plan/review` 与 `POST /api/attribute` 各 30；`GET /api/health` 与 `GET /api/state` 不限流。超限返回 `E4290` 与 `Retry-After` 响应头，不排队、不自动重试。
+限流（阈值随 `server/api/routes.js` 路由注册表的 `limit` 元数据声明，单进程固定窗口，单位 次/60 秒）：`POST /api/auth/session` 60（按来源 IP 隔离）、`POST /api/sync/ops` 60、`POST /api/replan` 与 `POST /api/replan/confirm` 与 `POST /api/replan/undo` 各 12、`POST /api/feasibility` 与 `POST /api/schedule` 与 `POST /api/plan/review` 与 `POST /api/attribute` 各 30、`POST /api/llm/clarify` 与 `POST /api/llm/analyze` 各 10（LLM 有外部成本，从严）；`GET /api/health` 与 `GET /api/state` 不限流。超限返回 `E4290` 与 `Retry-After` 响应头，不排队、不自动重试。
 
 ## 6. 前端到后端通信约定
 
@@ -156,9 +161,9 @@
 - 降级：`assets/js/engine.js` 后端优先，响应结构不合约定或请求失败即走本地 `assets/js/rhythm.build.js`，并置 `ZX.engine.source` 为 `local`；产物缺失时抛错提示先跑 `npm run build:engine`，不静默换语义。同步入口 `ZX.engine.feasibilityNow` 与 `ZX.engine.attributeNow` 直接用本地产物。
 - 离线指示：顶栏同步位在线时按待上行数量显示「本地优先 · 待上行 N」或「本地优先 · 已同步」，离线时换为诺瓦的离线褪色头像（`assets/js/main.js` `updateSync()`），形象取自 `assets/js/mascot-inline.js` 的内联 data URI——静态资源以 `Cache-Control: no-cache` 提供，后端不可达时无法加载，故离线指示不依赖网络请求。
 - 补传：启动探测流程在采纳服务端状态并重放已加载的本地 overlay 后尝试补传；已判定离线后，下一次非同步 API 请求成功也会触发补传。无后台轮询；网络恢复但没有新请求时不会立即触发。队列只把服务端 `accepted` 确认的操作标为已同步。
-- op 队列：写操作先入 `localStorage['zx.op_queue']`；`opId` 形如 `op_<Date.now().toString(36)>_<计数>`，`clientTs` 取 `Date.now()`，`baseSeq` 取 `ZX.state.serverSeq`；队列保存时只保留最后 200 条，故单批上行 ≤ 200，与服务端 `MAX_SYNC_BATCH` 一致，超限服务端返回 `E4002`。
+- op 队列：写操作先入 `localStorage['zx.op_queue']`；`opId` 形如 `op_<Date.now().toString(36)>_<计数>`，`clientTs` 取 `Date.now()`，`baseSeq` 取 `ZX.state.serverSeq`；未确认操作全部保留，已确认历史最多保留 200 条；分批上行每批 ≤ 200，与服务端 `MAX_SYNC_BATCH` 一致，零确认时停止本轮补传。
 - 幂等键是 `opId`，分区内唯一；重复提交不再次写入，`accepted` 仍含该 `opId`。非空批次的 `serverSeq` 对应最后一条操作（若重复则为首次写入的序号），不是分区最新序号，也不能作为单调游标。客户端以 `accepted` 确认队列；上行 `baseSeq` 当前不参与服务端字段合并。
-- 字段级合并（`server/store/memory.js` 的 `policyOf`）：墓碑类 `deleted`、`isDeleted`、`deletedAt` 墓碑优先不可翻转；计数类 `count`、`sessionCount`、`sessions`、`times` 求和；`actual`、`durationMin`、`minutes`、`duration` 取最大值；其余字段最后写入优先（同 `clientTs` 时 `serverSeq` 大者为准）。
+- 字段级合并（`server/store/memory.js` 的 `policyOf`）：墓碑类 `deleted`、`isDeleted`、`deletedAt` 墓碑优先不可翻转；计数类 `count`、`sessionCount`、`sessions`、`times` 求和；`actual`、`durationMin`、`minutes`、`duration` 取最大值（首次从已有业务状态取基线）；其余字段最后写入优先（同 `clientTs` 时 `serverSeq` 大者为准）。执行记录按 session ID 追加去重，不受同任务其他记录时间戳压制；`plan/dayAssign/moved` 按 taskId 独立合并。
 
 - 基线 `version` 为服务端生成的版本标识，区别于浏览器执行事件关联的计划版本；`stale` 是新同步操作登记后的保守标脏标记。计划离线复核：前端把排程结果经 `POST /api/plan/review` 上送，服务端重算比对；基线缺失或不一致返回 `conflict`（附 `ticket`），携 `ticket` 重交直至 `committed`；收据幂等（同签名 24 小时内重放返回首次结果）。新建计划排程生效即建立基线，服务进程重启后基线与收据清空。
 
@@ -170,14 +175,17 @@
 4. 改 `shared/data/seed.js` → 同步 `test/engine.test.js` 与 `test/api.test.js` 的断言。
 5. 改 op 实体或字段 → 同步 `server/store/memory.js` 的 `applyToState` / `policyOf` 与本文件第 6 节。
 6. 前端不得内嵌第二份引擎实现；`assets/js/rhythm.build.js` 不得手改。
-7. 不引入第三方库或外部 CDN 资源。
+7. 服务端保持零第三方运行时依赖；前端已使用本地 vendored Three.js / CSS3DRenderer，不得误记为无第三方。vendor 由 `scripts/build-vendor-three.mjs` 生成，禁止手改；新增或升级依赖须同步资源与契约，不引入 CDN 运行时依赖。
 
 ## 8. 验收口径
 
 | 检查项 | 命令 | 判定标准 |
 |---|---|---|
-| 引擎单测 + HTTP 冒烟 + 前端 VM 单测 + 资产门禁 | `npm test` | 退出码 0，输出 `pass 130 fail 0`（当前 130 项全绿，覆盖引擎单测、HTTP 冒烟、前端 VM 单测与资产门禁） |
+| 引擎单测 + HTTP 冒烟 + 前端 VM 单测 + 资产门禁等 | `npm test` | 退出码 0、失败数为 0；测试数与通过 / 跳过情况以本次命令输出为准，不以历史数量证明当前全绿 |
 | CSS 审计 | `npm run audit` | 退出码 0；存在 error 时退出码 1，仅 warn 仍为 0 |
-| 引擎产物重建校验 | `npm run build:engine` 后重算 `assets/js/rhythm.build.js` 的 SHA256 | 重建前后哈希一致（构建不写时间戳）；当前值 `5cdc674e3af022a9f9c23a8f8a6f12847745a22c2acf29e50ca4329e8bd55986` |
-| 资源引用全量扫描 | 提取 `index.html` 中 `src`/`href` 的相对路径并逐个检查文件存在 | 缺失数为 0（当前 24 个引用） |
+| 引擎产物重建校验 | `npm run build:engine` 后重算 `assets/js/rhythm.build.js` 的 SHA256 | 在源文件未变时，重建前后哈希一致（构建不写时间戳）；源文件有改动则以重新生成的产物为准，再构建应幂等，不钉死历史哈希 |
+| 资源引用全量扫描 | 使用 `FRONTEND-CONTRACT.md` §9 扫描命令提取 `index.html` 的本地 `src`/`href` 并检查存在 | 缺失数为 0；引用清单与数量取本次扫描结果（包含 GL 与 vendor），不钉死引用总数 |
 | 服务冒烟 | `node server/main.js` 后请求 `GET /api/health` | HTTP 200 且 `ok` 为 `true` |
+| 真实浏览器 GL 验收 | 按 `FRONTEND-CONTRACT.md` §9 在 HTTP 与 `file://` 下检查 GL 开启 / 关闭 / 不可用场景 | 首帧、WebGL / CSS3D 渲染与层级、导航 / 输入 / 滚动 / 弹层、动效闸门与 DOM 回退均实测；记录浏览器与结果 |
+
+Node VM 单测验证模拟环境下的逻辑，不能替代真实浏览器的 WebGL 上下文、CSS3D 布局、交互与视觉验收。上述命令和浏览器检查是验收要求，不是本文已执行或已通过的声明。

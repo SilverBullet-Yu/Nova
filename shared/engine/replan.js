@@ -80,7 +80,9 @@
       compressedShareCap: num(p.compressedShareCap, 0.30),
       consecutiveNoImproveCap: num(p.consecutiveNoImproveCap, 3),
       bufferRatio: num(p.bufferRatio, 0.15),
-      dailyCapMin: num(p.dailyCapMin, 300)
+      dailyCapMin: num(p.dailyCapMin, 300),
+      maxTasks: num(p.maxTasks, 500),
+      maxOperations: num(p.maxOperations, 50000)
     };
   }
 
@@ -462,6 +464,13 @@
     var tasks = clone(src.tasks || []);
     var weekRaw = clone(src.week || []);
     var days = normalizeDays(weekRaw, P);
+    if (tasks.length > P.maxTasks) {
+      throw new RangeError('重排任务规模超过上限：' + P.maxTasks);
+    }
+    var estimatedOperations = tasks.length * Math.max(1, days.length) * 8;
+    if (estimatedOperations > P.maxOperations) {
+      throw new RangeError('重排计算预算不足：预计 ' + estimatedOperations + ' 次操作，预算 ' + P.maxOperations);
+    }
     /* 锁定集合：硬约束，直接参与各等级判定，不做事后过滤 */
     var locks = normalizeLocks(src.locks);
 

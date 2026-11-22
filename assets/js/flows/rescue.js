@@ -92,7 +92,7 @@ window.ZX = window.ZX || {};
   }
 
   function undone() {
-    return ZX.state.tasks.filter(function (t) { return !t.done; });
+    return ZX.state.tasks.filter(function (t) { return !t.done && !t.abandoned && !t.substituted; });
   }
 
   function byWeightAsc(list) {
