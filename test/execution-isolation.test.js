@@ -43,6 +43,19 @@ for (const paused of [false, true]) {
   }
 }
 
+test('部分完成后再次完成，任务实际时长累计且刷新保留', () => {
+  const storage = new Map();
+  const { ZX } = boot(storage);
+  ZX.state.tasks = [{ id: 'a', title: 'A', est: 60 }];
+  ZX.exec.commitRecord('a', 20, 50, '', 100, 1200100);
+  assert.equal(ZX.state.tasks[0].actual, 20);
+  ZX.exec.commitRecord('a', 25, 100, '', 1200100, 2700100);
+  assert.equal(ZX.state.tasks[0].actual, 45);
+  const refreshed = boot(storage).ZX;
+  assert.equal(refreshed.state.tasks[0].actual, 45);
+  assert.deepEqual(plain(refreshed.state.sessions.map(s => s.minutes)), [20, 25]);
+});
+
 test('记录当前 A 后复位四元组，归因先于持久化；刷新与重复完成不重计数', () => {
   const storage = new Map();
   const { ZX, counts } = boot(storage);

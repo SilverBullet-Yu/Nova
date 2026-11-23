@@ -148,7 +148,7 @@ window.ZX = window.ZX || {};
 
     if (completion >= 100) {
       t.done = true;
-      t.actual = minutes;
+      t.actual = U.num(t.actual, 0) + minutes;
       t.completion = 100;
       t.partial = null;
     } else {

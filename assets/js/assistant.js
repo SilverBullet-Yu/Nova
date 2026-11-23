@@ -63,6 +63,10 @@ window.ZX = window.ZX || {};
     var t = S.tasks.filter(function (x) { return x.id === id; })[0];
     /* 旧卡片不能复活退役任务，也不能覆盖其他任务的计时。 */
     if (!t || t.done || t.abandoned || t.substituted) return;
+    if (S.running) {
+      ZX.ui.toast('已有任务正在计时，请先结束并记录，再开始其他任务', 'warn');
+      return;
+    }
     var restored = !!t.skipped;
     if (restored) { t.skipped = false; t.skipReason = null; }
     S.running = id;

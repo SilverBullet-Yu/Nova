@@ -140,15 +140,16 @@ window.ZX = window.ZX || {};
 
   /* ---------- 导出（本地 CSV，无后端可用；pad2 用 util.js 共用实现） ---------- */
   function ymd(ms) {
-    var d = ms === undefined || ms === null ? new Date() : new Date(ms);
+    if (ms === undefined || ms === null) return '';
+    var d = new Date(ms);
     if (isNaN(d.getTime())) return '';
     return d.getFullYear() + '-' + U.pad2(d.getMonth() + 1) + '-' + U.pad2(d.getDate());
   }
 
   function cell(v) {
     var s = (v === undefined || v === null) ? '' : String(v);
-    /* 防公式注入：以 = + - @ 开头的文本在 Excel/WPS 打开时会被当公式执行 */
-    if (/^[=+\-@]/.test(s)) s = "'" + s;
+    /* 防公式注入：公式符号及制表符开头的文本加前缀。 */
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
     return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   }
 
@@ -182,7 +183,7 @@ window.ZX = window.ZX || {};
   function csv() {
     var S = ZX.state;
     var head = ['类型', '任务ID', '科目', '标题', '预估分钟', '实际分钟', '完成度', '状态', '日期', '计划版本'];
-    var today = ymd();
+    var today = ymd(Date.now());
     var rows = [];
     var byId = {};
 
@@ -203,14 +204,14 @@ window.ZX = window.ZX || {};
       var t = byId[s.taskId] || {};
       rows.push([
         '记录', s.taskId || '', t.subject || t.s || '', t.title || '',
-        '', U.num(s.minutes, 0),
+        '', (s.minutes === undefined || s.minutes === null) ? '' : U.num(s.minutes, 0),
         (s.completion === undefined || s.completion === null) ? '' : U.num(s.completion, 0),
         s.status || '', ymd(s.startAt), s.planVersion || ''
       ]);
     });
 
-    return head.join(',') + '\n' +
-      rows.concat(availabilityRows(), goalRows()).map(function (r) { return r.map(cell).join(','); }).join('\n') + '\n';
+    var lines = rows.concat(availabilityRows(), goalRows()).map(function (r) { return r.map(cell).join(','); });
+    return [head.join(',')].concat(lines).join('\n') + '\n';
   }
 
   /* 数据行数在组装时统计，避免按换行符拆分把引号内换行误算成多行 */
@@ -285,9 +286,23 @@ window.ZX = window.ZX || {};
       avail: U.clone(ensure()),
       availSource: S.availSource,
       week: U.clone(S.week || null),
+      weekShift: U.clone(S.weekShift || null),
+      dayAssign: U.clone(S.dayAssign || {}),
+      locks: U.clone(S.locks || {}),
+      notif: U.clone(S.notif || null),
+      attrCounts: U.clone(S.attrCounts || {}),
+      replanHistory: U.clone(S.replanHistory || []),
+      replanSnapshot: U.clone(S.replanned ? S.snapshot : null),
       at: Date.now()
     };
-    writeRaw(TRASH_KEY, JSON.stringify({ at: snap.at, snapshot: snap }));
+    var trash = JSON.stringify({ at: snap.at, snapshot: snap });
+    try {
+      window.localStorage.setItem(TRASH_KEY, trash);
+      if (window.localStorage.getItem(TRASH_KEY) !== trash) throw new Error('trash not saved');
+    } catch (e) {
+      ZX.ui.toast('无法保存恢复快照，未删除数据', 'warn');
+      return;
+    }
     dropRaw(QUEUE_KEY);
     if (ZX.state.dropOverlay) ZX.state.dropOverlay();   /* 本地 overlay 同步清除，防重载复活已删数据 */
     writeRaw(FLASH_KEY, '已删除，可在 7 天内恢复');
@@ -342,6 +357,10 @@ window.ZX = window.ZX || {};
     if (!t) { ZX.ui.toast('没有可恢复的数据', 'warn'); return false; }
     var S = ZX.state;
     var s = t.snapshot || {};
+    var previous = {};
+    ['tasks', 'sessions', 'goal', 'feas', 'week', 'weekShift', 'dayAssign', 'locks',
+      'notif', 'attrCounts', 'replanHistory', 'snapshot', 'replanned', 'avail', 'availSource']
+      .forEach(function (key) { previous[key] = S[key]; });
     if (Array.isArray(s.tasks)) S.tasks = s.tasks.map(ZX.state.normTask);
     if (Array.isArray(s.sessions)) S.sessions = s.sessions;
     if (!S.goal || S.goal.source !== 'removed') {
@@ -349,9 +368,38 @@ window.ZX = window.ZX || {};
       if (s.feas) S.feas = s.feas;
     }
     if (s.week) S.week = s.week;
+    if (Array.isArray(s.weekShift)) S.weekShift = s.weekShift;
+    if (s.dayAssign && typeof s.dayAssign === 'object') S.dayAssign = s.dayAssign;
+    if (s.locks && typeof s.locks === 'object') S.locks = s.locks;
+    if (s.notif && typeof s.notif === 'object') S.notif = s.notif;
+    if (s.attrCounts && typeof s.attrCounts === 'object') S.attrCounts = s.attrCounts;
+    if (Array.isArray(s.replanHistory)) S.replanHistory = s.replanHistory;
+    if (Object.prototype.hasOwnProperty.call(s, 'replanSnapshot')) {
+      S.snapshot = s.replanSnapshot && Array.isArray(s.replanSnapshot.tasks) ? s.replanSnapshot : null;
+      S.replanned = S.snapshot !== null;
+    }
     if (s.avail) {
       S.avail = normGrid(s.avail);
       S.availSource = ['default', 'user'].indexOf(s.availSource) >= 0 ? s.availSource : 'legacy';
+    }
+    /* 先确认 overlay 已持久化，再丢弃唯一的恢复快照。 */
+    var restoredAt = Date.now();
+    S.saveOverlay();
+    var saved;
+    try { saved = JSON.parse(window.localStorage.getItem('zx.overlay') || 'null'); } catch (e) { saved = null; }
+    var restoredFields = {
+      tasks: S.tasks, sessions: S.sessions, goal: S.goal, feas: S.feas, week: S.week,
+      weekShift: S.weekShift, dayAssign: S.dayAssign || {}, locks: S.locks || {},
+      avail: S.avail || null, availSource: S.availSource || null, notif: S.notif || null,
+      attrCounts: S.attrCounts || {}, replanHistory: S.replanHistory || [],
+      replanSnapshot: S.replanned ? S.snapshot : null
+    };
+    if (!saved || saved.at < restoredAt || Object.keys(restoredFields).some(function (key) {
+      return JSON.stringify(saved[key]) !== JSON.stringify(restoredFields[key]);
+    })) {
+      Object.keys(previous).forEach(function (key) { S[key] = previous[key]; });
+      ZX.ui.toast('无法保存恢复结果，回收站仍保留', 'warn');
+      return false;
     }
     dropRaw(TRASH_KEY);
     ZX.api.queueOp({ entity: 'data', entityId: 'all', field: 'restored', value: { at: t.at } });

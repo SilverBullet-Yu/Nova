@@ -1,4 +1,5 @@
 'use strict';
+require('./isolate-store').isolateStore();
 
 const test = require('node:test');
 const assert = require('node:assert/strict');

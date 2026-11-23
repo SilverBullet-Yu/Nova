@@ -1,4 +1,5 @@
 'use strict';
+require('./isolate-store').isolateStore();
 /* 诺瓦 Nova · HTTP 端到端冒烟
  * 契约：docs/HANDOFF.md §5（全部端点）+ §8（幂等）
  * 运行：npm test

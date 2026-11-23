@@ -105,6 +105,7 @@ for (const level of [3, 4]) {
     for (const id of retiredIds) {
       assert.ok(refreshed.exec.activeTasks().some(t => t.id === id));
       assert.ok(refreshed.flows.planedit.board().includes('data-pe-task="' + id + '"'));
+      refreshed.state.resetTimer();
       refreshed.assistant.startTask(id);
       assert.equal(refreshed.state.running, id);
     }
