@@ -5,6 +5,7 @@ npm-debug.log*
 
 # 本地数据与运行时产物
 server/data/
+nova-store.json*
 *.sqlite
 *.sqlite3
 *.db
@@ -20,6 +21,11 @@ tmp/
 # 本地工具产物
 .playwright-cli/
 .hallmark/
+__pycache__/
+*.pyc
+.tools/ui-backups/
+.tools/workbench-check/
+.tools/*.png
 
 # 编辑器与系统
 .vscode/

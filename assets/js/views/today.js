@@ -20,15 +20,51 @@ window.ZX = window.ZX || {};
      按真实时钟星期匹配（seed 的 today 旗标是示例数据，与演示日期无关） */
   function todayBufMin() {
     var S = ZX.state;
+    var summary = S.placementSummary ? S.placementSummary() : null;
+    if (summary) {
+      var day = summary.days.find(function (item) { return item.date === U.todayKey(); });
+      return day ? day.bufferCapacityMin : 0;
+    }
     var dow = U.todayDow();
-    var w = S.week.filter(function (d) { return d.d === dow; })[0] || S.week[S.week.length - 1] || {};
+    var w = S.week.filter(function (d) { return d.d === dow })[0] || S.week[S.week.length - 1] || {};
     return U.num(w.buf, 0);
   }
 
-  /* Stage C-1：计划 / 已投入 / 达成率改为视图层口径（过滤 skipped），
-     统一取自 flows/exec 的 metrics（与对话页 KPI 同一来源） */
+  function taskDayTime(task) {
+    var S = ZX.state;
+    if (!S.placementModel || !S.taskSegments) return task.time;
+    var segments = S.taskSegments(task.id, U.todayKey());
+    if (!segments.length) return '';
+    var first = segments[0];
+    var last = segments[segments.length - 1];
+    var pad = U.pad2;
+    return pad(Math.floor(first.startMin / 60)) + ':' + pad(first.startMin % 60) + '–' +
+      pad(Math.floor((last.startMin + last.durMin) / 60)) + ':' + pad((last.startMin + last.durMin) % 60);
+  }
+
+  /* KPI 统一取 flows/exec 的 R8 / S2 口径；率是 0..1，null 不伪装成 0%。 */
   function metrics() {
     return ZX.flows.exec.metrics();
+  }
+
+  function rateText(rate, basis) {
+    if (rate === null || rate === undefined || !Number.isFinite(rate)) {
+      return basis === 'unknown' ? '未知' : '—';
+    }
+    return Math.round(Math.min(1, Math.max(0, rate)) * 100) + '%';
+  }
+
+  function stat(label, value, note, accent) {
+    return '<div class="vs' + (accent ? ' sc-vs' : '') + '"><span>' + label + '</span><b' +
+      (accent ? ' class="ac"' : '') + '>' + value + '</b><i>' + note + '</i></div>';
+  }
+
+  function statusSummary(m) {
+    return '<p class="note sc-stats-note">部分完成 ' + m.partialCount +
+      ' 项（今日待办中已有进度）；跳过 ' + m.skipped + ' 项、暂缓 ' + m.deferred +
+      ' 项（不计入任务数 / 计划 / 剩余，已投入仍保留）；锁定 ' + m.locked +
+      ' 项（今日任务 locks 标记）；放弃 ' + m.abandoned + ' 项、替代 ' + m.substituted +
+      ' 项（退役，不计入剩余）。实际投入仅汇总任务 actual，不含补录。</p>';
   }
 
   function activeTasks() {
@@ -49,12 +85,14 @@ window.ZX = window.ZX || {};
         '<h1>今日<span class="sub">基础期</span></h1>' +
       '</div>' +
       '<div class="vstats">' +
-        '<div class="vs"><span>计划</span><b>' + U.hm(m.planned) + '</b></div>' +
-        '<div class="vs"><span>已投入</span><b>' + U.hm(m.worked) + '</b></div>' +
-        '<div class="vs"><span>达成率</span><b class="ac">' + m.rate + '%</b></div>' +
+        stat('计划工时', U.hm(Math.max(0, m.planned)), m.plannedBasis === 'unknown' ? '已知项合计 · 分母不完整' : '原始计划分母') +
+        stat('任务完成率', rateText(m.taskRate), m.done + ' / ' + m.total + ' 项', true) +
+        stat('计划工时完成率', rateText(m.plannedRate, m.plannedBasis), m.plannedBasis === 'unknown' ? '旧任务缺原始计划' : '完成项 + 部分项折算', true) +
+        stat('实际投入', U.hm(Math.max(0, m.worked)), '任务 actual · 不含补录') +
+        stat('剩余预估', U.hm(Math.max(0, m.remain)), '未完成且未退役') +
         backfillStat(m) +
         '<div class="vs"><span>弹性位</span><b>' + (S.buffer.free ? '1 空闲' : '占用') + '</b></div>' +
-      '</div></div>' +
+      '</div>' + statusSummary(m) + '</div>' +
 
       dayBand() +
 
@@ -62,16 +100,17 @@ window.ZX = window.ZX || {};
         '<span class="r">待办 ' + todo.length + ' 项</span>' +
         '<button type="button" class="sc-link" data-sc="backfill">补录</button></div>' +
       ttTable(todo.map(function (t, i) { return taskRow(t, i); })) +
-      bufferRow() + movedRow() +
+      bufferRow() +
       doneFold(done) +
+      deferredBlock() +
       skippedBlock() +
     '</div>';
   }
 
-  /* 已记录任务折叠区：复用 ui.fold 原语（展开态持久化），累计时长取 actual||est */
+  /* 已记录任务折叠区：复用 ui.fold 原语（展开态持久化），累计时长只取 actual。 */
   function doneFold(done) {
     if (!done.length) return '';
-    var total = done.reduce(function (a, t) { return a + U.num(t.actual || t.est, 0); }, 0);
+    var total = done.reduce(function (a, t) { return a + Math.max(0, U.num(t.actual, 0)); }, 0);
     return ZX.ui.fold('today:done', {
       title: '已记录 ' + done.length + ' 项',
       meta: '累计 ' + U.hm(total),
@@ -121,14 +160,24 @@ window.ZX = window.ZX || {};
     var blocks = '';
     var label = '';
     var done = 0;
-    S.tasks.forEach(function (t) {
-      var span = parseSpan(t.time);
-      if (!span) return;
+    activeTasks().forEach(function (t) {
       var c = (SUBJ[t.s] || { c: 'var(--txt3)' }).c;
       var cls = t.done ? 'done' : (S.running === t.id ? 'run' : '');
       if (t.done) done++;
-      label += (label ? '；' : '') + t.s + ' ' + t.time;
-      blocks += tlBlk(span, cls, c, t.s, t.s + ' ' + t.title + ' ' + t.time + ' · ' + U.hm(t.est));
+      var segments = S.taskSegments ? S.taskSegments(t.id, U.todayKey()) : [];
+      if (segments.length) {
+        segments.forEach(function (segment) {
+          var span = [segment.startMin, segment.startMin + segment.durMin];
+          var time = taskDayTime(t);
+          label += (label ? '；' : '') + t.s + ' ' + time;
+          blocks += tlBlk(span, cls, c, t.s, t.s + ' ' + t.title + ' ' + time + ' · ' + U.hm(segment.durMin) + (segment.isBuffer ? ' · 弹性位' : ''));
+        });
+      } else {
+        var span = parseSpan(t.time);
+        if (!span) return;
+        label += (label ? '；' : '') + t.s + ' ' + t.time;
+        blocks += tlBlk(span, cls, c, t.s, t.s + ' ' + t.title + ' ' + t.time + ' · ' + U.hm(t.est));
+      }
     });
     var buf = parseSpan(S.buffer.time);
     if (buf) {
@@ -176,34 +225,57 @@ window.ZX = window.ZX || {};
     var c = (SUBJ[t.s] || { c: 'var(--txt3)' }).c;
     var running = S.running === t.id;
     var paused = running && !!S.pausedAt;
+    var time = taskDayTime(t);
     var act;
     if (t.done) {
-      act = '<span class="rec">已记录 ' + U.hm(t.actual || t.est) + '</span>';
+      act = '<span class="rec">已记录 ' + U.hm(Math.max(0, U.num(t.actual, 0))) + '</span>';
     } else if (running) {
       act = '<img class="tk-mascot" src="assets/img/mascot-v4-focus.svg" width="24" height="30" alt="" />' +
             '<span class="timer" id="timer">00:00</span>' +
-            '<button class="btn" data-sc="pause" data-id="' + t.id + '">' + (paused ? '继续' : '暂停') + '</button>' +
-            '<button class="btn" data-act="finish" data-id="' + t.id + '">结束</button>' +
-            '<button class="btn ghost" data-act="done" data-id="' + t.id + '">按预估记录</button>';
+            '<button class="btn" data-sc="pause" data-id="' + U.esc(t.id) + '">' + (paused ? '继续' : '暂停') + '</button>' +
+            '<button class="btn" data-act="finish" data-id="' + U.esc(t.id) + '">结束</button>' +
+            '<button class="btn ghost" data-act="done" data-id="' + U.esc(t.id) + '">按预估记录</button>';
     } else {
-      act = '<button class="btn" data-act="start" data-id="' + t.id + '">开始</button>' +
-            '<button class="btn ghost" data-sc="skip" data-id="' + t.id + '">跳过</button>' +
-            '<button class="btn ghost" data-act="done" data-id="' + t.id + '">完成</button>';
+      act = '<button class="btn" data-act="start" data-id="' + U.esc(t.id) + '">开始</button>' +
+            '<button class="btn ghost" data-sc="skip" data-id="' + U.esc(t.id) + '">跳过</button>' +
+            '<button class="btn ghost" data-act="done" data-id="' + U.esc(t.id) + '">完成</button>';
     }
     var notes = (t.why ? '<span class="why">' + U.esc(t.why) + '</span>' : '') +
       (paused ? '<span class="sc-paused">已暂停</span>' : '') +
-      (!t.done && t.partial ? '<span class="sc-part">已完成 ' + t.partial + '% · 余 ' + U.hm(t.est) + '</span>' : '');
-    return '<div class="tt-row' + (t.done ? ' done' : '') + (running ? ' run' : '') + (paused ? ' sc-run-paused' : '') + '" data-task="' + t.id + '">' +
+      (!t.done && t.partial ? '<span class="sc-part">已完成 ' + U.esc(t.partial) + '% · 余 ' + U.hm(t.est) + '</span>' : '');
+    return '<div class="tt-row' + (t.done ? ' done' : '') + (running ? ' run' : '') + (paused ? ' sc-run-paused' : '') + '" data-task="' + U.esc(t.id) + '">' +
       '<span class="c-idx mono">' + (t.done ? '✓' : U.pad2(i + 1)) + '</span>' +
       '<div class="c-main">' +
         '<div class="tt-line"><span class="subj" style="--c:' + c + '">' + U.esc(t.s) + '</span><h3>' + U.esc(t.title) + '</h3></div>' +
         (notes ? '<p class="tt-note">' + notes + '</p>' : '') +
-        '<p class="tt-m mono">' + U.esc(t.time) + ' · ' + U.hm(t.est) + ' · 权重 ' + t.weight.toFixed(2) + '</p>' +
+        '<p class="tt-m mono">' + U.esc(time) + ' · ' + U.hm(t.est) + ' · 权重 ' + t.weight.toFixed(2) + '</p>' +
       '</div>' +
-      '<span class="c-time mono">' + U.esc(t.time) + '</span>' +
+      '<span class="c-time mono">' + U.esc(time) + '</span>' +
       '<span class="c-est mono">' + U.hm(t.est) + '</span>' +
       '<span class="c-wt mono">' + t.weight.toFixed(2) + '</span>' +
       '<div class="c-act">' + act + '</div>' +
+    '</div>';
+  }
+
+  /* 今日暂缓始终可见：它不是真实改期，也不进入今日任务表和时间带。 */
+  function deferredBlock() {
+    var S = ZX.state;
+    var list = S.tasks.filter(function (t) { return t.deferred; });
+    if (!list.length) return '';
+    return '<div class="sc-skips open" data-deferred-list>' +
+      '<div class="sc-skips-h"><span class="sc-skips-t">今日暂缓（未改期）</span>' +
+        '<span class="sc-skips-n">不计入今日待办 · 计划日期未变</span></div>' +
+      '<div class="sc-skips-b">' + list.map(deferredItem).join('') + '</div></div>';
+  }
+
+  function deferredItem(t) {
+    var c = (SUBJ[t.s] || { c: 'var(--txt3)' }).c;
+    var legacy = t.deferredTo ? ' · 旧版标记（非改期）：' + U.esc(t.deferredTo) : '';
+    return '<div class="sc-skip-i">' +
+      '<span class="subj" style="--c:' + c + '">' + U.esc(t.s) + '</span>' +
+      '<span class="sc-skip-t">' + U.esc(t.title) + '</span>' +
+      '<span class="sc-skip-m mono">' + U.hm(t.est) + (t.deferredReason ? ' · ' + U.esc(t.deferredReason) : '') + legacy + '</span>' +
+      '<button type="button" class="btn ghost sc-skip-b" data-act="restore-deferred" data-id="' + U.esc(t.id) + '">恢复</button>' +
     '</div>';
   }
 
@@ -220,17 +292,9 @@ window.ZX = window.ZX || {};
       '<div class="bf-main"><div class="bf-t"><b>弹性位</b><span>' + U.esc(S.buffer.time) +
         (todayBufMin() ? ' · ' + U.hm(todayBufMin()) : '') +
         (S.buffer.free ? '' : ' · 已占用') + '</span></div></div>' +
-      '<div class="c-act"><button class="btn ghost" data-act="buffer">' + (S.buffer.free ? '占用' : '释放') + '</button></div>' +
-    '</div>';
-  }
-
-  function movedRow() {
-    var S = ZX.state;
-    if (!S.movedOut) return '';
-    return '<div class="buffer">' +
-      '<div class="ico">→</div>' +
-      '<div class="bf-main"><div class="bf-t"><b>已移出</b><span>' + U.esc(S.movedOut.title) + ' · ' + U.hm(S.movedOut.est) + '</span></div></div>' +
-      '<div class="c-act"><button class="btn ghost" data-act="tab" data-tab="plan">查看周计划</button></div>' +
+      '<div class="c-act">' + (S.placementModel
+        ? '<button class="btn ghost" disabled>用量自动记账</button>'
+        : '<button class="btn ghost" data-act="buffer">' + (S.buffer.free ? '占用' : '释放') + '</button>') + '</div>' +
     '</div>';
   }
 
@@ -256,14 +320,14 @@ window.ZX = window.ZX || {};
       '<span class="subj" style="--c:' + c + '">' + U.esc(t.s) + '</span>' +
       '<span class="sc-skip-t">' + U.esc(t.title) + '</span>' +
       '<span class="sc-skip-m mono">' + U.hm(t.est) + (t.skipReason ? ' · ' + U.esc(t.skipReason) : '') + '</span>' +
-      '<button type="button" class="btn ghost sc-skip-b" data-sc="restore" data-id="' + t.id + '">恢复</button>' +
+      '<button type="button" class="btn ghost sc-skip-b" data-sc="restore" data-id="' + U.esc(t.id) + '">恢复</button>' +
     '</div>';
   }
 
   /* 有补录才显示（不计入达成率） */
   function backfillStat(m) {
     if (!m.backfill) return '';
-    return '<div class="vs sc-vs"><span>补录</span><b>' + U.hm(m.backfill) + '</b><i>不计入达成率</i></div>';
+    return '<div class="vs sc-vs"><span>补录</span><b>' + U.hm(m.backfill) + '</b><i>不计入完成率 / 实际投入</i></div>';
   }
 
   ZX.views = ZX.views || {};

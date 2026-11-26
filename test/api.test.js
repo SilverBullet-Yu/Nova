@@ -7,6 +7,7 @@ require('./isolate-store').isolateStore();
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { randomUUID } = require('node:crypto');
 
 const { start } = require('../server/main.js');
 const auth = require('../server/auth.js');
@@ -49,7 +50,7 @@ async function newSession() {
 
 test.before(async () => {
   memory.reset();
-  handle = await start(0);
+  handle = await start(0, '127.0.0.1');
   base = handle.url;
   userA = await newSession();
   userB = await newSession();
@@ -60,6 +61,37 @@ test.after(async () => {
 });
 
 /* ── 端点覆盖 ─────────────────────────────────────────────────────────── */
+
+test('排程与重排在引擎调用前拒绝超规模输入', async () => {
+  const tasks = Array.from({ length: 501 }, (_, i) => ({ id: 't' + i, estMin: 1 }));
+  const schedule = await call('POST', '/api/schedule', { tasks, slots: [] }, userA.token);
+  assert.equal(schedule.status, 400);
+  assert.equal(schedule.body.error.code, 'E4002');
+  const slots = Array.from({ length: 2001 }, (_, i) => ({ date: 'D', startMin: i, durMin: 1 }));
+  const tooManySlots = await call('POST', '/api/schedule', { tasks: [], slots }, userA.token);
+  assert.equal(tooManySlots.status, 400);
+  assert.equal(tooManySlots.body.error.code, 'E4002');
+  const week = Array.from({ length: 8 }, (_, i) => ({ date: 'D' + i, minutes: 0 }));
+  const replan = await call('POST', '/api/replan', { tasks: [], week }, userA.token);
+  assert.equal(replan.status, 400);
+  assert.equal(replan.body.error.code, 'E4002');
+});
+
+test('超过 1 MiB 的请求返回 E4002 而不是断开连接', async () => {
+  const r = await call('POST', '/api/feasibility', { padding: 'x'.repeat(1024 * 1024) }, userA.token);
+  assert.equal(r.status, 400);
+  assert.equal(r.body.error.code, 'E4002');
+});
+
+test('需求工时同步后可从服务端状态回读', async () => {
+  const user = await newSession();
+  const op = { opId: 'feas-demand-regression', entity: 'feas', entityId: 'current', field: 'demand', value: 999, clientTs: 1 };
+  const sent = await call('POST', '/api/sync/ops', { ops: [op] }, user.token);
+  assert.equal(sent.status, 200);
+  assert.deepEqual(sent.body.accepted, [op.opId]);
+  const state = await call('GET', '/api/state', undefined, user.token);
+  assert.equal(state.body.seed.feas.demand, 999);
+});
 
 test('GET /api/health 返回 ok:true（无需凭证）', async () => {
   const r = await call('GET', '/api/health');
@@ -89,6 +121,20 @@ test('POST /api/feasibility 返回可行性结果（R 1.08）', async () => {
   assert.equal(r.body.verdict, '合理');
 });
 
+test('POST /api/replan 透传 v3 弹性容量与释放字段', async () => {
+  const user = await newSession();
+  const response = await call('POST', '/api/replan', {
+    tasks: [{ id: 'v3-task', subject: '数学', title: '弹性测试', est: 60, weight: 1 }],
+    week: [{ date: '2026-11-24', minutes: 0, bufferUsed: 0, buffer: 60, capacity: 30, releasedMinutes: 0, releasedBufferMinutes: 0 }],
+    allowBuffer: true,
+    timestamp: 1
+  }, user.token);
+  assert.equal(response.status, 200);
+  assert.equal(response.body.accepted, true);
+  assert.equal(response.body.loadDelta, null);
+  assert.ok(response.body.nextPlacements[0].segs.some(segment => segment.isBuffer === true));
+});
+
 test('POST /api/schedule 返回排程结果', async () => {
   const r = await call('POST', '/api/schedule', {
     tasks: [{ id: 't2', subject: '数学', estMin: 90, weight: 0.92 }],
@@ -106,6 +152,58 @@ test('POST /api/schedule 返回排程结果', async () => {
   assert.equal(r.body.blocks[0].taskId, 't2');
   assert.equal(r.body.blocks[0].durMin, 30);
   assert.equal(r.body.blocks[2].startMin, 690);
+});
+
+test('计划提交的锁内 revision 冲突映射 E3001 且不落库', async () => {
+  const conflict = () => {
+    const error = new Error('计划状态已变化，请重新预览');
+    error.code = 'REVISION_CONFLICT';
+    throw error;
+  };
+  const scheduleUser = await newSession();
+  const input = {
+    tasks: [{ id: 'review-task', subject: '数学', estMin: 30, weight: 1 }],
+    slots: [{ date: '三', startMin: 480, durMin: 30 }]
+  };
+  const result = (await call('POST', '/api/schedule', input, scheduleUser.token)).body;
+  const originalSchedule = memory.recordSchedule;
+  memory.recordSchedule = function (userId, version, scheduled, expectedRevision) {
+    assert.equal(typeof expectedRevision, 'string');
+    return conflict();
+  };
+  try {
+    const response = await call('POST', '/api/plan/review', {
+      id: randomUUID(), base: null, input, result
+    }, scheduleUser.token);
+    assert.equal(response.status, 409);
+    assert.equal(response.body.error.code, 'E3001');
+    assert.match(response.body.error.message, /重新预览/);
+  } finally {
+    memory.recordSchedule = originalSchedule;
+  }
+  assert.equal((await call('GET', '/api/state', undefined, scheduleUser.token)).body.planBaseline, null);
+
+  const replanUser = await newSession();
+  const preview = await call('POST', '/api/replan', {
+    tasks: [{ id: 'conflict-task', subject: '数学', est: 30, weight: 0.8 }],
+    week: ['二', '三', '四', '五', '六', '日', '一'].map(date => ({ date, minutes: 0, capacity: 100, buffer: 60 })),
+    timestamp: 1000
+  }, replanUser.token);
+  assert.equal(preview.status, 200);
+  assert.ok(preview.body.draftId);
+  const originalReplan = memory.recordReplan;
+  memory.recordReplan = function (userId, confirmed, constraints, expectedRevision) {
+    assert.equal(typeof expectedRevision, 'string');
+    return conflict();
+  };
+  try {
+    const response = await call('POST', '/api/replan/confirm', { draftId: preview.body.draftId }, replanUser.token);
+    assert.equal(response.status, 409);
+    assert.equal(response.body.error.code, 'E3001');
+  } finally {
+    memory.recordReplan = originalReplan;
+  }
+  assert.equal((await call('GET', '/api/state', undefined, replanUser.token)).body.replan, null);
 });
 
 test('POST /api/replan 返回四级策略与快照（L4 需确认，不落库）', async () => {
@@ -376,6 +474,8 @@ test('错误：未知接口返回 E2001 / 404', async () => {
   assert.equal(r.status, 404);
   assert.equal(r.body.error.code, 'E2001');
   assert.equal(typeof r.body.error.message, 'string');
+  assert.doesNotMatch(r.body.error.message, /\/api\/nope/);
+  assert.match(r.res.headers.get('x-request-id') || '', /^[0-9a-f-]{36}$/);
 });
 
 test('错误：参数缺失返回 E1001 / 400', async () => {

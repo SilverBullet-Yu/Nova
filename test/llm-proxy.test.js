@@ -2,6 +2,7 @@
 require('./isolate-store').isolateStore();
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
 const { start } = require('../server/main');
 const llm = require('../server/llm.js');
 const { ApiError } = require('../server/api/errors.js');
@@ -51,6 +52,47 @@ function mockChat(t, fetchImpl) {
   t.mock.method(globalThis, 'fetch', fetchImpl);
   t.mock.timers.enable({ apis: ['setTimeout'] });
 }
+
+test('chat：请求字节预算在发起网络前拒绝超限上下文', () => {
+  const child = spawnSync(process.execPath, ['-e', `
+    process.env.LLM_BASE_URL='https://llm.example.test';
+    process.env.LLM_API_KEY='synthetic';
+    process.env.LLM_MODEL='synthetic';
+    process.env.NOVA_LLM_MAX_REQUEST_BYTES='1024';
+    let calls=0;
+    globalThis.fetch=()=>{calls++;throw new Error('must not fetch')};
+    const llm=require(${JSON.stringify(require.resolve('../server/llm.js'))});
+    llm.chat([{role:'user',content:'x'.repeat(2048)}]).then(
+      ()=>{process.stdout.write(JSON.stringify({code:'unexpected',calls}));process.exitCode=1},
+      e=>process.stdout.write(JSON.stringify({code:e.code,calls}))
+    );
+  `], { encoding: 'utf8', env: { ...process.env, NOVA_LLM_MAX_REQUEST_BYTES: '1024' } });
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(JSON.parse(child.stdout), { code: 'E4002', calls: 0 });
+});
+
+test('chat：拒绝重定向并限制分块响应体为 1 MiB', async (t) => {
+  let options;
+  mockChat(t, async (url, opts) => {
+    options = opts;
+    let sent = false;
+    return {
+      ok: true,
+      body: new ReadableStream({
+        pull(controller) {
+          if (sent) { controller.close(); return; }
+          sent = true;
+          controller.enqueue(new Uint8Array(600 * 1024));
+          controller.enqueue(new Uint8Array(600 * 1024));
+        }
+      })
+    };
+  });
+  const error = await errCode(llm.chat([{ role: 'user', content: 'hi' }]));
+  assert.equal(error.code, 'E5012');
+  assert.match(error.message, /1 MiB/);
+  assert.equal(options.redirect, 'error');
+});
 
 test('chat：响应头后读取 body 仍受同一个超时控制，abort 映射 E5011', async (t) => {
   let signal;
@@ -276,7 +318,7 @@ test('未配置环境变量：clarifyTurn 抛 E5010，不发起网络请求', as
 
 test('HTTP 层：401 先于业务；未配置 503 E5010；输出非法 502 E5012', async () => {
   clearLlmEnv();
-  const server = await start(0);
+  const server = await start(0, '127.0.0.1');
   try {
     /* 未带凭证：鉴权先于 LLM 判定 */
     const noAuth = await fetch(server.url + '/api/llm/clarify', {

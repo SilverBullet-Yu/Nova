@@ -2,90 +2,97 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const path = require('node:path');
 const vm = require('node:vm');
+const H = require('./helpers');
 
-/* main.js 的计划复核编排（ZX.reviewPendingPlan）：离线挂起、冲突升级、
-   取消即止、本机版本漂移拒绝。装配沿用 sync-status 的最小桩模式。 */
-const source = fs.readFileSync(path.join(__dirname, '../assets/js/main.js'), 'utf8');
+/* 本地主数据模式：main 不再提供复核编排，启动/online 仅探测健康。 */
+const source = fs.readFileSync(require.resolve('../assets/js/main.js'), 'utf8');
 
-function setup(env) {
-  const toasts = [];
-  const reviewCalls = [];
-  const elements = { '#form': { addEventListener() {} } };
-  const window = {
-    ZX: {
-      util: { $: key => elements[key], sleep: async () => {} },
-      api: {
-        isOnline: () => env.online,
-        pendingCount: () => 0,
-        pendingPlan: () => env.pending || null,
-        reviewPlan: (ticket) => {
-          reviewCalls.push(ticket || null);
-          /* 离线时复核请求必然网络失败，贴合真实降级语义 */
-          if (!env.online) return Promise.reject(new Error('offline'));
-          return Promise.resolve((env.responses && env.responses.length) ? env.responses.shift() : { status: 'committed', version: 'v-final' });
-        }
-      },
-      state: { tab: 'chat', currentPlanVersion: () => env.planVersion },
-      ui: { confirm: async () => env.confirmOk !== false, toast: (t, k) => toasts.push([t, k]) },
-      flows: { exec: { metrics: () => ({}) } },
-      assistant: { tickTimer() {}, say() {} }
-    }
+function setup(env = {}) {
+  const disk = env.disk || new Map([
+    ['zx.pending_plan', JSON.stringify({ id: 'legacy-plan', input: {}, result: {} })]
+  ]);
+  const healthCalls = [];
+  const restored = [];
+  const listeners = {};
+  let pendingReads = 0;
+  const element = () => ({
+    innerHTML: '', textContent: '', hidden: false, dataset: {}, style: {}, offsetWidth: 0,
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+    addEventListener() {}, querySelector: () => null, querySelectorAll: () => [],
+    setAttribute() {}, removeAttribute() {}
+  });
+  const ZX = {
+    state: {
+      tab: 'chat', tasks: [], user: { name: '合成测试' }, goal: {}, buffer: {},
+      folds: {}, running: false, feasibility: () => null, saveOverlay() {}
+    },
+    api: {
+      isOnline: () => true,
+      legacyPendingCount: () => 1,
+      pendingCount: () => 0,
+      pendingPlan: () => { pendingReads++; return JSON.parse(disk.get('zx.pending_plan') || 'null'); },
+      health: () => { healthCalls.push('/api/health'); return Promise.resolve({ ok: true }); },
+      onStatus() {}
+    },
+    ui: { loadFolds: () => ({}), confirm: async () => true, toast() {}, countTo() {} },
+    flows: {
+      exec: {
+        activeTasks: () => [], metrics: () => ({ remain: 0 }),
+        restoreDeferred: id => { restored.push(id); return true; }
+      }
+    },
+    assistant: { say() {}, tickTimer() {} },
+    views: { chat: () => '', plan: () => '' }
   };
-  const document = { readyState: 'loading', addEventListener() {} };
-  vm.runInNewContext(source, { window, document });
-  const drain = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
-  return { ZX: window.ZX, toasts, reviewCalls, drain };
+  const document = {
+    readyState: 'loading', documentElement: { dataset: {} }, activeElement: null,
+    addEventListener(type, fn) { (listeners[type] ||= []).push(fn); },
+    querySelector: () => element(), querySelectorAll: () => []
+  };
+  const window = {
+    ZX,
+    localStorage: {
+      getItem: key => disk.has(key) ? disk.get(key) : null,
+      setItem: (key, value) => disk.set(key, String(value)),
+      removeItem: key => disk.delete(key)
+    },
+    addEventListener(type, fn) { (listeners['window:' + type] ||= []).push(fn); }
+  };
+  H.installUtil({ window, document });
+  ZX.util.applyPrefs = () => {};
+  vm.runInNewContext(source, { window, document, setInterval() {}, setTimeout() {}, clearTimeout() {} });
+  listeners.DOMContentLoaded.forEach(fn => fn());
+  const dispatch = (type, target) => (listeners[type] || []).forEach(fn => fn({ target }));
+  return { ZX, disk, healthCalls, restored, pendingReads: () => pendingReads, dispatch };
 }
 
-test('离线且非手动时不触发复核，手动触发失败则提示保留本机', async () => {
-  const { ZX, toasts, reviewCalls, drain } = setup({
-    online: false, planVersion: 'v1',
-    pending: { id: 'p1', input: {}, result: {} }
-  });
-  ZX.reviewPendingPlan();
-  await drain();
-  assert.deepEqual(reviewCalls, []);
-  assert.deepEqual(toasts, []);
+const turn = () => new Promise(resolve => setImmediate(resolve));
 
-  ZX.reviewPendingPlan(true);
-  await drain();
-  assert.deepEqual(reviewCalls, [null]);
-  assert.deepEqual(toasts, [['计划保留在本机，待联网复核。', 'warn']]);
+test('main 无复核编排，启动和 online 不读取旧 pending_plan 或发业务请求', async () => {
+  const legacy = JSON.stringify({ id: 'legacy-plan', localVersion: 'old', input: {}, result: {} });
+  const { ZX, disk, healthCalls, pendingReads, dispatch } = setup({ disk: new Map([['zx.pending_plan', legacy]]) });
+  await turn();
+  assert.equal(ZX.reviewPendingPlan, undefined);
+  assert.deepEqual(healthCalls, ['/api/health']);
+  assert.equal(pendingReads(), 0);
+
+  dispatch('window:online');
+  await turn();
+  assert.deepEqual(healthCalls, ['/api/health', '/api/health']);
+  assert.equal(pendingReads(), 0);
+  assert.equal(disk.get('zx.pending_plan'), legacy);
+  for (const name of ['getState', 'stagePlan', 'reviewPlan', 'confirmReplan', 'undo', 'syncOps']) {
+    assert.equal(typeof ZX.api[name], 'undefined', name + ' 已移除');
+  }
 });
 
-test('冲突携 ticket 升级重交，确认后 committed 提示同步完成', async () => {
-  const { ZX, toasts, reviewCalls, drain } = setup({
-    online: true, planVersion: 'v1',
-    pending: { id: 'p1', input: {}, result: {} },
-    responses: [{ status: 'conflict', reason: 'baseline-changed', ticket: 't1' }]
-  });
-  ZX.reviewPendingPlan(true);
-  await drain();
-  assert.deepEqual(reviewCalls, [null, 't1']);
-  assert.deepEqual(toasts, [['计划基线已同步', 'ok']]);
-});
-
-test('冲突后用户取消则不再重交', async () => {
-  const { ZX, toasts, reviewCalls, drain } = setup({
-    online: true, planVersion: 'v1', confirmOk: false,
-    pending: { id: 'p1', input: {}, result: {} },
-    responses: [{ status: 'conflict', reason: 'baseline-changed', ticket: 't1' }]
-  });
-  ZX.reviewPendingPlan(true);
-  await drain();
-  assert.deepEqual(reviewCalls, [null]);
-  assert.deepEqual(toasts, []);
-});
-
-test('本机计划版本漂移时拒绝复核并提示重新生成', async () => {
-  const { ZX, toasts, reviewCalls, drain } = setup({
-    online: true, planVersion: 'v2',
-    pending: { id: 'p1', localVersion: 'v1', input: {}, result: {} }
-  });
-  ZX.reviewPendingPlan(true);
-  await drain();
-  assert.deepEqual(reviewCalls, []);
-  assert.deepEqual(toasts, [['本机计划已变化，请重新生成并确认计划。旧排程未上传。', 'warn']]);
+test('main 的 restore-deferred 事件委托可用', () => {
+  const { restored, dispatch } = setup();
+  const button = {
+    dataset: { act: 'restore-deferred', id: 'deferred-task' },
+    closest: selector => selector === '[data-act]' ? button : null
+  };
+  dispatch('click', button);
+  assert.deepEqual(restored, ['deferred-task']);
 });

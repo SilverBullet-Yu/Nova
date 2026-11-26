@@ -44,24 +44,32 @@
   /* 任务统一格式：estMin + subject（不做 est / s 别名兼容） */
   function normalizeTask(t, idx) {
     var src = t || {};
+    var estMin = num(src.estMin, 0);
+    var startMin = src.startMin !== undefined && src.startMin !== null ? num(src.startMin, null) : null;
+    if (!Number.isInteger(estMin) || estMin < 0) throw new TypeError('schedule: estMin 必须是非负整数分钟');
+    if (startMin !== null && (!Number.isInteger(startMin) || startMin < 0)) throw new TypeError('schedule: startMin 必须是非负整数分钟');
     return {
       id: String(src.id !== undefined ? src.id : ('t' + (idx + 1))),
       subject: String(src.subject !== undefined ? src.subject : '未分类'),
-      estMin: num(src.estMin, 0),
+      estMin: estMin,
       weight: num(src.weight, 0),
       date: src.date !== undefined && src.date !== null ? String(src.date) : null,
-      startMin: src.startMin !== undefined && src.startMin !== null ? num(src.startMin, null) : null,
+      startMin: startMin,
       title: src.title !== undefined ? String(src.title) : ''
     };
   }
 
   function normalizeSlot(s, idx) {
     var src = s || {};
+    var startMin = num(src.startMin, 0);
+    var durMin = num(src.durMin, 0);
+    if (!Number.isInteger(startMin) || startMin < 0) throw new TypeError('schedule: slot.startMin 必须是非负整数分钟');
+    if (!Number.isInteger(durMin) || durMin < 0) throw new TypeError('schedule: slot.durMin 必须是非负整数分钟');
     return {
       idx: idx,
       date: String(src.date !== undefined ? src.date : ''),
-      startMin: num(src.startMin, 0),
-      durMin: num(src.durMin, 0),
+      startMin: startMin,
+      durMin: durMin,
       available: src.available !== false,
       isBuffer: src.isBuffer === true
     };
@@ -159,14 +167,14 @@
       reserveMin: Math.round(P.dailyCapMin * P.bufferRatio),
       slots: slots,
       slotUsed: [],
-      days: {},
+      days: Object.create(null),
       dayOrder: []
     };
     for (var i = 0; i < slots.length; i++) st.slotUsed.push(0);
     slots.forEach(function (slot) {
       var d = st.days[slot.date];
       if (!d) {
-        d = st.days[slot.date] = { date: slot.date, total: 0, nonBuffer: 0, bufferUsed: 0, bufferCap: 0, intervals: {} };
+        d = st.days[slot.date] = { date: slot.date, total: 0, nonBuffer: 0, bufferUsed: 0, bufferCap: 0, intervals: Object.create(null) };
         st.dayOrder.push(slot.date);
       }
       if (slot.isBuffer) d.bufferCap += slot.durMin;
@@ -244,10 +252,14 @@
 
   function anchorCandidates(slots, task) {
     var out = [];
+    var usable = [];
     for (var i = 0; i < slots.length; i++) {
-      if (slots[i].date === task.date && slots[i].startMin === task.startMin) out.push(i);
+      if (slots[i].date === task.date && slots[i].startMin === task.startMin) {
+        out.push(i);
+        if (slots[i].available && slots[i].durMin > 0) usable.push(i);
+      }
     }
-    return out;
+    return usable.length ? usable : out;
   }
 
   function reasonOf(cause, task, remaining, P) {
@@ -352,17 +364,15 @@
       var guard = 0;
       while (guard++ < slots.length) {
         var found = -1;
-        var blocked = false;
         for (var j = 0; j < slots.length; j++) {
           if (usedSlots[j]) continue;
           var s = slots[j];
           if (s.date !== task.date) continue;
-          if (s.startMin !== cursorEnd) continue;
-          if (!s.available) { blocked = true; break; }
+          if (s.startMin !== cursorEnd || !s.available || s.durMin <= 0) continue;
           found = j;
           break;
         }
-        if (blocked || found < 0) break;
+        if (found < 0) break;
         chain.push(found);
         usedSlots[found] = true;
         cursorEnd = slots[found].startMin + slots[found].durMin;

@@ -29,12 +29,21 @@ window.ZX_GL_STAGE = (function () {
   var frameObj = null;
   var pageEls = {};                /* page → 元素引用（frame 未入 document 前 getElementById 不可用） */
   var frameW = 1080, frameH = 400;
-  var chat = { target: 0, cur: 0, contentH: 0, viewH: 1 };
+  var chat = { target: 0, cur: 0, contentH: 0, viewH: 1, userScrolled: false };
   var clones = [];
+  var sourceNodes = [];
   var sourceHtml = [];
+  var dirtySources = new Set();
+  var chatListDirty = false;
   var slide = { cur: 0, tx: 0 };
   var currentPage = 'chat';
   var band = { top: 70, bottom: 0 };
+
+  function stageVisible() {
+    var canvas = document.getElementById('gl');
+    var css = document.getElementById('css3d');
+    return !document.hidden && !!canvas && !!css && getComputedStyle(canvas).display !== 'none' && getComputedStyle(css).display !== 'none';
+  }
 
   function cloneClean(node, deep) {
     var c = node.cloneNode(deep !== false);
@@ -44,12 +53,33 @@ window.ZX_GL_STAGE = (function () {
   }
 
   /* ---------- 对话流增量同步（与 #chat.children 逐一对齐） ---------- */
+  function markChatSource(node, src) {
+    if (!node || node.nodeType === 3) node = node && node.parentNode;
+    while (node && node.parentNode && node.parentNode !== src) node = node.parentNode;
+    if (node && node.parentNode === src) dirtySources.add(node);
+  }
+
+  function chatMutations(records, src) {
+    records.forEach(function (record) {
+      if (record.type === 'childList') chatListDirty = true;
+      markChatSource(record.target, src);
+      if (record.addedNodes) Array.prototype.forEach.call(record.addedNodes, function (node) { markChatSource(node, src); });
+    });
+  }
+
   function syncChat() {
+    if (!stageVisible()) return;
     var src = document.getElementById('chat');
     if (!src) return;
+    ['role', 'aria-live', 'aria-relevant', 'aria-atomic'].forEach(function (name) {
+      var value = src.getAttribute && src.getAttribute(name);
+      if (value) streamEl.setAttribute(name, value);
+    });
     var prevCount = clones.length;
     while (clones.length > src.children.length) {
       var dead = clones.pop();
+      var deadSource = sourceNodes.pop();
+      dirtySources.delete(deadSource);
       sourceHtml.pop();
       dead.parentNode && dead.parentNode.removeChild(dead);
     }
@@ -58,24 +88,34 @@ window.ZX_GL_STAGE = (function () {
       c.classList.add('gl-in');
       streamEl.appendChild(c);
       clones.push(c);
+      sourceNodes.push(src.children[i]);
       sourceHtml.push(src.children[i].outerHTML);
     }
-    for (var j = 0; j < clones.length; j++) {
-      var html = src.children[j].outerHTML;
-      if (sourceHtml[j] !== html) {
-        var fresh = cloneClean(src.children[j]);
-        fresh.classList.remove('gl-in');
-        streamEl.replaceChild(fresh, clones[j]);
-        clones[j] = fresh;
-        sourceHtml[j] = html;
+    if (chatListDirty || dirtySources.size) {
+      for (var j = 0; j < clones.length; j++) {
+        var source = src.children[j];
+        if (source === sourceNodes[j] && !dirtySources.has(source)) continue;
+        var html = source.outerHTML;
+        if (sourceHtml[j] !== html) {
+          var fresh = cloneClean(source);
+          fresh.classList.remove('gl-in');
+          streamEl.replaceChild(fresh, clones[j]);
+          clones[j] = fresh;
+          sourceHtml[j] = html;
+        }
+        sourceNodes[j] = source;
+        dirtySources.delete(source);
       }
     }
+    chatListDirty = false;
+    dirtySources.clear();
     var grew = clones.length > prevCount;
     chat.contentH = streamEl.scrollHeight;
     var max = Math.max(0, chat.contentH - chat.viewH);
     /* 新消息到达 → 重新贴底（与 DOM 版 scrollTop=scrollHeight 同语义）；上翻中不抢位 */
     if (grew && !chat.userScrolled) chat.target = 0;
     chat.target = Math.min(max, Math.max(0, chat.target));
+    chat.userScrolled = chat.target > 0;
     applyChatScroll();
   }
 
@@ -86,6 +126,7 @@ window.ZX_GL_STAGE = (function () {
 
   /* ---------- 工作台整页重克隆（保留面板滚动位置） ---------- */
   function syncPage(page) {
+    if (!stageVisible()) return;
     var bench = document.getElementById('main');
     var view = document.getElementById('view');
     var pageEl = pageEls[page];
@@ -93,6 +134,7 @@ window.ZX_GL_STAGE = (function () {
     var head = bench.querySelector('.bench-head');
     var wrap = view.querySelector('.wrap');
     var inner = pageEl.querySelector('.gl-page-inner');
+    if (!inner) return;
     var keep = inner.scrollTop;
     inner.innerHTML = '';
     if (head) inner.appendChild(cloneClean(head));
@@ -102,7 +144,7 @@ window.ZX_GL_STAGE = (function () {
 
   function observe() {
     var chatEl = document.getElementById('chat');
-    new MutationObserver(syncChat).observe(chatEl, { childList: true, subtree: true, characterData: true, attributes: true });
+    new MutationObserver(function (records) { chatMutations(records, chatEl); syncChat(); }).observe(chatEl, { childList: true, subtree: true, characterData: true, attributes: true });
 
     var bench = document.getElementById('main');
     var pending = false;
@@ -117,7 +159,10 @@ window.ZX_GL_STAGE = (function () {
 
     new MutationObserver(function () {
       var tab = document.documentElement.dataset.tab;
-      if (tab && ALL.indexOf(tab) >= 0 && tab !== currentPage) go(tab);
+      if (tab && ALL.indexOf(tab) >= 0 && tab !== currentPage) {
+        currentPage = tab;
+        if (stageVisible()) go(tab);
+      }
     }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-tab'] });
   }
 
@@ -161,6 +206,7 @@ window.ZX_GL_STAGE = (function () {
     });
     chat.contentH = streamEl.scrollHeight;
     chat.cur = chat.target = 0;   /* 贴底：流 bottom:0 天然对齐格底，translateY 恒 0 */
+    chat.userScrolled = false;
     applyChatScroll();
     /* 诺瓦跨格：主格左缘外、头顶探出格顶（mascot.setFrame 同源公式对齐） */
     if (window.ZX_GL_MASCOT && ZX_GL_MASCOT.setFrame) {
@@ -208,8 +254,12 @@ window.ZX_GL_STAGE = (function () {
     slide = { cur: 0, tx: 0 };
     var s0 = api.size();
     layout(s0.w, s0.h);
-    syncChat();
-    go(document.documentElement.dataset.tab || 'chat');
+    currentPage = document.documentElement.dataset.tab || 'chat';
+    if (ALL.indexOf(currentPage) < 0) currentPage = 'chat';
+    if (stageVisible()) {
+      syncChat();
+      go(currentPage);
+    }
 
     observe();
 
@@ -241,7 +291,7 @@ window.ZX_GL_STAGE = (function () {
     }, { passive: true });
     window.addEventListener('touchend', function () { touchY = null; }, { passive: true });
 
-    api.onResize.push(function (w, h) { layout(w, h); syncChat(); });
+    api.onResize.push(function (w, h) { layout(w, h); if (stageVisible()) syncChat(); });
 
     api.onFrame.push(function (dt) {
       if (!api.motion()) {
@@ -260,9 +310,16 @@ window.ZX_GL_STAGE = (function () {
     });
   }
 
+  function refresh() {
+    if (!api || !stageVisible()) return;
+    syncChat();
+    go(currentPage);
+  }
+
   return {
     mount: mount,
     go: go,
+    refresh: refresh,
     pulse: function () { api.pulse(0.6); }
   };
 })();

@@ -1,0 +1,42 @@
+# Nova 本机反向代理示例；复制后按实际域名/证书/上游地址调整。
+# 若前面还有可信网关，配置 real_ip 模块，避免所有请求共享同一限流/连接桶。
+limit_req_zone $binary_remote_addr zone=nova_api_req:10m rate=120r/m;
+limit_conn_zone $binary_remote_addr zone=nova_api_conn:10m;
+
+server {
+    listen 127.0.0.1:8080;
+    server_name localhost;
+
+    client_max_body_size 1m;
+    client_header_timeout 10s;
+    client_body_timeout 30s;
+    send_timeout 30s;
+    keepalive_timeout 5s;
+
+    # S3 已确认旧撤销接口不增加应用层 12 次/分钟限流；
+    # 此位置只保留连接数与超时保护，不配置 limit_req。
+    location = /api/replan/undo {
+        limit_conn nova_api_conn 64;
+        proxy_pass http://127.0.0.1:8787;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 30s;
+        proxy_read_timeout 130s;
+    }
+
+    location / {
+        limit_req zone=nova_api_req burst=240 nodelay;
+        limit_conn nova_api_conn 64;
+        proxy_pass http://127.0.0.1:8787;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 30s;
+        proxy_read_timeout 130s;
+    }
+}

@@ -32,6 +32,7 @@ window.ZX = window.ZX || {};
       var at = s.endAt ?? s.startAt;
       if (!Number.isFinite(at) || at < mon.getTime() || at >= next.getTime()) return;
       var min = U.num(s.minutes, 0);
+      if (!Number.isFinite(min) || min < 0) return;
       effMin += min;
       var t = U.findById(S.tasks, s.taskId);
       var key = t ? t.s : '其他';
@@ -105,10 +106,51 @@ window.ZX = window.ZX || {};
     return U.pad2(d.getMonth() + 1) + '.' + U.pad2(d.getDate()) + ' ' + U.nowStr();
   }
 
+  /* 新调用方只认 0..1 的 taskRate / plannedRate；旧隔离测试桩只有百分比 rate，
+     仅在两个新字段都缺席时兼容，且 null 仍显示未知。 */
+  function todayMetrics() {
+    var m = ZX.flows.exec.metrics();
+    if (Object.prototype.hasOwnProperty.call(m, 'taskRate') &&
+        Object.prototype.hasOwnProperty.call(m, 'plannedRate')) return m;
+    var legacy = m.plannedRate === null || m.rate === null || m.rate === undefined
+      ? null : U.num(m.rate, null);
+    return {
+      taskRate: 0,
+      plannedRate: legacy === null ? null : legacy / 100,
+      plannedBasis: m.plannedBasis || (legacy === null ? 'unknown' : 'known'),
+      planned: U.num(m.planned, 0),
+      done: U.num(m.done, 0),
+      total: U.num(m.total, 0),
+      worked: U.num(m.worked, 0),
+      remain: U.num(m.remain, 0),
+      partialCount: U.num(m.partialCount, 0),
+      skipped: U.num(m.skipped, 0),
+      deferred: U.num(m.deferred, 0),
+      abandoned: U.num(m.abandoned, 0),
+      substituted: U.num(m.substituted, 0),
+      locked: U.num(m.locked, 0),
+      backfill: U.num(m.backfill, 0)
+    };
+  }
+
+  function rateText(rate, basis) {
+    if (rate === null || rate === undefined || !Number.isFinite(rate)) {
+      return basis === 'unknown' ? '未知' : '—';
+    }
+    return Math.round(Math.min(1, Math.max(0, rate)) * 100) + '%';
+  }
+
+  function minutesText(value) {
+    var minutes = Math.max(0, U.num(value, 0));
+    return typeof U.hm === 'function' ? U.hm(minutes) : minutes + ' min';
+  }
+
   function data() {
-    var k = kpis();
-    var attr = stats().attribution || {};
-    var todayRate = ZX.flows.exec.metrics().rate;
+    /* 单次渲染只算一次全量统计，向下传递，避免重复遍历会话与重排历史。 */
+    var s = stats();
+    var k = s.kpis;
+    var attr = s.attribution || {};
+    var today = todayMetrics();
     return '<div class="wrap">' +
       '<div class="vhead"><div>' +
         '<div class="eyebrow">第 ' + U.isoWeek() + ' 周 · ' + weekRange() + '</div>' +
@@ -126,20 +168,31 @@ window.ZX = window.ZX || {};
 
       '<div class="sec-h"><span class="n">02</span><span class="t">本周周报</span><span class="rule"></span>' +
         '<span class="r">结论 / 依据 / 演示预置</span></div>' +
-      '<div class="kpis"><div class="kpi"><span>今日达成率</span><b>' + U.num(todayRate, 0) + '<span class="u">%</span></b><span class="d">仅统计今日任务</span></div></div>' +
-      reportBlock() +
+      '<div class="kpis">' +
+        '<div class="kpi"><span>任务完成率</span><b>' + rateText(today.taskRate) + '</b><span class="d">' +
+          U.num(today.done, 0) + ' / ' + U.num(today.total, 0) + ' 项 · 仅今日 activeTasks</span></div>' +
+        '<div class="kpi"><span>今日达成率</span><b>' + rateText(today.plannedRate, today.plannedBasis) + '</b><span class="d">计划工时完成率 · ' +
+          (today.plannedBasis === 'unknown' ? '旧任务缺原始计划，分母未知' : '原始计划 ' + minutesText(today.planned)) + '</span></div>' +
+        '<div class="kpi"><span>实际投入</span><b>' + minutesText(today.worked) + '</b><span class="d">今日任务 actual · 不含补录</span></div>' +
+        '<div class="kpi"><span>剩余预估</span><b>' + minutesText(today.remain) + '</b><span class="d">未完成且未退役</span></div>' +
+      '</div>' +
+      '<p class="note">部分完成 ' + U.num(today.partialCount, 0) + ' 项；跳过 ' + U.num(today.skipped, 0) +
+        ' 项、暂缓 ' + U.num(today.deferred, 0) + ' 项、锁定 ' + U.num(today.locked, 0) +
+        ' 项；放弃 ' + U.num(today.abandoned, 0) + ' 项、替代 ' + U.num(today.substituted, 0) +
+        ' 项。跳过 / 暂缓不计入任务数、计划和剩余，此前实际投入仍保留。</p>' +
+      reportBlock(s) +
       ZX.ui.fold('data:trend', {
         title: '科目结构与归因',
         meta: '科目结构 · ' + Math.max(1, Object.keys(attr).length) + ' 类归因',
         body:
           '<div class="sec-h"><span class="n">03</span><span class="t">结构与归因</span><span class="rule"></span></div>' +
-          '<div class="grid2">' + subjectBars() + attribution() + '</div>'
+          '<div class="grid2">' + subjectBars(s) + attribution(s) + '</div>'
       }) +
     '</div>';
   }
 
-  function subjectBars() {
-    var mix = stats().subjectMix || {};
+  function subjectBars(s) {
+    var mix = (s || stats()).subjectMix || {};
     var keys = Object.keys(mix);
     return '<div class="panel"><div class="panel-h">科目结构<span>有效时长占比</span></div><div class="panel-b">' +
       (keys.length
@@ -152,8 +205,8 @@ window.ZX = window.ZX || {};
     '</div></div>';
   }
 
-  function attribution() {
-    var attr = stats().attribution || {};
+  function attribution(s) {
+    var attr = (s || stats()).attribution || {};
     var keys = Object.keys(attr);
     return '<div class="panel"><div class="panel-h">累计偏差归因' +
       '<img class="warn-flag" src="assets/img/mascot-v4-warn.svg" width="22" height="19" alt="偏差提醒" />' +
@@ -168,12 +221,13 @@ window.ZX = window.ZX || {};
     '</div></div>';
   }
 
-  function reportBlock() {
+  function reportBlock(s) {
     var S = ZX.state;
-    var k = kpis();
-    var mix = stats().subjectMix || {};
-    var attr = stats().attribution || {};
-    var actions = Array.isArray(stats().actions) ? stats().actions : [];
+    var d = s || stats();
+    var k = d.kpis;
+    var mix = d.subjectMix || {};
+    var attr = d.attribution || {};
+    var actions = Array.isArray(d.actions) ? d.actions : [];
     var mixTxt = Object.keys(mix).map(function (n) { return n + ' ' + U.num(mix[n], 0) + '%'; }).join(' / ');
     var attrTxt = Object.keys(attr).map(function (n) { return n + ' ' + U.num(attr[n], 0) + '%'; }).join('、');
     return '<div class="report">' +
@@ -187,8 +241,7 @@ window.ZX = window.ZX || {};
         (actions.length
           ? '演示数据中的调整示例：' + U.esc(actions.join('；')) + '。生成周报不会将示例写入日程。'
           : '暂无演示调整。') + '</div></div>' +
-      '<div class="preset"><span class="tx">演示预置：<b>周日 08:00–10:00 政治 · 马原第 3 章</b></span><span class="spacer"></span>' +
-        '<button class="btn ghost" data-act="preset">' + (S.presetActive ? '撤销预置' : '恢复预置') + '</button></div>' +
+      '<div class="preset"><span class="tx">演示预置：<b>周日 08:00–10:00 政治 · 马原第 3 章</b> · 仅示例，不写入日程</span></div>' +
     '</div>';
   }
 

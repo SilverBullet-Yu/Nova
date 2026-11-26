@@ -7,13 +7,14 @@
  *
  * 部署适配：
  * - 端口取 PORT 环境变量（部署环境注入），本地默认 8787
- * - 绑定 0.0.0.0 以便反向代理接入；本地收紧可用 HOST=127.0.0.1
+ * - 默认仅绑定回环地址；需要局域网或反向代理访问时显式设置 HOST
  *
  * 零第三方依赖，只用 node: 内置模块。
  */
 
 const http = require('node:http');
 const { URL } = require('node:url');
+const { randomUUID } = require('node:crypto');
 
 const { createRouter, ApiError } = require('./api/routes.js');
 const store = require('./store/memory.js');
@@ -22,33 +23,26 @@ const llm = require('./llm.js');
 const { sendJson, sendError } = require('./resp.js');
 const { serveStatic } = require('./static.js');
 
-/* 绑定地址：部署环境要求 0.0.0.0 才能被反向代理访问；本地开发可用 HOST=127.0.0.1 收紧。 */
-const DEFAULT_HOST = '0.0.0.0';
+/* 默认只监听回环，避免匿名发证与计算接口意外暴露到局域网；部署时显式覆盖 HOST。 */
+const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 8787;
 const MAX_BODY_BYTES = 1024 * 1024;
 
 /**
- * CORS 策略：
- * 1. 本机来源（127.0.0.1 / localhost / file:// 的 null origin）——支持 file:// 双击打开的前端连后端；
- * 2. 同源来源（Origin 的 host 与请求 Host 一致）——支持自部署后前端与 API 同源互调。
- * 其余外部站点一律拒绝。
+ * CORS 只接受显式配置的精确 origin；同源浏览器请求不需要 CORS 头。
+ * file:// 的 null origin 默认关闭，需要时用 NOVA_ALLOW_NULL_ORIGIN=1 显式开启。
  */
 function corsHeaders(req) {
   const origin = req.headers.origin;
   if (!origin) return {};
-  const local = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin) || origin === 'null';
-  let sameOrigin = false;
-  if (!local) {
-    try {
-      const originHost = new URL(origin).host;
-      sameOrigin = !!originHost && originHost === req.headers.host;
-    } catch (e) { /* origin 非法则不放行 */ }
-  }
-  if (!local && !sameOrigin) return {};
+  const configured = String(process.env.NOVA_ALLOWED_ORIGINS || '')
+    .split(',').map(value => value.trim()).filter(Boolean);
+  const allowed = configured.includes(origin) ||
+    (origin === 'null' && process.env.NOVA_ALLOW_NULL_ORIGIN === '1');
+  if (!allowed) return {};
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    /* Authorization 必须放行：前端业务请求统一携带 Bearer 凭证 */
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Max-Age': '600',
     'Vary': 'Origin'
@@ -68,7 +62,8 @@ function readBody(req) {
       if (size > MAX_BODY_BYTES) {
         done = true;
         reject(new ApiError('E4002', '请求体超过 ' + MAX_BODY_BYTES + ' 字节上限'));
-        req.destroy();
+        /* 继续消费并丢弃余下数据，避免销毁连接导致错误响应无法送达。 */
+        req.resume();
         return;
       }
       chunks.push(c);
@@ -87,7 +82,7 @@ function readBody(req) {
     req.on('error', (e) => {
       if (done) return;
       done = true;
-      reject(new ApiError('E9001', e && e.message ? e.message : '请求读取失败'));
+      reject(new ApiError('E9001', '请求读取失败'));
     });
   });
 }
@@ -95,10 +90,17 @@ function readBody(req) {
 /* 静态托管与响应原语已拆至 server/static.js 与 server/resp.js；
  * 鉴权与限流的逐路由判定以 routes.js 注册表元数据（public / limit）为单一事实源。 */
 
+function envBound(name, fallback, min, max) {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value >= min && value > 0
+    ? Math.min(max, Math.max(min, Math.round(value)))
+    : fallback;
+}
+
 function createServer() {
   const router = createRouter(store, auth);
 
-  return http.createServer((req, res) => {
+  const server = http.createServer((req, res) => {
     let parsed;
     try {
       parsed = new URL(req.url, 'http://' + (req.headers.host || DEFAULT_HOST + ':' + DEFAULT_PORT));
@@ -169,13 +171,25 @@ function createServer() {
     }).then((out) => {
       sendJson(res, out.status, out.body, cors);
     }).catch((err) => {
+      const requestId = randomUUID();
       if (err instanceof ApiError) {
-        sendError(res, err.code, err.message, err.status, cors);
+        if (err.code === 'E5001') {
+          console.error('[nova] ' + requestId + ' ' + (err.message || '服务内部错误'));
+          sendError(res, 'E5001', '服务内部错误', 500, Object.assign({ 'X-Request-Id': requestId }, cors));
+          return;
+        }
+        sendError(res, err.code, err.message, err.status, Object.assign({ 'X-Request-Id': requestId }, cors));
         return;
       }
-      sendError(res, 'E9001', err && err.message ? err.message : '未分类异常', 500, cors);
+      console.error('[nova] ' + requestId, err);
+      sendError(res, 'E9001', '服务内部错误', 500, Object.assign({ 'X-Request-Id': requestId }, cors));
     });
   });
+  server.headersTimeout = envBound('NOVA_HTTP_HEADERS_TIMEOUT_MS', 10000, 1000, 60000);
+  server.requestTimeout = envBound('NOVA_HTTP_REQUEST_TIMEOUT_MS', 130000, 1000, 300000);
+  server.keepAliveTimeout = envBound('NOVA_HTTP_KEEP_ALIVE_TIMEOUT_MS', 5000, 1000, 60000);
+  server.maxConnections = envBound('NOVA_HTTP_MAX_CONNECTIONS', 128, 1, 10000);
+  return server;
 }
 
 /** 启动服务；port 传 0 表示随机端口（测试用） */

@@ -48,6 +48,27 @@ test('拒绝、未知工具和过期预览均不写入', () => {
   assert.equal(writes(), 0);
 });
 
+test('长会话 trace 与未结草案有界，旧草案明确失效且最新草案可用', () => {
+  const flow = createWorkflow({
+    tools: { plan: { preview: () => ({ value: 1 }), commit() {} } },
+    version: () => 1, now: () => 1, rulesVersion: 'bounded', maxTrace: 200, maxDrafts: 20
+  });
+  const ids = [];
+  for (let i = 0; i < 1000; i++) {
+    const draft = flow.preview('plan', {});
+    ids.push(draft.id);
+    flow.confirm(draft.id);
+  }
+  assert.equal(flow.events().length, 200);
+  assert.deepEqual(flow.events().slice(-2).map(event => event.status), ['pending', 'committed']);
+
+  const pending = [];
+  for (let i = 0; i < 25; i++) pending.push(flow.preview('plan', {}).id);
+  assert.equal(flow.confirm(pending[0]).status, 'rejected');
+  assert.equal(flow.confirm(pending[24]).status, 'committed');
+  assert.ok(flow.events().length <= 200);
+});
+
 test('提交失败可追踪，追踪不包含输入、草案正文或原始错误', () => {
   const { flow, writes, fail } = setup();
   const draft = flow.preview('plan', { token: 'secret-token' });
@@ -58,4 +79,15 @@ test('提交失败可追踪，追踪不包含输入、草案正文或原始错�
   assert.deepEqual(events.map(e => e.status), ['pending', 'failed']);
   assert.deepEqual(events[1], { id: draft.id, tool: 'plan', at: 100, planVersion: 1, rulesVersion: 'test-rules-1', status: 'failed' });
   assert.doesNotMatch(JSON.stringify(events), /secret-token|private/);
+});
+
+test('trace 与草案上限只接受有限正整数，Infinity 不能绕过边界', () => {
+  const { createWorkflow } = require('../shared/workflow.js');
+  const base = { tools: { plan: { preview: () => ({}), commit: () => {} } }, version: () => 1, now: () => 1, rulesVersion: 'r1' };
+  for (const value of [Infinity, -Infinity, NaN, 0, -1, 1.5, 10001]) {
+    assert.throws(() => createWorkflow({ ...base, maxTrace: value }), RangeError);
+  }
+  for (const value of [Infinity, -Infinity, NaN, 0, -1, 1.5, 1001]) {
+    assert.throws(() => createWorkflow({ ...base, maxDrafts: value }), RangeError);
+  }
 });

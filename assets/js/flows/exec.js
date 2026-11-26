@@ -15,37 +15,97 @@ window.ZX = window.ZX || {};
 
   var U = ZX.util;
 
+  function commitState(mutate) {
+    return typeof ZX.state.transact === 'function' ? ZX.state.transact(mutate) : mutate();
+  }
+
   var PCTS = [25, 50, 75, 100];              /* 完成度四档 */
   var FEELS = ['顺利', '吃力', '分心', '疲惫']; /* 执行状态，可选 */
   var REASONS = ['临时有事', '状态不好', '任务过难', '其他']; /* 跳过原因 */
   var MIN_EST = 15;                          /* 部分完成后剩余工时下限 */
+
+  /* ---------- 计划基准 ----------
+     plannedEst 是统计分母的原始计划工时；originalEst 是状态已有的兼容来源。
+     新任务在归一化时冻结 est，之后压缩 / 部分完成只改 est，不改分母。
+     旧部分任务可能只剩剩余 est，禁止用 completion 反推原计划。 */
+  function numberOrNull(value) {
+    if (value === undefined || value === null || value === '') return null;
+    var n = Number(value);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  }
+
+  function completionOf(t) {
+    if (!t) return 0;
+    if (t.done) return 100;
+    var value = t.partial;
+    if (numberOrNull(value) === null) value = t.completion;
+    return Math.min(100, Math.max(0, U.num(value, 0)));
+  }
+
+  function hasPartialRecord(t) {
+    if (!t) return false;
+    if (numberOrNull(t.partial) !== null && U.num(t.partial, 0) > 0) return true;
+    var completion = numberOrNull(t.completion);
+    return completion !== null && completion > 0 && completion < 100;
+  }
+
+  function isPartial(t) {
+    var completion = completionOf(t);
+    return !t.done && completion > 0 && completion < 100;
+  }
+
+  function ensurePlanBasis(t) {
+    if (!t || numberOrNull(t.plannedEst) !== null) return t;
+    var original = numberOrNull(t.originalEst);
+    if (original !== null) {
+      t.plannedEst = original;
+    } else if (!hasPartialRecord(t)) {
+      t.plannedEst = Math.max(0, U.num(t.est, 0));
+    }
+    return t;
+  }
 
   /* ---------- 状态初始化 ----------
      只新增契约第 4 节预留字段（sessions / pausedAt）与阶段内视图标记：
      · pausedAt    本次暂停起点（ms）；null 表示未暂停
      · pausedTotal 累计暂停毫秒
      · sessions    执行记录数组
-     · skippedOpen 「已跳过」折叠区是否展开（纯视图状态，仍放 state 以跨 render 保留） */
+     · skippedOpen 「已跳过」折叠区是否展开（纯视图状态，仍放 state 以跨 render 保留）
+     normTask 的包装只在本模块初始化计划基准，不修改 state.js。 */
   (function initState() {
     var S = ZX.state;
     if (S.pausedAt === undefined) S.pausedAt = null;
     if (typeof S.pausedTotal !== 'number') S.pausedTotal = 0;
     if (!Array.isArray(S.sessions)) S.sessions = [];
     if (typeof S.skippedOpen !== 'boolean') S.skippedOpen = false;
+    tasks().forEach(ensurePlanBasis);
+    if (typeof S.normTask === 'function') {
+      var normalizeTask = S.normTask;
+      S.normTask = function (raw) {
+        return ensurePlanBasis(normalizeTask(raw));
+      };
+    }
   })();
 
   /* ---------- 基础 ---------- */
-  function tasks() { return ZX.state.tasks; }
+  function tasks() { return ZX.state.tasks || []; }
 
   function task(id) {
     return U.findById(tasks(), id);
   }
 
+  function tasksToday() {
+    var S = ZX.state;
+    return S.tasksOnDate ? S.tasksOnDate(U.todayKey()) : tasks();
+  }
+
+  function isActive(t) {
+    return !t.skipped && !t.deferred && (t.done || (!t.abandoned && !t.substituted));
+  }
+
   /* 退役待办不再参与今日计划；已完成历史仍保留在统计中。 */
   function activeTasks() {
-    return tasks().filter(function (t) {
-      return !t.skipped && !t.deferred && (t.done || (!t.abandoned && !t.substituted));
-    });
+    return tasksToday().filter(isActive);
   }
 
   function colorOf(t) {
@@ -71,28 +131,79 @@ window.ZX = window.ZX || {};
     }, 0);
   }
 
-  /* 视图层统计：过滤 skipped，不改 state.js 的派生函数语义 */
+  /* R8 / S2：任务数、计划工时、实际投入、剩余预估分列。
+     total / planned / remain 取 activeTasks；worked 取今日任务 actual，
+     因此跳过 / 暂缓前已投入的 actual 不会随待办过滤消失。
+     所有率均为 0..1；rate 仅保留为 plannedRate 的旧别名。 */
   function metrics() {
-    var list = activeTasks();
-    var planned = 0, worked = 0, done = 0;
+    var S = ZX.state;
+    var today = tasksToday();
+    var list = today.filter(isActive);
+    var planned = 0, completedPlanned = 0, worked = 0, remain = 0;
+    var done = 0, partialCount = 0, known = true;
+    var locks = S.locks || {};
+
     list.forEach(function (t) {
-      planned += U.num(t.est, 0);
-      if (t.done) { worked += U.num(t.actual || t.est, 0); done += 1; }
+      ensurePlanBasis(t);
+      var basis = numberOrNull(t.plannedEst);
+      if (basis === null) {
+        known = false;
+      } else {
+        planned += basis;
+        if (t.done) completedPlanned += basis;
+        else if (isPartial(t)) completedPlanned += basis * completionOf(t) / 100;
+      }
+      if (t.done) done += 1;
+      else {
+        remain += Math.max(0, U.num(t.est, 0));
+        if (isPartial(t)) partialCount += 1;
+      }
     });
+
+    today.forEach(function (t) {
+      worked += Math.max(0, U.num(t.actual, 0));
+    });
+
+    var total = list.length;
+    var plannedBasis = known ? 'known' : 'unknown';
+    var plannedRate = known && planned > 0
+      ? Math.min(1, Math.max(0, completedPlanned / planned))
+      : null;
     return {
-      planned: planned,
-      worked: worked,
-      remain: planned - worked,
-      rate: planned ? Math.round(worked / planned * 100) : 0,
+      total: total,
       done: done,
-      total: list.length,
-      skipped: tasks().length - list.length,
-      backfill: backfillMin()
+      taskRate: total ? done / total : 0,
+      planned: planned,
+      plannedBasis: plannedBasis,
+      completedPlanned: completedPlanned,
+      plannedRate: plannedRate,
+      worked: worked,
+      remain: remain,
+      partialCount: partialCount,
+      skipped: today.filter(function (t) { return !!t.skipped; }).length,
+      deferred: today.filter(function (t) { return !!t.deferred; }).length,
+      abandoned: today.filter(function (t) { return !!t.abandoned; }).length,
+      substituted: today.filter(function (t) { return !!t.substituted; }).length,
+      locked: today.filter(function (t) { return !!locks[t.id]; }).length,
+      backfill: backfillMin(),
+      rate: plannedRate
     };
+  }
+
+  function rateText(rate) {
+    if (rate === null || rate === undefined || !Number.isFinite(rate)) return '未知';
+    return Math.round(Math.min(1, Math.max(0, rate)) * 100) + '%';
   }
 
   function partialEst(est, completion) {
     return Math.max(MIN_EST, Math.round(U.num(est, 0) * (1 - U.num(completion, 0) / 100)));
+  }
+
+  function remainingEst(task, completion) {
+    ensurePlanBasis(task);
+    var basis = numberOrNull(task.plannedEst);
+    return basis === null ? partialEst(task.est, completion)
+      : Math.max(MIN_EST, Math.round(basis * (1 - U.num(completion, 0) / 100)));
   }
 
   /* ---------- 记录写入 ----------
@@ -114,6 +225,7 @@ window.ZX = window.ZX || {};
       feel: o.feel || null,
       isBackfill: !!o.isBackfill
     };
+    if (o.plannedEst !== undefined) sess.plannedEst = Math.max(0, Math.round(U.num(o.plannedEst, 0)));
     S.sessions.push(sess);
     U.appendTrace('zx.executionTrace', {
       id: sess.id, tool: 'execution', at: sess.endAt, planVersion: sess.planVersion,
@@ -125,16 +237,35 @@ window.ZX = window.ZX || {};
     return sess;
   }
 
-  /* 把一次执行落到任务上：100% → 完成；<100% → 累计实际 + 顺延剩余工时 */
+  function placementTime(S, taskId) {
+    var segments = S.taskSegments ? S.taskSegments(taskId) : [];
+    if (!segments.length) return '';
+    var first = segments[0];
+    var last = segments[segments.length - 1];
+    var pad = U.pad2;
+    var from = pad(Math.floor(first.startMin / 60)) + ':' + pad(first.startMin % 60);
+    var to = pad(Math.floor((last.startMin + last.durMin) / 60)) + ':' + pad((last.startMin + last.durMin) % 60);
+    return first.date === last.date ? from + '–' + to : first.date.slice(5) + ' ' + from + '–' + last.date.slice(5) + ' ' + to;
+  }
+
+  /* 把一次执行落到任务上：100% → 完成；<100% → 累计实际并更新剩余预估 */
   function applyRecord(id, o) {
     var S = ZX.state;
     var t = task(id);
     if (!t) return null;
+    ensurePlanBasis(t);
     var now = Date.now();
     var minutes = Math.max(1, Math.round(U.num(o.minutes, 1)));
     var completion = Math.min(100, Math.max(1, Math.round(U.num(o.completion, 100))));
     var startAt = U.num(o.startAt, now - minutes * 60000);
     var beforeEst = U.num(t.est, 0);
+    var nextEst = completion >= 100 ? beforeEst : remainingEst(t, completion);
+    var resized = null;
+    if (S.placementModel) {
+      var P = window.Rhythm && window.Rhythm.placementModel;
+      resized = P.resizeTask(S.placementModel, id, completion >= 100 ? 0 : nextEst, 'pm_exec_' + now.toString(36) + '_');
+      if (!resized.ok) throw new Error(resized.reason || '无法同步任务落点');
+    }
 
     var sess = record({
       taskId: id,
@@ -142,20 +273,26 @@ window.ZX = window.ZX || {};
       endAt: U.num(o.endAt, now),
       minutes: minutes,
       completion: completion,
-      feel: o.feel || null,   /* 记录弹层的「状态」即感受词；status 由完成度推导 */
+      plannedEst: beforeEst,
+      feel: o.feel || null,
       isBackfill: false
     });
 
+    if (resized) {
+      S.placementModel = resized.model;
+      S.syncPlacementProjection();
+    }
     if (completion >= 100) {
       t.done = true;
+      t.completedAt = now;
       t.actual = U.num(t.actual, 0) + minutes;
       t.completion = 100;
       t.partial = null;
     } else {
       t.done = false;
       t.actual = U.num(t.actual, 0) + minutes;
-      t.est = partialEst(beforeEst, completion);
-      t.time = U.retime(t.time, t.est);
+      t.est = nextEst;
+      t.time = resized ? placementTime(S, id) : U.retime(t.time, t.est);
       t.partial = completion;
       t.completion = completion;
     }
@@ -170,12 +307,17 @@ window.ZX = window.ZX || {};
      每次记录执行后自动跑一遍：输入全部由本地状态推导，不读种子摆拍数据。
      归因结果计入 state.attrCounts（数据页「偏差归因」卡片的真实数据源）。 */
   function timeoutCount() {
+    var sessions = (ZX.state.sessions || []).filter(function (s) {
+      return s && !s.isBackfill && typeof s.endAt === 'number' && isFinite(s.endAt);
+    }).sort(function (a, b) { return b.endAt - a.endAt; });
     var n = 0;
-    (ZX.state.sessions || []).forEach(function (s) {
-      if (!s || s.isBackfill) return;
+    for (var i = 0; i < sessions.length; i++) {
+      var s = sessions[i];
       var t = task(s.taskId);
-      if (t && U.num(s.minutes, 0) > U.num(t.est, 0)) n++;
-    });
+      var baseline = typeof s.plannedEst === 'number' && isFinite(s.plannedEst) ? s.plannedEst : (t ? U.num(t.est, 0) : 0);
+      if (U.num(s.minutes, 0) <= baseline) break;
+      n++;
+    }
     return n;
   }
 
@@ -286,10 +428,10 @@ window.ZX = window.ZX || {};
       }).join('') + '</div>';
   }
 
-  function recordNote(est, completion) {
-    if (completion >= 100) return '记为完成：达成率按本次实际时长计入，不做额外追加。';
-    return '记为 ' + completion + '%：剩余 ' + U.hm(partialEst(est, completion)) +
-      ' 已顺延到弹性位，任务留在今日，可继续计时。';
+  function recordNote(task, completion) {
+    if (completion >= 100) return '记为完成：任务数与计划工时分别统计，实际投入不改变原始计划分母。';
+    return '记为 ' + completion + '%：剩余预估 ' + U.hm(remainingEst(task, completion)) +
+      '，不会自动移入弹性位；任务留在今日，可继续计时。';
   }
 
   function recordBody(t, mins, completion, feel) {
@@ -301,13 +443,13 @@ window.ZX = window.ZX || {};
         '<i>min 实测 · 已扣除暂停</i></div>' +
       '<div class="field"><label>完成度</label>' + segPct(completion) + '</div>' +
       '<div class="field"><label>状态 <em class="sc-opt-i">可选</em></label>' + segFeel(feel) + '</div>' +
-      '<div class="notice sc-note" id="sc-rec-note">' + recordNote(t.est, completion) + '</div>';
+      '<div class="notice sc-note" id="sc-rec-note">' + recordNote(t, completion) + '</div>';
   }
 
   function openRecord(id) {
     var S = ZX.state;
     var t = task(id);
-    if (!t || !ZX.ui) return;
+    if (!t || !ZX.ui || t.skipped || t.deferred || t.abandoned || t.substituted) return;
     if (S.running !== id || !S.timerStart) {
       /* 没有在计时（例如刷新后）→ 退回按预估记录，避免出现 0 分钟 */
       ZX.assistant.finishTask(id, true);
@@ -339,7 +481,7 @@ window.ZX = window.ZX || {};
         completion = U.num(b.dataset.v, 100);
         syncSeg(ctl.root, '#sc-pct', completion, true);
         var note = ctl.$('#sc-rec-note');
-        if (note) note.textContent = recordNote(t.est, completion);
+        if (note) note.textContent = recordNote(t, completion);
         return;
       }
 
@@ -361,17 +503,25 @@ window.ZX = window.ZX || {};
   function commitRecord(id, mins, completion, feel, startAt, endAt) {
     var S = ZX.state;
     var t = task(id);
-    if (!t || t.done || t.abandoned || t.substituted) return;
+    if (!t || t.done || t.skipped || t.deferred || t.abandoned || t.substituted) return;
     var beforeEst = U.num(t.est, 0);
-    var sess = applyRecord(id, {
-      minutes: mins, completion: completion, feel: feel,
-      startAt: startAt, endAt: endAt
-    });
-
-    /* 归因回写必须先于 render 的 overlay 保存，每条记录只计算一次。 */
-    var interrupted = ZX.flows.rescue ? ZX.flows.rescue.detect() : false;
-    var attr = runAttribution(t, sess, beforeEst);
-    ZX.render();
+    var sess, attr, interrupted;
+    try {
+      var commit = function () {
+        sess = applyRecord(id, {
+          minutes: mins, completion: completion, feel: feel,
+          startAt: startAt, endAt: endAt
+        });
+        interrupted = ZX.flows.rescue ? ZX.flows.rescue.detect() : false;
+        attr = runAttribution(t, sess, beforeEst);
+      };
+      if (typeof S.transact === 'function') S.transact(commit);
+      else commit();
+    } catch (e) {
+      ZX.ui.toast('执行记录未能保存，本次变更已回滚', 'warn');
+      return;
+    }
+    ZX.render({ skipOverlaySave: true });
     ZX.ui.toast(completion >= 100 ? '已记录 ' + U.hm(mins) : '已记录 ' + completion + '%', 'ok');
 
     var m = metrics();
@@ -380,22 +530,24 @@ window.ZX = window.ZX || {};
       (completion < 100 ? ' · 完成度 ' + completion + '%' : '') +
       (feel ? ' · ' + U.esc(feel) : '') + '。';
 
+    var rates = '任务完成率 <b class="ac">' + rateText(m.taskRate) + '</b>，计划工时完成率 <b class="ac">' +
+      rateText(m.plannedRate) + '</b>';
     var tail;
     if (completion < 100) {
-      tail = '剩余 ' + U.hm(t.est) + ' 已顺延到弹性位（' + beforeEst + ' → ' + t.est +
-        ' min），今日达成率 <b class="ac">' + m.rate + '%</b>，还留着 ' + left + ' 项。';
+      tail = '剩余预估 ' + U.hm(t.est) + '，未自动移入弹性位（' + beforeEst + ' → ' + t.est +
+        ' min），' + rates + '，还留着 ' + left + ' 项（部分完成 ' + m.partialCount + ' 项）。';
     } else {
       tail = left
-        ? '今日达成率 <b class="ac">' + m.rate + '%</b>，还剩 ' + left + ' 项。'
-        : '今天 ' + m.total + ' 项全部记录，累计 <b class="ac">' + U.hm(m.worked) + '</b>。弹性位留空 60 分钟。';
+        ? rates + '，还剩 ' + left + ' 项。'
+        : '今天 ' + m.total + ' 项全部记录，' + rates + '，累计实际投入 <b class="ac">' + U.hm(m.worked) + '</b>。弹性位留空 60 分钟。';
     }
 
     say((completion >= 100 ? '<img class="msg-state state-done" src="assets/img/mascot-v4-done.svg" width="32" height="28" alt="" />' : '') +
       '<p>' + head + tail + '</p>' +
       (completion < 100
-        ? '<p style="color:var(--txt3);font-size:11px">部分完成不追加补作，剩余工时只占用弹性位。</p>' +
+        ? '<p style="color:var(--txt3);font-size:11px">已更新任务的剩余预估，未自动安排新的时段。</p>' +
           '<div class="ecard-f"><button class="btn" data-say="这周太乱，帮我重排">重新安排本周</button>' +
-          '<span class="note">剩余工时已落在弹性位，重排会把它排进新空档</span></div>'
+          '<span class="note">需要时可预览重排，再确认是否应用</span></div>'
         : (left ? '' : '<p style="color:var(--txt3);font-size:11px">没有追加任务。按计划结束，比多学 20 分钟更重要。</p>')) +
       attributionHtml(attr, interrupted),
       '执行 · 完成 ' + (sess ? sess.completion : 100) + '%');
@@ -406,7 +558,7 @@ window.ZX = window.ZX || {};
     var S = ZX.state;
     var t = task(id);
     if (!t || !ZX.ui) return;
-    if (t.done || t.skipped || S.running === id) return;
+    if (t.done || t.skipped || t.deferred || t.abandoned || t.substituted || S.running === id) return;
 
     var reason = REASONS[0];
     var ctl = null;
@@ -452,33 +604,89 @@ window.ZX = window.ZX || {};
   function commitSkip(id, reason) {
     var S = ZX.state;
     var t = task(id);
-    if (!t) return;
+    if (!t || t.done || t.skipped || t.deferred || t.abandoned || t.substituted) return;
     var now = Date.now();
-    t.skipped = true;
-    t.skipReason = reason;
-    t.skippedAt = now;
-
-    record({
-      taskId: id, startAt: now, endAt: now,
-      minutes: 0, completion: 0, status: 'skip', isBackfill: false
-    });
-
-    ZX.render();
+    var released = null;
+    if (S.placementModel) {
+      var P = window.Rhythm && window.Rhythm.placementModel;
+      released = P.releaseTask(S.placementModel, id, '已跳过', 'pm_skip_' + now.toString(36) + '_');
+    }
+    try {
+      commitState(function () {
+        if (released) {
+          S.placementModel = released.model;
+          S.syncPlacementProjection();
+        }
+        t.skipped = true;
+        t.skipReason = reason;
+        t.skippedAt = now;
+        record({
+          taskId: id, startAt: now, endAt: now,
+          minutes: 0, completion: 0, status: 'skip', isBackfill: false
+        });
+      });
+    } catch (e) {
+      ZX.ui.toast('跳过未能保存，本次变更已回滚', 'warn');
+      return;
+    }
+    ZX.render({ skipOverlaySave: true });
     ZX.ui.toast('已跳过 · 不计入欠账');
     say('<p>已跳过：<b>' + U.esc(t.title) + '</b>（' + U.esc(reason) + '）。' +
       '<b>不计入欠账</b>，也不占今日剩余；需要时在「已跳过」里恢复即可。</p>', '执行 · 跳过');
   }
 
   function restoreTask(id) {
+    var S = ZX.state;
     var t = task(id);
-    if (!t) return;
-    t.skipped = false;
-    t.skipReason = null;
-    t.skippedAt = null;
-    ZX.render();
+    if (!t || !t.skipped) return;
+    var restored = null;
+    if (S.placementModel) {
+      var P = window.Rhythm && window.Rhythm.placementModel;
+      restored = P.restoreTask(S.placementModel, id, 'pm_restore_' + Date.now().toString(36) + '_', t.est);
+      if (!restored.ok) {
+        ZX.ui.toast(restored.reason, 'warn');
+        return;
+      }
+    }
+    try {
+      commitState(function () {
+        if (restored) {
+          S.placementModel = restored.model;
+          S.syncPlacementProjection();
+        }
+        t.skipped = false;
+        t.skipReason = null;
+        t.skippedAt = null;
+      });
+    } catch (e) {
+      ZX.ui.toast('恢复未能保存，本次变更已回滚', 'warn');
+      return;
+    }
+    ZX.render({ skipOverlaySave: true });
     /* 全量重绘会丢焦点：放回同项的「恢复」按钮（该按钮存在时） */
     U.refocus(U.$('[data-sc="restore"][data-id="' + id + '"]'));
     ZX.ui.toast('已恢复', 'ok');
+  }
+
+  /* 今日暂缓的统一恢复：只清暂缓元数据，不改任务、计划日期或其他退役保护。 */
+  function restoreDeferred(id) {
+    var t = task(id);
+    if (!t || !t.deferred) return false;
+    try {
+      commitState(function () {
+        delete t.deferred;
+        delete t.deferredTo;
+        delete t.deferredAt;
+        delete t.deferredReason;
+      });
+    } catch (e) {
+      ZX.ui.toast('恢复未能保存，本次变更已回滚', 'warn');
+      return false;
+    }
+    ZX.render({ skipOverlaySave: true });
+    ZX.ui.toast('已恢复 · 计划日期未变', 'ok');
+    say('<p>已恢复：<b>' + U.esc(t.title) + '</b>。仅清除今日暂缓，未修改计划日期。</p>', '执行 · 恢复');
+    return true;
   }
 
   function toggleSkipped() {
@@ -516,7 +724,7 @@ window.ZX = window.ZX || {};
           '<select class="input sc-select" id="sc-bf-task">' + options + '</select></div>' +
         '<div class="row2f">' +
           '<div class="field"><label>日期</label>' +
-            '<input class="input mono" type="date" id="sc-bf-date" value="' + date + '"></div>' +
+            '<input class="input mono" type="date" id="sc-bf-date" value="' + date + '" max="' + date + '"></div>' +
           '<div class="field"><label>实际分钟</label>' +
             '<input class="input mono" type="number" id="sc-bf-min" min="1" max="600" step="5" value="' + mins + '"></div>' +
         '</div>' +
@@ -554,25 +762,35 @@ window.ZX = window.ZX || {};
 
   function commitBackfill(taskId, date, mins, completion) {
     var t = task(taskId);
-    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date || ''));
-    var start = m
-      ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 0, 0, 0, 0)
-      : new Date();
-    if (isNaN(start.getTime())) start = new Date();
-    var startAt = start.getTime();
+    var day = U.parseDay(date);
+    mins = Math.round(Number(mins));
+    completion = Math.round(Number(completion));
+    if (!t || !day || day > U.today0() || !isFinite(mins) || mins < 1 || mins > 600 ||
+        !isFinite(completion) || completion < 1 || completion > 100) {
+      ZX.ui.toast('补录日期必须有效且不晚于今天，分钟和完成度需在范围内', 'warn');
+      return false;
+    }
+    var startAt = day.getTime();
     var endAt = startAt + mins * 60000;
 
-    record({
-      taskId: taskId, startAt: startAt, endAt: endAt,
-      minutes: mins, completion: completion,
-      status: 'backfill', isBackfill: true
-    });
-
-    ZX.render();
+    try {
+      commitState(function () {
+        record({
+          taskId: taskId, startAt: startAt, endAt: endAt,
+          minutes: mins, completion: completion,
+          status: 'backfill', isBackfill: true
+        });
+      });
+    } catch (e) {
+      ZX.ui.toast('补录未能保存，本次变更已回滚', 'warn');
+      return false;
+    }
+    ZX.render({ skipOverlaySave: true });
     ZX.ui.toast('已补录 ' + U.hm(mins));
     say('<p>已补录：<b>' + (t ? U.esc(t.title) : U.esc(taskId)) + '</b>，' + U.hm(mins) +
       ' · 完成度 ' + completion + '%。' +
       '<b>不计入达成率</b>，任务工时也保持不变。</p>', '执行 · 补录');
+    return true;
   }
 
   /* ---------- 今日页按钮委托（不改 main.js） ---------- */
@@ -598,7 +816,8 @@ window.ZX = window.ZX || {};
     elapsedMin: elapsedMin,
     record: record,
     openRecord: openRecord,
-    commitRecord: commitRecord
+    commitRecord: commitRecord,
+    restoreDeferred: restoreDeferred
   };
 
   /* 供其他模块（assistant）复用的小工具 */

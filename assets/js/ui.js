@@ -327,10 +327,10 @@ window.ZX = window.ZX || {};
     if (!isFinite(end)) return;
     var from = Number(el.dataset.num);
     if (!isFinite(from)) from = end;
-    var done = function () { el.textContent = f(end); el.dataset.num = String(end); };
-    if (from === end || !U.prefs().motion || typeof requestAnimationFrame !== 'function') { done(); return; }
     var token = (el._ct || 0) + 1;
     el._ct = token;
+    var done = function () { el.textContent = f(end); el.dataset.num = String(end); };
+    if (from === end || !U.prefs().motion || typeof requestAnimationFrame !== 'function') { done(); return; }
     var t0 = 0;
     var D = dur || 420;
     function frame(now) {

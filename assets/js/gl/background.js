@@ -13,9 +13,9 @@ window.ZX_GL_BG = (function () {
 
   if (!window.THREE) return null;
   var uniforms = null;
-  /* 黏土氛围（风格轮次2 · 2026-11-22）：薰衣草纸 + 墨紫软点 */
-  var paper = new THREE.Color('#EFE9F7');
-  var ink = new THREE.Color('#4A4463');
+  /* Summer Checkin 氛围：深色玻璃底 + 薄荷青呼吸点 */
+  var paper = new THREE.Color('#07130D');
+  var ink = new THREE.Color('#8FE3CF');
 
   var FRAG = [
     'precision highp float;',

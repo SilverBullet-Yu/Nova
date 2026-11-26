@@ -75,15 +75,7 @@ const warns = [];
 
 /* ---- 4. 硬编码十六进制色（换肤残留防线）：仅 :root 基础定义与 mask 的 #000 允许 ---- */
 {
-  let inRoot = false, line = 1, inComment = false;
-  for (let i = 0; i < css.length; i++) {
-    const c = css[i], n = css[i + 1];
-    if (c === '\n') line++;
-    if (inComment) { if (c === '*' && n === '/') { inComment = false; i++; } continue; }
-    if (c === '/' && n === '*') { inComment = true; i++; continue; }
-    if (c === '{') { /* 判定是否进入 :root */ }
-    // 粗粒度：仅在文件头 :root 块内允许 hex。以首个 "}"（:root 结束）之后的 hex 为违例。
-  }
+  // 粗粒度：仅在文件头 :root 块内允许 hex。以首个 "}"（:root 结束）之后的 hex 为违例。
   const rootEnd = css.indexOf('}', css.indexOf(':root'));
   const rest = css.slice(rootEnd);
   const restLineOffset = css.slice(0, rootEnd).split('\n').length - 1;

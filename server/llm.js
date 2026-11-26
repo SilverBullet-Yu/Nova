@@ -31,6 +31,40 @@ function configured() {
   return !!(c.baseUrl && c.apiKey && c.model);
 }
 
+const MAX_RESPONSE_BYTES = 1024 * 1024;
+const MAX_REQUEST_BYTES = (() => {
+  const value = Number(process.env.NOVA_LLM_MAX_REQUEST_BYTES || 256 * 1024);
+  if (!Number.isSafeInteger(value) || value < 1) throw new Error('NOVA_LLM_MAX_REQUEST_BYTES 必须是正安全整数');
+  return value;
+})();
+
+async function readJsonLimited(res) {
+  if (!res.body || typeof res.body.getReader !== 'function') return res.json();
+  const declared = Number(res.headers && res.headers.get ? res.headers.get('content-length') : 0);
+  if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) {
+    try { await res.body.cancel(); } catch (e) { /* ignore cancellation failure */ }
+    throw new ApiError('E5012', 'LLM 响应超过 1 MiB 上限');
+  }
+  const reader = res.body.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > MAX_RESPONSE_BYTES) {
+        try { await reader.cancel(); } catch (e) { /* ignore cancellation failure */ }
+        throw new ApiError('E5012', 'LLM 响应超过 1 MiB 上限');
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const text = Buffer.concat(chunks.map(chunk => Buffer.from(chunk))).toString('utf8');
+  try { return JSON.parse(text); } catch (e) { throw new ApiError('E5012', 'LLM 响应不是合法 JSON'); }
+}
 /* ── OpenAI 兼容 chat/completions 客户端 ──────────────────────────────
    通过 globalThis.fetch 调用，测试可整桩替换 */
 async function chat(messages, opts) {
@@ -41,6 +75,10 @@ async function chat(messages, opts) {
   }
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), c.timeoutMs);
+  if (Buffer.byteLength(JSON.stringify(messages), 'utf8') > MAX_REQUEST_BYTES) {
+    clearTimeout(timer);
+    throw new ApiError('E4002', 'LLM 请求超过 ' + MAX_REQUEST_BYTES + ' 字节上限');
+  }
   try {
     const res = await fetch(c.baseUrl + '/chat/completions', {
       method: 'POST',
@@ -54,7 +92,8 @@ async function chat(messages, opts) {
         temperature: typeof o.temperature === 'number' ? o.temperature : 0.3,
         stream: false
       }),
-      signal: ctrl.signal
+      signal: ctrl.signal,
+      redirect: 'error'
     });
     if (!res.ok) {
       /* 不读取/透传上游正文；取消响应体，清理失败也不能覆盖 HTTP 状态。 */
@@ -65,7 +104,7 @@ async function chat(messages, opts) {
       }
       throw new ApiError('E5011', 'LLM 调用失败：HTTP ' + res.status);
     }
-    const data = await res.json();
+    const data = await readJsonLimited(res);
     const choice = data && Array.isArray(data.choices) && data.choices[0];
     const content = choice && choice.message && typeof choice.message.content === 'string'
       ? choice.message.content : '';
@@ -182,14 +221,14 @@ function mergeProfiles(prior, patch) {
 
 function clarifyTurn(messages, profile) {
   const prior = normalizeProfile(profile);
-  const payload = messages.map((m) => ({ role: m.role, content: String(m.content).slice(0, 2000) }));
+  const payload = messages.slice(-20).map((m) => ({ role: m.role, content: String(m.content).slice(0, 2000) }));
   const context = [
     { role: 'system', content: CLARIFY_SYSTEM },
     {
       role: 'system',
       content: '已确认的画像（可能为空，不要重复询问已确认项）：' + JSON.stringify(prior)
     }
-  ].concat(payload.slice(-20));
+  ].concat(payload);
   return chat(context, { temperature: 0.4 }).then((content) => {
     const data = parseJsonContent(content);
     const reply = str(data.reply).slice(0, MAX_REPLY);

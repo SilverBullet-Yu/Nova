@@ -14,6 +14,7 @@ window.ZX = window.ZX || {};
   'use strict';
 
   var U = ZX.util;
+  function placementModel() { return window.Rhythm && window.Rhythm.placementModel; }
 
   /* 对话输出统一走 assistant。index.html 中 assistant.js 先于 flows 加载，
      正常装配下 ZX.assistant 已就绪；防御包装只为 VM 测试的部分装配兜底 */
@@ -40,6 +41,7 @@ window.ZX = window.ZX || {};
   var STEP = 15;            /* 每次加减的粒度 */
   var OVER_RATIO = 1.15;    /* 周负载超过容量 15% 判为超载 */
   var AMP_LIMIT = 0.30;     /* 相对初始草案的修改幅度阈值 */
+  var MAX_TEXT_LENGTH = 200; /* 与 settings 完整备份的 goal.name / task.title 上限一致 */
 
   /* 拆解模板：6–8 项，覆盖数学 / 英语 / 408 / 政治（演示口径）
      顺序按「一天四科各一项」排，前 4 项会直接成为今天的任务 */
@@ -57,6 +59,7 @@ window.ZX = window.ZX || {};
   var flow = null;          /* ZX.ui.flowSheet 步骤控制器 */
   var initialPlan = [];     /* 初始草案快照，用于计算修改幅度 */
   var addForm = { s: '数学', title: '', min: 45 };
+  var suppressAddCapture = false;
   var dragId = null;
   var overEl = null;
 
@@ -167,8 +170,8 @@ window.ZX = window.ZX || {};
             ' class="' + (d.type === t ? 'on' : '') + '">' + t + '</button>';
         }).join('') + '</div>' +
       '</div>' +
-      '<div class="field"><label for="saName">目标名称</label>' +
-        '<input class="input" id="saName" data-f="name" autofocus value="' + U.esc(d.name) + '" />' +
+      '<div class="field"><label for="saName">目标名称（最多 200 字）</label>' +
+        '<input class="input" id="saName" data-f="name" autofocus maxlength="200" value="' + U.esc(d.name) + '" />' +
         '<div class="hint sa-hint" data-hint="name"></div>' +
       '</div>' +
       '<div class="row2f">' +
@@ -212,7 +215,7 @@ window.ZX = window.ZX || {};
     if (n) d.name = String(n.value || '');
     if (dl) d.deadline = String(dl.value || '');
     if (wk && String(wk.value).trim() !== '') d.weeklyH = U.num(wk.value, d.weeklyH);
-    d.demand = demandOf(d.type, d.base);
+    if (!d.demandAdjusted) d.demand = demandOf(d.type, d.base);
     var day = U.parseDay(d.deadline);
     if (day) d.weeks = weeksUntil(day);
   }
@@ -221,6 +224,7 @@ window.ZX = window.ZX || {};
     var d = draft();
     var errs = {};
     if (!String(d.name || '').trim()) errs.name = '请填写目标名称，例如「2027 考研 · 计算机」。';
+    else if (String(d.name).length > MAX_TEXT_LENGTH) errs.name = '目标名称最多 ' + MAX_TEXT_LENGTH + ' 字。';
     var day = U.parseDay(d.deadline);
     if (!day) errs.deadline = '请选择截止日期。';
     else if (day.getTime() <= today0().getTime()) errs.deadline = '截止日期需要晚于今天。';
@@ -366,7 +370,7 @@ window.ZX = window.ZX || {};
         stat('当前 R', f.R.toFixed(2), f.R >= GATE ? 'ac' : 'warn') +
       '</div>' +
       '<div class="sa-notices">' + noticesHtml(cap, total, f) + '</div>' +
-      '<p class="note">' + scheduleConstraints(buildSlots()) + '</p>' +
+      '<p class="note">' + scheduleConstraints(buildSlots(d.deadline)) + '</p>' +
       rowsHtml() +
       addHtml();
   }
@@ -439,14 +443,14 @@ window.ZX = window.ZX || {};
     }).join('');
     return '<div class="sa-add">' +
         '<select class="input sa-add-s" id="saAddS" aria-label="新计划项科目">' + opts + '</select>' +
-        '<input class="input sa-add-t" id="saAddT" placeholder="计划项标题，如「线代 · 矩阵 20 题」" value="' + U.esc(addForm.title) + '" />' +
+        '<input class="input sa-add-t" id="saAddT" placeholder="计划项标题，如「线代 · 矩阵 20 题」" maxlength="200" value="' + U.esc(addForm.title) + '" />' +
         '<input class="input mono sa-add-m" id="saAddM" type="number" min="15" max="240" step="15" value="' + addForm.min + '" aria-label="预估分钟" />' +
         '<button type="button" class="btn" data-sa="add">添加计划项</button>' +
       '</div>';
   }
 
   function captureAdd(n) {
-    if (n !== 3) return;
+    if (n !== 3 || suppressAddCapture) return;
     var s = api.$('#saAddS');
     var t = api.$('#saAddT');
     var m = api.$('#saAddM');
@@ -486,31 +490,36 @@ window.ZX = window.ZX || {};
   /* 本周可排空档取自可用时段网格，弹性槽也必须位于可用窗口内。
      「今天」排数组最前：候选按 slots 顺序评估，权重最高的任务先占今天。 */
   var DAY_ORDER = ['一', '二', '三', '四', '五', '六', '日'];
-  var BUFFER_MIN = 60;             /* 每日弹性位容量，与 seed.buf 一致 */
+  var BUFFER_MIN = 60;
 
   function futureDates() {
-    var today = U.todayDow();
-    var start = DAY_ORDER.indexOf(today);
-    if (start < 0) start = 0;
-    return DAY_ORDER.map(function (_, i) { return DAY_ORDER[(start + i) % DAY_ORDER.length]; });
+    var start = U.today0();
+    return DAY_ORDER.map(function (_, i) { return U.isoDay(U.addDays(start, i)); });
+  }
+
+  function gridIndex(date) {
+    return (new Date(date + 'T00:00:00Z').getUTCDay() + 6) % 7;
   }
 
   function fmtMin(m) { return U.pad2(Math.floor(m / 60)) + ':' + U.pad2(m % 60); }
 
-  function buildSlots() {
-    var days = futureDates();
+  function buildSlots(deadline, startDate) {
+    var start = startDate ? U.parseDay(startDate) : U.today0();
+    if (!start || isNaN(start.getTime())) start = U.today0();
+    var days = Array.from({ length: 7 }, function (_, i) { return U.isoDay(U.addDays(start, i)); })
+      .filter(function (date) { return !deadline || date <= deadline; });
     var slots = [];
     var grid = ZX.state.avail;
     var ranges = [[480, 720], [720, 1080], [1080, 1320]];
-    days.forEach(function (d) {
-      var row = grid && grid[DAY_ORDER.indexOf(d)];
+    days.forEach(function (date) {
+      var row = grid && grid[gridIndex(date)];
       var starts = [];
       ranges.forEach(function (range, i) {
         if (row ? row[i] !== true : i !== 2) return;
         for (var min = range[0]; min < range[1]; min += 30) starts.push(min);
       });
       starts.forEach(function (min, i) {
-        slots.push({ date: d, startMin: min, durMin: 30, available: true, isBuffer: i >= starts.length - BUFFER_MIN / 30 });
+        slots.push({ date: date, startMin: min, durMin: 30, available: true, isBuffer: i >= starts.length - BUFFER_MIN / 30 });
       });
     });
     return slots;
@@ -524,58 +533,28 @@ window.ZX = window.ZX || {};
       ' 小时（含弹性位，不等于可排任务工时）；只在可用时段内排程，弹性位兜底。';
   }
 
-  /* 引擎 blocks → 周视图（segs 按科目聚合；弹性位容量单列，与周图 .buf 同语） */
-  function weekFromBlocks(blocks, slots) {
-    var dow = U.todayDow();
-    var byDay = {};
-    blocks.forEach(function (b) { (byDay[b.date] = byDay[b.date] || []).push(b); });
-    return DAY_ORDER.map(function (d) {
-      var segs = [];
-      var sum = 0;
-      (byDay[d] || []).forEach(function (b) {
-        if (b.isBuffer) return;
-        var hit = null;
-        for (var i = 0; i < segs.length; i++) if (segs[i][0] === b.subject) { hit = segs[i]; break; }
-        if (hit) hit[1] += b.durMin;
-        else segs.push([b.subject, b.durMin]);
-        sum += b.durMin;
-      });
-      var bufferMin = slots.filter(function (s) { return s.date === d && s.isBuffer && s.available; })
-        .reduce(function (min, s) { return min + s.durMin; }, 0);
-      return { d: d, segs: segs, buf: bufferMin, total: sum + bufferMin, today: d === dow };
-    });
+  function localTimezone() {
+    try {
+      var zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (zone) return zone;
+    } catch (e) { /* 使用可验证的 UTC 回退 */ }
+    return 'UTC';
   }
 
-  /* 今日投影只计当天排入的分钟，不能把跨日任务的总工时计入今日。 */
-  function todayTasksFromBlocks(blocks, all, stamp) {
-    var S = ZX.state;
-    var dow = U.todayDow();
-    var byTask = {};
-    blocks.forEach(function (b) {
-      if (b.date !== dow || b.isBuffer) return;
-      var g = byTask[b.taskId] = byTask[b.taskId] || { first: b.startMin, last: b.startMin + b.durMin, min: 0 };
-      g.first = Math.min(g.first, b.startMin);
-      g.last = Math.max(g.last, b.startMin + b.durMin);
-      g.min += b.durMin;
-    });
-    return Object.keys(byTask)
-      .map(function (id) {
-        var src = U.findById(all, id);
-        return src ? { src: src, g: byTask[id] } : null;
-      })
-      .filter(function (x) { return x && x.g.min > 0; })
-      .sort(function (a, b) { return a.g.first - b.g.first; })
-      .map(function (x, i) {
-        return S.normTask({
-          id: 't_' + stamp + i,
-          subject: x.src.subject,
-          title: x.src.title,
-          est: x.g.min,
-          time: fmtMin(x.g.first) + '–' + fmtMin(x.g.last),
-          weight: x.src.weight,
-          done: false
-        });
-      });
+  function taskTime(model, taskId) {
+    var P = placementModel();
+    var segments = P.taskSegments(model, taskId);
+    if (!segments.length) return '';
+    var first = segments[0];
+    var last = segments[segments.length - 1];
+    var from = fmtMin(first.startMin);
+    var to = fmtMin(last.startMin + last.durMin);
+    if (first.date === last.date) return from + '–' + to;
+    return first.date.slice(5) + ' ' + from + '–' + last.date.slice(5) + ' ' + to;
+  }
+
+  function weekdayOf(date) {
+    return DAY_ORDER[(new Date(date + 'T00:00:00Z').getUTCDay() + 6) % 7];
   }
 
   function traceSchedule(status, planVersion) {
@@ -588,82 +567,156 @@ window.ZX = window.ZX || {};
   var scheduleRequest = 0;
   function apply() {
     var S = ZX.state;
+    var request = ++scheduleRequest;
     var d = draft();
+    var deadline = U.parseDay(d.deadline);
+    if (!deadline || deadline <= U.today0() || !isFinite(d.weeklyH) || d.weeklyH < 1 || d.weeklyH > 80) {
+      ZX.ui.toast('截止日期必须晚于今天，每周投入需为 1–80 小时', 'warn');
+      return Promise.resolve(false);
+    }
     var total = totalMin();
-    if (total <= 0) { ZX.ui.toast('草案为空，先添加计划项', 'warn'); return; }
+    if (total <= 0) { ZX.ui.toast('草案为空，先添加计划项', 'warn'); return Promise.resolve(false); }
+    var name = String(d.name || '').trim();
+    if (!name) { ZX.ui.toast('请填写目标名称', 'warn'); return Promise.resolve(false); }
+    if (name.length > MAX_TEXT_LENGTH) { ZX.ui.toast('目标名称最多 ' + MAX_TEXT_LENGTH + ' 字', 'warn'); return Promise.resolve(false); }
+    var longItem = plan().find(function (item) { return String(item.title || '').length > MAX_TEXT_LENGTH; });
+    if (longItem) { ZX.ui.toast('计划项标题最多 ' + MAX_TEXT_LENGTH + ' 字', 'warn'); return Promise.resolve(false); }
     var f = feasOf(d);
-    if (f.R < GATE) { ZX.ui.toast('R 低于 0.70，先完成校准', 'warn'); return; }
+    if (f.R < GATE) { ZX.ui.toast('R 低于 0.70，先完成校准', 'warn'); return Promise.resolve(false); }
 
     var all = plan().map(function (it) {
       return { id: it.id, subject: it.s, title: it.title, estMin: it.est, weight: it.weight };
     });
-    var slots = buildSlots();
-    if (!slots.length) { ZX.ui.toast('没有可用时段，请先在「我的」中设置。当前计划未变更。', 'warn'); return; }
+    var slots = buildSlots(d.deadline);
+    if (!slots.length) { ZX.ui.toast('没有可用时段，请先在「我的」中设置。当前计划未变更。', 'warn'); return Promise.resolve(false); }
     var stamp = Date.now().toString(36);
-
-    var request = ++scheduleRequest;
     var approved = JSON.stringify([d, all, slots]);
-    ZX.engine.schedule({ tasks: all, slots: slots, params: {} }).then(function (res) {
-      if (request !== scheduleRequest || S.goalDraft !== d) return;
+    var scheduled;
+    try {
+      scheduled = ZX.engine.schedule({ tasks: all, slots: slots, params: {} });
+    } catch (e) {
+      traceSchedule('failed', S.currentPlanVersion ? S.currentPlanVersion() : null);
+      ZX.ui.toast('排程未完成，当前计划未变更；可重试提交。', 'warn');
+      return Promise.resolve(false);
+    }
+    return Promise.resolve(scheduled).then(function (res) {
+      if (request !== scheduleRequest || S.goalDraft !== d) return false;
       var current = plan().map(function (it) {
         return { id: it.id, subject: it.s, title: it.title, estMin: it.est, weight: it.weight };
       });
-      if (approved !== JSON.stringify([d, current, buildSlots()])) {
+      if (approved !== JSON.stringify([d, current, buildSlots(d.deadline)])) {
         traceSchedule('stale', S.currentPlanVersion ? S.currentPlanVersion() : null);
         ZX.ui.toast('草案或可用时段有变，请重新确认。当前计划未变更。', 'warn');
-        return;
+        return false;
       }
       if (!res || !Array.isArray(res.blocks) || !res.blocks.length || !Array.isArray(res.unplanned)) {
         traceSchedule('failed', S.currentPlanVersion ? S.currentPlanVersion() : null);
         ZX.ui.toast('没有可应用的排程结果，当前计划未变更。', 'warn');
-        return;
+        return false;
       }
-      applyScheduled(res, all, stamp, d, slots);
-      if (ZX.api && ZX.api.stagePlan) {
-        try {
-          ZX.api.stagePlan({ tasks: all, slots: slots, params: {} }, res);
-          if (ZX.reviewPendingPlan) ZX.reviewPendingPlan(false, true);
-        } catch (e) { ZX.ui.toast('计划已在本机生效，但无法保存待复核请求。', 'warn'); }
-      }
+      return applyScheduled(res, all, stamp, d, slots);
     }, function () {
       if (request === scheduleRequest && S.goalDraft === d) {
         traceSchedule('failed', S.currentPlanVersion ? S.currentPlanVersion() : null);
         ZX.ui.toast('排程未完成，当前计划未变更；可重试提交。', 'warn');
       }
+      return false;
     });
   }
 
   function applyScheduled(res, all, stamp, d, slots) {
     var S = ZX.state;
+    var name = String(d.name || '').trim();
+    var P = placementModel();
+    if (!P) {
+      traceSchedule('failed', S.currentPlanVersion ? S.currentPlanVersion() : null);
+      ZX.ui.toast('落点模型未加载，当前计划未变更。', 'warn');
+      return false;
+    }
     var blocks = res.blocks;
     var unplanned = res.unplanned;
-    var dow = U.todayDow();
-    var week = weekFromBlocks(blocks, slots);
-    var todayTasks = todayTasksFromBlocks(blocks, all, stamp);
+    var today = U.todayKey();
+    var tasks = all.map(function (item) {
+      var task = {
+        id: item.id, subject: item.s, s: item.s, title: item.title,
+        est: item.estMin !== undefined ? item.estMin : item.est, weight: item.weight, done: false
+      };
+      return S.normTask ? S.normTask(task) : task;
+    });
+    var model;
+    try {
+      model = P.createModel({
+        startDate: slots[0].date,
+        timezone: localTimezone(),
+        slots: slots,
+        tasks: tasks,
+        blocks: blocks,
+        unplanned: unplanned.map(function (item) {
+          return { taskId: item.taskId, reason: item.reason || '未排入可用窗口' };
+        }),
+        idPrefix: 'pm_' + stamp + '_'
+      });
+    } catch (e) {
+      traceSchedule('failed', S.currentPlanVersion ? S.currentPlanVersion() : null);
+      ZX.ui.toast('排程落点无法安全保存，当前计划未变更。', 'warn');
+      return false;
+    }
+    tasks.forEach(function (task) {
+      task.time = taskTime(model, task.id);
+      var segments = P.taskSegments(model, task.id);
+      task.date = segments.length ? segments[0].date : null;
+      var unplaced = model.unplanned.find(function (item) { return item.taskId === task.id; });
+      if (unplaced) {
+        task.unplanned = true;
+        task.unplannedReason = unplaced.reason;
+      } else {
+        delete task.unplanned;
+        delete task.unplannedReason;
+      }
+    });
+    var week = P.projectWeek(model, tasks);
     var dayAssign = {};
-    if (dow !== '日') todayTasks.forEach(function (t) { dayAssign[t.id] = dow; });
-    var bufferSlots = slots.filter(function (s) { return s.date === dow && s.isBuffer && s.available; });
-    var bufferTime = bufferSlots.length
-      ? fmtMin(bufferSlots[0].startMin) + '–' + fmtMin(bufferSlots[bufferSlots.length - 1].startMin + bufferSlots[bufferSlots.length - 1].durMin)
+    tasks.forEach(function (task) {
+      var segments = P.taskSegments(model, task.id);
+      if (segments.length) dayAssign[task.id] = weekdayOf(segments[0].date);
+    });
+    var summary = P.summary(model);
+    var todaySummary = summary.days.find(function (day) { return day.date === today; });
+    var todayDay = model.days.find(function (day) { return day.date === today; });
+    var bufferWindows = todayDay ? todayDay.windows.filter(function (window) { return window.isBuffer; }) : [];
+    var bufferTime = bufferWindows.length
+      ? fmtMin(bufferWindows[0].startMin) + '–' + fmtMin(bufferWindows[bufferWindows.length - 1].endMin)
       : '';
     var patch = {
-      goal: Object.assign({}, S.goal, { name: String(d.name || '').trim(), deadline: d.deadline, weeks: d.weeks, source: 'user' }),
+      goal: Object.assign({}, S.goal, { name: name, deadline: d.deadline, weeks: d.weeks, source: 'user' }),
       feas: { weeklyH: d.weeklyH, weeks: d.weeks, discount: DISCOUNT, demand: d.demand },
-      week: week, weekShift: U.clone(week), tasks: todayTasks,
-      buffer: { time: bufferTime, free: !blocks.some(function (b) { return b.isBuffer && b.date === dow; }) },
+      week: week, weekShift: U.clone(week), placementModel: model, tasks: tasks,
+      buffer: { time: bufferTime, free: !todaySummary || todaySummary.bufferUsedMin === 0 },
       replanned: false, snapshot: null, replanRecord: null, tiredAdopted: false, movedOut: null,
       replanHistory: [], dayAssign: dayAssign, locks: {}, goalDraft: null, planDraft: null
     };
-    S.resetTimer();
-    Object.assign(S, patch);
+    try {
+      var commit = function () {
+        S.resetTimer();
+        Object.assign(S, patch);
+        if (S.syncPlacementProjection) S.syncPlacementProjection();
+      };
+      if (typeof S.transact === 'function') S.transact(commit);
+      else commit();
+    } catch (e) {
+      traceSchedule('failed', S.currentPlanVersion ? S.currentPlanVersion() : null);
+      ZX.ui.toast('排程结果未能保存，当前计划未变更；可重试提交。', 'warn');
+      return false;
+    }
     traceSchedule('committed', S.currentPlanVersion ? S.currentPlanVersion() : null);
     var ctl = api;
     api = null;
     if (ctl) ctl.close('applied');
-    ZX.render();
+    ZX.render({ skipOverlaySave: true });
     ZX.setTab('plan');
 
-    var rows = S.tasks.map(function (t) {
+    var todayTasks = S.tasksOnDate ? S.tasksOnDate(today) : tasks;
+    var rows = todayTasks.map(function (t) {
       return '<div class="erow"><span class="k">' + U.esc(t.time.split('–')[0]) + '</span>' +
         '<span class="why" style="flex:1;color:var(--txt2)">' + U.esc(t.s) + ' · ' + U.esc(t.title) + '</span>' +
         '<span class="v">' + U.hm(t.est) + '</span></div>';
@@ -673,10 +726,11 @@ window.ZX = window.ZX || {};
         U.esc(unplanned.map(function (u) { return (u.reason || '无可用时段').split('，')[0]; }).join('；')) + '</span></div>'
       : '';
     say('<p>排程完成：<b>' + (all.length - unplanned.length) + '</b> 项已排入可用时段，' +
-      '今天先做 <b>' + S.tasks.length + '</b> 项。</p>' +
+      '今天先做 <b>' + todayTasks.length + '</b> 项。</p>' +
       '<div class="ecard"><div class="ecard-h"><b>今晚开始</b><span class="tag">引擎 ' + U.esc(res.version || '') + '</span></div>' +
       '<div class="ecard-b"><p class="note">输入：已确认任务草案；来源：确定性引擎。' +
       scheduleConstraints(slots) + '</p>' + rows + unplannedTxt + '</div></div>', '排程 · ' + blocks.length + ' 块');
+    return true;
   }
 
   /* ---------- 事件 ---------- */
@@ -696,6 +750,7 @@ window.ZX = window.ZX || {};
       if (act === 'type') draft().type = t.dataset.v;
       else draft().base = t.dataset.v;
       draft().demand = demandOf(draft().type, draft().base);
+      draft().demandAdjusted = false;
       flow.render();
       return;
     }
@@ -731,6 +786,7 @@ window.ZX = window.ZX || {};
     }
     if (act === 'fix-demand') {
       draft().demand = Math.round(draft().demand * 0.85);
+      draft().demandAdjusted = true;
       flow.render();
     }
   }
@@ -771,6 +827,7 @@ window.ZX = window.ZX || {};
       captureAdd(3);
       var title = String(addForm.title || '').trim();
       if (!title) { ZX.ui.toast('先写一个计划项标题', 'warn'); return; }
+      if (title.length > MAX_TEXT_LENGTH) { ZX.ui.toast('计划项标题最多 ' + MAX_TEXT_LENGTH + ' 字', 'warn'); return; }
       plan().push({
         id: 'd_' + Date.now().toString(36),
         s: addForm.s,
@@ -780,7 +837,10 @@ window.ZX = window.ZX || {};
         order: plan().length
       });
       addForm.title = '';
-      flow.render();
+      suppressAddCapture = true;
+      try { flow.render(); } finally { suppressAddCapture = false; }
+      var titleInput = api.$('#saAddT');
+      if (titleInput) titleInput.value = '';
       return;
     }
 
@@ -890,7 +950,7 @@ window.ZX = window.ZX || {};
   }
 
   ZX.flows = ZX.flows || {};
-  ZX.flows.goal = { open: open, apply: apply };
+  ZX.flows.goal = { open: open, apply: apply, buildSlots: buildSlots };
 
   /* 计划页头部按钮（按钮在 views/plan.js，事件在这里委托，不改 main.js） */
   document.addEventListener('click', function (e) {

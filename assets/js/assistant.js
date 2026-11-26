@@ -9,6 +9,7 @@ window.ZX = window.ZX || {};
   'use strict';
 
   var U = ZX.util;
+  var tiredPreview = null;
 
   function chatEl() { return U.$('#chat'); }
 
@@ -21,7 +22,7 @@ window.ZX = window.ZX || {};
     var seal = who === 'a' ? '<span class="seal-no" aria-hidden="true">诺</span>' : '';
     el.innerHTML =
       '<div class="meta"><b>' + label + '</b><span class="t">' + U.nowStr() + '</span>' +
-      (eng ? '<span class="eng">' + eng + '</span>' : '') + '</div>' +
+      (eng ? '<span class="eng">' + U.esc(eng) + '</span>' : '') + '</div>' +
       '<div class="txt">' + html + seal + '</div>';
     var box = chatEl();
     /* 对话日志上限：超出后丢弃最早节点，避免长会话 DOM 无限增长 */
@@ -61,14 +62,28 @@ window.ZX = window.ZX || {};
   function startTask(id) {
     var S = ZX.state;
     var t = S.tasks.filter(function (x) { return x.id === id; })[0];
-    /* 旧卡片不能复活退役任务，也不能覆盖其他任务的计时。 */
-    if (!t || t.done || t.abandoned || t.substituted) return;
+    /* 旧卡片不能复活退役或今日暂缓任务，也不能覆盖其他任务的计时。 */
+    if (!t || t.done || t.deferred || t.abandoned || t.substituted) return;
     if (S.running) {
       ZX.ui.toast('已有任务正在计时，请先结束并记录，再开始其他任务', 'warn');
       return;
     }
     var restored = !!t.skipped;
-    if (restored) { t.skipped = false; t.skipReason = null; }
+    if (!restored && S.placementModel && (!S.taskSegments || !S.taskSegments(id, U.todayKey()).length)) {
+      ZX.ui.toast('该任务不在今日计划中，不能开始计时', 'warn');
+      return;
+    }
+    if (restored && S.placementModel) {
+      var P = window.Rhythm && window.Rhythm.placementModel;
+      var placement = P.restoreTask(S.placementModel, id, 'pm_start_' + Date.now().toString(36) + '_', t.est);
+      if (!placement.ok) {
+        ZX.ui.toast(placement.reason, 'warn');
+        return;
+      }
+      S.placementModel = placement.model;
+      S.syncPlacementProjection();
+    }
+    if (restored) { t.skipped = false; t.skipReason = null; t.skippedAt = null; }
     S.running = id;
     S.timerStart = Date.now();
     S.pausedAt = null;
@@ -91,7 +106,7 @@ window.ZX = window.ZX || {};
   function finishTask(id, useEst) {
     var S = ZX.state;
     var t = S.tasks.filter(function (x) { return x.id === id; })[0];
-    if (!t || t.done || t.abandoned || t.substituted) return;
+    if (!t || t.done || t.skipped || t.deferred || t.abandoned || t.substituted) return;
     var exec = ZX.flows.exec;
 
     /* 结束（有计时）→ 记录弹层：完成度 / 状态；按预估记录 → 直接 100% */
@@ -100,20 +115,18 @@ window.ZX = window.ZX || {};
       return;
     }
 
-    var mins = t.est;
-    var startAt = null;
-    if (S.running === id && !useEst) {
-      mins = exec.elapsedMin();
-      startAt = S.timerStart;
-    }
-
-    exec.commitRecord(id, mins, 100, '', startAt || (Date.now() - mins * 60000), Date.now());
+    /* 计时结束路径已在上方进入 openRecord 弹层；此处只处理按预估直接记录。 */
+    exec.commitRecord(id, t.est, 100, '', Date.now() - t.est * 60000, Date.now());
   }
 
   /* ---------- 弹性位占用 / 释放（真交互） ----------
      占用需二次确认（反焦虑：提示代价，不诱导）；释放即时生效。 */
   function toggleBuffer() {
     var S = ZX.state;
+    if (S.placementModel) {
+      ZX.ui.toast('弹性位用量由实际任务落点自动记账，请拖动任务或使用重排', 'warn');
+      return;
+    }
     var t = (S.buffer && S.buffer.time) || '';
     if (S.buffer.free) {
       ZX.ui.confirm({
@@ -143,6 +156,7 @@ window.ZX = window.ZX || {};
      重排三态（预览 / 确认 / 撤销）在 flows/replan.js，路由经运行时查找解耦 */
   var INTENTS = [
     { k: ['确认重排', '确认放弃'], run: function () { if (ZX.flows.replan) ZX.flows.replan.confirmReplan(); } },
+    { k: ['演示挽救', '挽救演示'], run: demoRescueFlow },
     { k: ['我断了四天', '断了', '中断', '挽救', '没打开'], run: rescueFlow },
     { k: ['新建目标', '定目标', '改目标'], run: goalFlow },
     { k: ['撤销', '恢复', '撤回'], run: function () { if (ZX.flows.replan) ZX.flows.replan.undoReplan(); } },
@@ -190,21 +204,54 @@ window.ZX = window.ZX || {};
   }
 
   /* ---------- flow：中断挽救（Stage B · F-7.1 F-7.2 F-7.3） ----------
-     天数由执行记录真实计算；确实未断更时才注入演示天数（聊天演示钩子），
-     判定与弹层与产品口径完全一致。 */
+     真实对话只按 sessions 判定；演示天数走独立入口，不注入真实状态。 */
   function rescueFlow() {
     if (!ZX.flows || !ZX.flows.rescue) {
       say('<p>挽救流程还没加载完成，刷新页面后再试一次。</p>', '挽救 · 待加载');
       return;
     }
     var R = ZX.flows.rescue;
-    var real = R.zeroDaysFromSessions();
-    R.detect(real >= R.THRESHOLD ? undefined : R.DEMO_ZERO_DAYS);
+    var interrupted = R.detect();
+    if (!interrupted) {
+      say('<p>尚未达到连续 ' + R.THRESHOLD + ' 天：目前连续 ' +
+        U.num(ZX.state.consecutiveZeroDays, 0) + ' 天没有记录。暂不打开挽救，也不会改变当前计划。</p>', '挽救 · 未达标');
+      return;
+    }
     var m = R.metrics();
     say('<p>连续 ' + U.num(ZX.state.consecutiveZeroDays, 0) + ' 天没有记录。计划还在：这周还剩 ' + m.days + ' 天，缺口 ' +
       U.hm(m.gap) + '。下一步给三种接法，选一个就行，不需要补记录。</p>', '挽救 · 判定');
     ZX.setTab('today');
     R.open();
+  }
+
+  /* ---------- flow：独立中断挽救演示 ----------
+     只读取当前计划，用局部演示天数生成预览；不 detect / open / apply / render。 */
+  function demoRescueFlow() {
+    if (!ZX.flows || !ZX.flows.rescue) {
+      say('<p>挽救演示还没加载完成，刷新页面后再试一次。</p>', '挽救演示 · 待加载');
+      return null;
+    }
+    var R = ZX.flows.rescue;
+    var preview = R.preview(R.DEMO_ZERO_DAYS);
+    var m = preview.metrics;
+    var options = preview.options.map(function (o) {
+      var effect = o.key === 'defer'
+        ? '截止 ' + U.esc(o.deadlineAfter) + ' · 周期 ' + o.weeksAfter + ' 周'
+        : '本周计划 ' + U.hm(o.planMin) + ' · 放弃 ' + o.dropped.length + ' 项';
+      return '<div class="erow"><span class="k">' + U.esc(o.label) + '</span>' +
+        '<span class="why">' + effect + '</span><span class="v">缺口 ' + U.hm(o.gap) + '</span></div>';
+    }).join('');
+    say('<div class="ecard" style="border:2px solid var(--warn,#b7791f)">' +
+      '<div class="ecard-h"><b>中断挽救演示</b><span class="tag warn">演示数据 · 不会修改真实计划</span></div>' +
+      '<div class="ecard-b">' +
+        '<div class="notice sb-note" style="border:2px solid var(--warn,#b7791f)"><b>演示数据 · 不会修改真实计划</b><br>' +
+          '连续 ' + preview.zeroDays + ' 天没有记录，演示剩余 ' + m.days + ' 天。仅使用局部演示天数与当前计划的只读快照。</div>' +
+        '<div class="erow"><span class="k">演示缺口</span><span class="why">计划 ' + U.hm(m.planned) +
+          ' − 已投入 ' + U.hm(m.worked) + ' − 剩余可用 ' + U.hm(Math.round(m.avail)) + '</span>' +
+          '<span class="v warn">' + U.hm(m.gap) + '</span></div>' + options +
+      '</div><div class="ecard-f"><span class="note">仅供预览，不会打开真实挽救，也不会提交任何方案。</span></div></div>',
+      '挽救演示 · 只读预览');
+    return preview;
   }
 
   /* ---------- flow：可行性 ---------- */
@@ -217,7 +264,7 @@ window.ZX = window.ZX || {};
       return;
     }
     say('<div class="ecard">' +
-      '<div class="ecard-h"><b>可行性评估</b><span class="tag ' + (f.R >= 0.9 ? 'ok' : 'warn') + '">' + f.verdict + '</span></div>' +
+      '<div class="ecard-h"><b>可行性评估</b><span class="tag ' + (f.R >= 0.9 ? 'ok' : 'warn') + '">' + U.esc(f.verdict) + '</span></div>' +
       '<div class="ecard-b">' +
         '<div class="erow"><span class="k">R 值</span><span class="why">T / D</span><span class="v ' + (f.R >= 0.9 ? 'ac' : 'warn') + '">' + f.R.toFixed(2) + '</span></div>' +
         '<div class="erow"><span class="k">可用 T</span><span class="why">' + S.feas.weeklyH + ' h/周 × ' + S.feas.weeks + ' 周 × 0.85</span><span class="v">' + f.T + ' h</span></div>' +
@@ -269,12 +316,12 @@ window.ZX = window.ZX || {};
       '<div class="ecard-b">' +
         '<div class="erow"><span class="k">R 值</span><span class="why">需求 ' + Math.round(before) + ' → ' + Math.round(S.feas.demand) + ' h</span><span class="v ' + (f.R >= 0.9 ? 'ac' : 'warn') + '">' + beforeFeas.R.toFixed(2) + ' → ' + f.R.toFixed(2) + '</span></div>' +
         '<div class="erow"><span class="k">缓冲</span><span class="why">真实可损耗余量随之收窄</span><span class="v ' + (buf1 > 0 ? 'ac' : 'warn') + '">' + buf0 + ' → ' + buf1 + ' h</span></div>' +
-        '<div class="erow"><span class="k">判定</span><span class="why">修改幅度 ' + U.pct(amp) + '，未超过 30% 阈值</span><span class="v ' + (f.R >= 0.9 ? 'ac' : 'warn') + '">' + f.verdict + '</span></div>' +
+        '<div class="erow"><span class="k">判定</span><span class="why">修改幅度 ' + U.pct(amp) + '，未超过 30% 阈值</span><span class="v ' + (f.R >= 0.9 ? 'ac' : 'warn') + '">' + U.esc(f.verdict) + '</span></div>' +
       '</div></div>' +
       '<p style="margin-top:10px">可行性已按新需求重算' + (buf1 > 0 ? '，仍有缓冲，不阻断。' : '，缓冲归零：再加就会大面积裁剪。') + '</p>', '拆解 · 15ms');
     ZX.setTab('plan');
     ZX.api.queueOp({
-      entity: 'goal', entityId: (S.goal.id || 'g_2027'), field: 'feas.demand', value: S.feas.demand
+      entity: 'feas', entityId: 'current', field: 'demand', value: S.feas.demand
     });
   }
 
@@ -289,7 +336,7 @@ window.ZX = window.ZX || {};
   function lowestWeightTask() {
     var pick = null;
     ZX.state.tasks.forEach(function (x) {
-      if (x.done || x.skipped || x.abandoned || x.substituted || (ZX.state.locks && ZX.state.locks[x.id]) || x.deferred) return;
+      if (x.done || x.skipped || x.abandoned || x.substituted || (ZX.state.locks && ZX.state.locks[x.id]) || x.deferred || x.id === ZX.state.running) return;
       if (!pick || U.num(x.weight, 0) < U.num(pick.weight, 0)) pick = x;
     });
     return pick;
@@ -297,7 +344,12 @@ window.ZX = window.ZX || {};
 
   function tiredFlow() {
     var S = ZX.state;
+    if (S.tiredAdopted) {
+      say('<p>本次计划已采纳过一次降载。若今天仍吃紧，可到「计划」页用重排调整，不必反复顺延。</p>', '洞察 · 归因');
+      return;
+    }
     var pick = lowestWeightTask();
+    tiredPreview = pick ? { taskId: pick.id, planVersion: S.currentPlanVersion ? S.currentPlanVersion() : null } : null;
     var est = pick ? U.num(pick.est, 0) : 0;
     /* 计划口径与今日页 KPI 同源（exec.metrics 过滤跳过项） */
     var before = ZX.flows.exec.metrics().planned;
@@ -307,7 +359,7 @@ window.ZX = window.ZX || {};
       '<div class="ecard">' +
         '<div class="ecard-h"><b>降载建议</b><span class="tag warn">保留弹性位</span></div>' +
         '<div class="ecard-b">' +
-          '<div class="erow"><span class="k">调整</span><span class="why">' + (pick ? U.esc(pick.s) + ' ' + U.hm(est) + ' 移入本周六弹性位' : '今天没有可顺延的未完成项') + '</span><span class="v">' + (est ? '今日 −' + U.hm(est) : '—') + '</span></div>' +
+          '<div class="erow"><span class="k">调整</span><span class="why">' + (pick ? U.esc(pick.s) + ' ' + U.hm(est) + ' 仅标记顺延（仅今日暂缓），不会修改计划日期' : '今天没有可暂缓的未完成项') + '</span><span class="v">' + (est ? '今日 −' + U.hm(est) : '—') + '</span></div>' +
           '<div class="erow"><span class="k">保留</span><span class="why">权重更高的项不受影响</span><span class="v ac">' + keepN + ' 项</span></div>' +
           '<div class="erow"><span class="k">后果</span><span class="why">今日计划 ' + U.hm(before) + ' → ' + U.hm(after) + '，不触发重排</span><span class="v">可承受</span></div>' +
         '</div>' +
@@ -318,11 +370,11 @@ window.ZX = window.ZX || {};
   /* ---------- flow：今日安排 ---------- */
   function todayFlow() {
     var S = ZX.state;
-    var todo = S.tasks.filter(function (t) { return !t.done && !t.skipped && !t.abandoned && !t.substituted; });
+    var todo = ZX.flows.exec.activeTasks().filter(function (t) { return !t.done; });
     /* 剩余量口径与今日页 KPI 同源（exec.metrics 过滤跳过项） */
     var mD = ZX.flows.exec.metrics();
     var rows = todo.map(function (t) {
-      return '<div class="erow"><span class="k">' + t.time.split('–')[0] + '</span><span class="why" style="flex:1;color:var(--txt2)">' + t.s + ' · ' + U.esc(t.title) + '</span><span class="v">' + U.hm(t.est) + '</span></div>';
+      return '<div class="erow"><span class="k">' + U.esc(t.time.split('–')[0]) + '</span><span class="why" style="flex:1;color:var(--txt2)">' + U.esc(t.s) + ' · ' + U.esc(t.title) + '</span><span class="v">' + U.hm(t.est) + '</span></div>';
     }).join('');
     var bufTime = (S.buffer && S.buffer.time ? S.buffer.time : '20:30–21:30').split('–')[0];
     say('<p>今天还剩 <b>' + todo.length + '</b> 项，共 <b>' + U.hm(mD.remain) + '</b>。顺序不是按科目排的，是按「截止紧迫度 ↓ + 权重 ↓」排的。</p>' +
@@ -336,11 +388,8 @@ window.ZX = window.ZX || {};
   /* ---------- flow：开始计时 ---------- */
   function startFlow() {
     var S = ZX.state;
-    var next = null;
-    for (var i = 0; i < S.tasks.length; i++) {
-      var t = S.tasks[i];
-      if (!t.done && !t.skipped && !t.deferred && !t.abandoned && !t.substituted) { next = t; break; }
-    }
+    var active = ZX.flows.exec.activeTasks().filter(function (t) { return !t.done && !t.skipped && !t.deferred && !t.abandoned && !t.substituted; });
+    var next = active[0];
     if (!next) { say('<p>今天的任务都记录完了。要不要留 10 分钟做一次明日预览？</p>', '执行'); return; }
     startTask(next.id);
     ZX.setTab('today');
@@ -357,6 +406,7 @@ window.ZX = window.ZX || {};
         '<div class="erow"><span class="k">评估</span><span class="why">「我的计划可行吗」</span><span class="v">R 值</span></div>' +
         '<div class="erow"><span class="k">调参</span><span class="why">「数学多给两小时」</span><span class="v">需求 +116h</span></div>' +
         '<div class="erow"><span class="k">反馈</span><span class="why">「生成周报」/「我有点累」</span><span class="v">insight</span></div>' +
+        '<div class="erow"><span class="k">演示</span><span class="why">「演示挽救」查看隔离示例，不修改真实计划</span><span class="v">demo</span></div>' +
         '<div class="erow"><span class="k">计时</span><span class="why">「开始」/「撤销」</span><span class="v">session</span></div>' +
       '</div></div>' +
       '<p style="margin-top:10px;color:var(--txt3);font-size:11px">澄清与拆解建议由 LLM 承接；R 值与排程始终由确定性引擎产出，同输入必得同输出。</p>', '意图 · 兜底');
@@ -366,31 +416,27 @@ window.ZX = window.ZX || {};
   function adoptTired() {
     var S = ZX.state;
     if (S.tiredAdopted) return;
-    var previewTask = lowestWeightTask();
-    if (!previewTask || (S.locks && S.locks[previewTask.id])) return;
-    S.tiredAdopted = true;
-    /* 与 tiredFlow 同一选取：顺延当前权重最低的未完成项（不写死任务 id） */
-    var t = previewTask;
-    if (t) {
-      S.movedOut = { title: t.title, est: t.est };
-      t.deferred = true;
-      t.deferredTo = '六';
+    var previewTask = tiredPreview && S.tasks.filter(function (x) { return x.id === tiredPreview.taskId; })[0];
+    var currentVersion = S.currentPlanVersion ? S.currentPlanVersion() : null;
+    if (!previewTask || (tiredPreview.planVersion !== null && tiredPreview.planVersion !== currentVersion) ||
+        previewTask.done || previewTask.skipped || previewTask.abandoned || previewTask.substituted || previewTask.deferred ||
+        previewTask.id === S.running || (S.locks && S.locks[previewTask.id]) || lowestWeightTask() !== previewTask) {
+      say('<p>降载预览已失效，请重新生成建议；现有计划未改动。</p>', '洞察 · 归因');
+      return;
     }
-    var left = S.tasks.filter(function (x) { return !x.done && !x.skipped && !x.abandoned && !x.substituted; }).length;
+    S.tiredAdopted = true;
+    /* 与 tiredFlow 同一选取：只暂缓当前权重最低的未完成项，不写真实改期 */
+    var t = previewTask;
+    var at = Date.now();
+    t.deferred = true;
+    t.deferredAt = at;
+    t.deferredReason = '状态不佳';
+    var left = ZX.flows.exec.activeTasks().filter(function (x) { return !x.done; }).length;
     ZX.render();
-    say('<p>已采纳。' + (t ? U.esc(t.s) + '（' + U.hm(t.est) + '）移到周六弹性位，今天剩 ' + left + ' 项收工。' : '今天没有需要顺延的项。') + '</p><p style="color:var(--txt3);font-size:11px">本次调整写入任务顺延状态，原因「状态不佳」；不计入断更，也不影响连续记录。</p>', '重排 · L1 顺延');
+    say('<p>已采纳。' + (t ? U.esc(t.s) + '（' + U.hm(t.est) + '）仅标记顺延（仅今日暂缓，未修改计划日期）；今天剩 ' + left + ' 项收工。' : '今天没有需要暂缓的项。') + '</p><p style="color:var(--txt3);font-size:11px">本次调整只写入今日暂缓状态，原因「状态不佳」；不计入断更，也不影响连续记录。</p>', '执行 · 今日暂缓');
     ZX.api.queueOp({
       entity: 'task', entityId: t ? t.id : '', field: 'deferred',
-      value: { reason: '状态不佳', to: '周六 15:00 弹性位', est: S.movedOut ? S.movedOut.est : 0 }
-    });
-  }
-
-  function togglePreset() {
-    var S = ZX.state;
-    S.presetActive = !S.presetActive;
-    ZX.render();
-    ZX.api.queueOp({
-      entity: 'preset', entityId: 'w45_politics', field: 'active', value: S.presetActive
+      value: { reason: t.deferredReason, at: at, est: U.num(t.est, 0) }
     });
   }
 
@@ -409,10 +455,11 @@ window.ZX = window.ZX || {};
     route: route,
     goalFlow: goalFlow,
     rescueFlow: rescueFlow,
+    demoRescueFlow: demoRescueFlow,
     feasibilityFlow: feasibilityFlow,
     adjustMath: adjustMath, weeklyFlow: weeklyFlow, tiredFlow: tiredFlow,
     todayFlow: todayFlow, startFlow: startFlow, fallback: fallback,
-    adoptTired: adoptTired, togglePreset: togglePreset, toggleNotif: toggleNotif
+    adoptTired: adoptTired, toggleNotif: toggleNotif
   };
 
 })(window.ZX);

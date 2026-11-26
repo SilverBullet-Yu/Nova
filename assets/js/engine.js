@@ -30,14 +30,29 @@ window.ZX = window.ZX || {};
 
   function localFeasibility(input) { return mustRhythmFn('feasibility')(input); }
   function localReplan(input) { return mustRhythmFn('replan')(input); }
+  function localConfirmReplan(result) { return mustRhythmFn('confirmReplan')(result); }
   function localUndo(snapshot) { return mustRhythmFn('undoReplan')(snapshot); }
   function localAttribute(input) { return mustRhythmFn('attribute')(input); }
   function localSchedule(input) { return mustRhythmFn('schedule')(input); }
 
-  function okFeas(r) { return !!(r && typeof r.R === 'number' && typeof r.T === 'number' && r.verdict); }
-  function okReplan(r) { return !!(r && Array.isArray(r.strategies) && Array.isArray(r.diff)); }
-  function okUndo(r) { return !!(r && Array.isArray(r.tasks)); }
-  function okSched(r) { return !!(r && Array.isArray(r.blocks)); }
+  function finite(v) { return typeof v === 'number' && isFinite(v); }
+  function okFeas(r) {
+    return !!(r && finite(r.T) && finite(r.D) && finite(r.R) && finite(r.margin) &&
+      typeof r.verdict === 'string' && r.threshold && typeof r.threshold === 'object');
+  }
+  function okReplan(r) {
+    return !!(r && Array.isArray(r.strategies) && r.strategies.length === 4 &&
+      r.strategies.every(function (s) { return s && finite(s.level) && typeof s.name === 'string' && typeof s.applied === 'boolean'; }) &&
+      Array.isArray(r.diff) && r.diff.every(function (d) { return d && typeof d.op === 'string' && typeof d.taskId === 'string'; }) &&
+      r.guards && typeof r.guards === 'object' && Array.isArray(r.nextTasks) && Array.isArray(r.nextWeek) &&
+      Array.isArray(r.nextPlacements) && r.snapshot && Array.isArray(r.snapshot.tasks) && Array.isArray(r.snapshot.week) &&
+      (r.loadDelta === null || finite(r.loadDelta)) && typeof r.accepted === 'boolean' && typeof r.needsConfirmation === 'boolean');
+  }
+  function okSched(r) {
+    return !!(r && Array.isArray(r.blocks) && Array.isArray(r.unplanned) && typeof r.version === 'string' &&
+      r.blocks.every(function (b) { return b && typeof b.taskId === 'string' && finite(b.startMin) && finite(b.durMin); }) &&
+      r.unplanned.every(function (u) { return u && typeof u.taskId === 'string'; }));
+  }
 
   ZX.engine = {
     /* 异步入口：后端优先，失败或结构不合约时走同一套本地产物 */
@@ -61,19 +76,15 @@ window.ZX = window.ZX || {};
         return localReplan(input);
       });
     },
-    /* 服务端草案必须收到有效确认，不降级为本地提交。 */
-    confirmReplan: function (draftId) {
-      return ZX.api.confirmReplan(draftId).then(function (r) {
-        if (!okReplan(r) || r.accepted !== true) throw new Error('重排确认无效');
-        return r;
+    /* 业务确认只作用于本机计算结果，不创建或确认服务端草案。 */
+    confirmReplan: function (result) {
+      return Promise.resolve().then(function () {
+        ZX.engine.source = 'local';
+        return localConfirmReplan(result);
       });
     },
     undo: function (snapshot) {
-      return ZX.api.undo(snapshot).then(function (r) {
-        if (!okUndo(r)) { ZX.engine.source = 'local'; return localUndo(snapshot); }
-        ZX.engine.source = 'backend';
-        return r;
-      }, function () {
+      return Promise.resolve().then(function () {
         ZX.engine.source = 'local';
         return localUndo(snapshot);
       });

@@ -51,6 +51,7 @@ window.ZX = window.ZX || {};
     var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(str || ''));
     if (!m) return null;
     var d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    if (d.getFullYear() !== Number(m[1]) || d.getMonth() !== Number(m[2]) - 1 || d.getDate() !== Number(m[3])) return null;
     d.setHours(0, 0, 0, 0);
     return isNaN(d.getTime()) ? null : d;
   }
@@ -86,7 +87,8 @@ window.ZX = window.ZX || {};
   /* ---------- 记录日口径（执行记录 / 中断识别 / 周报共用） ---------- */
   /* 毫秒时间戳 → 'YYYY-MM-DD'（本地时区）；非法输入返回空串 */
   function dayKey(ts) {
-    var d = new Date(num(ts, 0));
+    if (typeof ts !== 'number' || !isFinite(ts)) return '';
+    var d = new Date(ts);
     return isNaN(d.getTime()) ? '' : isoDay(d);
   }
   function todayKey() { return isoDay(new Date()); }
@@ -129,6 +131,14 @@ window.ZX = window.ZX || {};
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   function clone(v) { return v === undefined ? v : JSON.parse(JSON.stringify(v)); }
   function num(v, dft) { var n = Number(v); return isFinite(n) ? n : dft; }
+
+  /* ---------- 业务快照字段清单（overlay 持久化与备份校验的单一事实源） ----------
+     state.js 用它写 overlay 快照与冲突比对；flows/settings.js 用它做备份导入校验。
+     新增/删除业务字段只改此处，避免两处复制漂移。 */
+  var SNAPSHOT_FIELDS = ['tasks', 'sessions', 'goal', 'feas', 'week', 'weekShift',
+    'placementModel', 'dayAssign', 'locks', 'avail', 'availSource', 'notif', 'attrCounts',
+    'consecutiveZeroDays', 'interrupted', 'rescueRecord', 'replanHistory', 'replanSnapshot'];
+  var OPTIONAL_SNAPSHOT_FIELDS = ['buffer', 'tiredAdopted'];
 
   /* ---------- 视觉偏好：科技网格 / 辉光 / 动效 / 字号 ---------- */
   var PREF_KEY = 'zx.ui_prefs';
@@ -182,6 +192,8 @@ window.ZX = window.ZX || {};
   }
 
   ZX.util = {
+    SNAPSHOT_FIELDS: SNAPSHOT_FIELDS,
+    OPTIONAL_SNAPSHOT_FIELDS: OPTIONAL_SNAPSHOT_FIELDS,
     $: $, $$: $$, esc: esc, pad2: pad2, hm: hm,
     nowStr: nowStr, tsHM: tsHM, isoWeek: isoWeek, todayDow: todayDow,
     parseDay: parseDay, isoDay: isoDay, addDays: addDays, retime: retime, pct: pct,

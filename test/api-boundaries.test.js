@@ -43,9 +43,6 @@ function untilAbort(signal) {
     }, { once: true });
   });
 }
-function enqueue(api, count, prefix = 'op') {
-  for (let i = 0; i < count; i++) api.queueOp({ opId: prefix + i, value: i });
-}
 
 test('响应头已到但正文挂起时仍在 3000ms 中止，finally 清理计时器', async () => {
   const f = fixture((url, opts) => ({ ok: true, json: () => untilAbort(opts.signal) }));
@@ -152,122 +149,58 @@ test('LLM 客户端预算保持原 3 秒，服务端 30 秒预算差异待产品
   assert.equal(f.timers.size, 0);
 });
 
-test('超过 200 个 pending 全保留，只裁剪最旧的已确认历史', () => {
+test('旧队列原样隔离：新业务不写队列，健康恢复后 flush 仍不发网络', async () => {
+  const original = '[{"opId":"old-pending","pending":true,"value":{"note":"private"}},{"opId":"old-done","pending":false},null]';
+  let reachable = false;
+  const f = fixture(url => {
+    assert.equal(new URL(url).pathname, '/api/health');
+    if (!reachable) throw new Error('offline');
+    return response({ ok: true });
+  });
+  f.disk.set('zx.op_queue', original);
+  f.state.serverSeq = 7;
+
+  assert.equal(f.api.queueOp({ opId: 'new-offline', value: 'local-only' }), null);
+  assert.equal(f.api.pendingCount(), 0);
+  assert.equal(f.api.legacyPendingCount(), 1);
+  await assert.rejects(f.api.health(), /offline/);
+
+  reachable = true;
+  await f.api.health();
+  assert.equal(f.api.queueOp({ opId: 'new-online', value: 'local-only' }), null);
+  const first = f.api.flushQueue();
+  const second = f.api.flushQueue();
+  assert.notEqual(first, second);
+  const expected = { status: 'isolated', sent: 0, accepted: [], pending: 1, serverSeq: 7 };
+  assert.deepEqual(JSON.parse(JSON.stringify(await first)), expected);
+  assert.deepEqual(JSON.parse(JSON.stringify(await second)), expected);
+  await turn();
+
+  assert.deepEqual(f.calls.map(call => new URL(call.url).pathname), ['/api/health', '/api/health']);
+  assert.equal(f.disk.get('zx.op_queue'), original);
+  assert.equal(f.api.pendingCount(), 0);
+  assert.equal(f.api.legacyPendingCount(), 1);
+  assert.equal(f.disk.has('zx.syncTrace'), false);
+  assert.equal(f.state.serverSeq, 7);
+  for (const name of ['getState', 'stagePlan', 'reviewPlan', 'confirmReplan', 'undo', 'syncOps']) {
+    assert.equal(f.api[name], undefined, name + ' 不应继续暴露');
+  }
+});
+
+test('超过 200 条旧 pending 也原样保留，不裁剪且不产生待同步计数', async () => {
   const f = fixture(() => { throw new Error('must stay offline'); });
-  const history = Array.from({ length: 205 }, (_, i) => ({ opId: 'history' + i, pending: false }));
-  f.disk.set('zx.op_queue', JSON.stringify([{ opId: 'old-pending', pending: true }, ...history]));
-  enqueue(f.api, 450);
-  const q = Array.from(f.api.loadQueue());
-  assert.equal(f.api.pendingCount(), 451);
-  assert.equal(q.length, 651);
-  assert.equal(q[0].opId, 'old-pending');
-  assert.deepEqual(q.filter(o => !o.pending).map(o => o.opId), history.slice(-200).map(o => o.opId));
+  const legacy = Array.from({ length: 450 }, (_, i) => ({ opId: 'old-' + i, pending: true }));
+  const history = Array.from({ length: 205 }, (_, i) => ({ opId: 'history-' + i, pending: false }));
+  const original = JSON.stringify([...legacy, ...history]);
+  f.disk.set('zx.op_queue', original);
+
+  for (let i = 0; i < 450; i++) assert.equal(f.api.queueOp({ opId: 'new-' + i }), null);
+  assert.equal(f.api.pendingCount(), 0);
+  assert.equal(f.api.legacyPendingCount(), 450);
+  assert.equal(JSON.parse(JSON.stringify(f.api.loadQueue())).length, 655);
+  assert.deepEqual(JSON.parse(JSON.stringify(await f.api.flushQueue())), {
+    status: 'isolated', sent: 0, accepted: [], pending: 450, serverSeq: 0
+  });
+  assert.equal(f.disk.get('zx.op_queue'), original);
   assert.equal(f.calls.length, 0);
-});
-
-test('flush 按 200 分批串行上行，确认历史最多保留 200 条', async () => {
-  const batches = [];
-  const f = fixture((url, opts) => {
-    const ops = JSON.parse(opts.body).ops;
-    batches.push(ops);
-    return response({ accepted: ops.map(o => o.opId), serverSeq: batches.length });
-  });
-  enqueue(f.api, 450);
-  await f.api.flushQueue();
-  assert.deepEqual(batches.map(b => b.length), [200, 200, 50]);
-  assert.equal(new Set(batches.flat().map(o => o.opId)).size, 450);
-  assert.equal(batches[0][0].pending, undefined);
-  assert.equal(f.api.pendingCount(), 0);
-  assert.equal(f.api.loadQueue().length, 200);
-  assert.equal(f.state.serverSeq, 3);
-});
-
-test('部分确认本轮不重发，零确认停止；下次 flush 只发送未确认项', async () => {
-  let acceptAll = false;
-  const batches = [];
-  const f = fixture((url, opts) => {
-    const ids = JSON.parse(opts.body).ops.map(o => o.opId);
-    batches.push(ids);
-    return response({ accepted: acceptAll ? ids : batches.length === 1 ? ids.slice(0, 1) : [] });
-  });
-  enqueue(f.api, 450);
-  await f.api.flushQueue();
-  await turn();
-  assert.deepEqual(batches.map(b => b.length), [200, 200]);
-  assert.equal(f.api.pendingCount(), 449);
-  acceptAll = true;
-  await f.api.flushQueue();
-  assert.deepEqual(batches.slice(2).map(b => b.length), [200, 200, 49]);
-  assert.ok(batches.slice(2).flat().every(id => id !== 'op0'));
-  assert.equal(f.api.pendingCount(), 0);
-});
-
-for (const accepted of [true, false]) {
-  test('并发 flush 共享请求，运行中新增项不被旧快照覆盖：' + accepted, async () => {
-    const first = deferred();
-    const batches = [];
-    const f = fixture((url, opts) => {
-      if (url.endsWith('/api/health')) return response({});
-      const ids = JSON.parse(opts.body).ops.map(o => o.opId);
-      batches.push(ids);
-      return batches.length === 1 ? first.promise : response({ accepted: ids });
-    });
-    enqueue(f.api, 2);
-    await f.api.health();
-    const done = f.api.flushQueue();
-    assert.equal(f.api.flushQueue(), done);
-    await turn();
-    f.api.queueOp({ opId: 'new-during-flight' });
-    await turn();
-    assert.equal(batches.length, 1);
-    // 即使服务端返回未发送的 ID，也不能误确认运行中新加的写入。
-    first.resolve(response({ accepted: accepted ? ['op0', 'op1'] : ['new-during-flight'] }));
-    await done;
-    assert.equal(f.api.loadQueue().some(o => o.opId === 'new-during-flight'), true);
-    if (accepted) {
-      assert.deepEqual(batches, [['op0', 'op1'], ['new-during-flight']]);
-      assert.equal(f.api.pendingCount(), 0);
-    } else {
-      assert.equal(batches.length, 1);
-      assert.equal(f.api.pendingCount(), 3);
-    }
-  });
-}
-
-test('中途网络失败保留剩余项且释放 flush 锁', async () => {
-  let count = 0;
-  const f = fixture((url, opts) => {
-    const ids = JSON.parse(opts.body).ops.map(o => o.opId);
-    if (++count === 2) throw new Error('stub offline');
-    return response({ accepted: ids });
-  });
-  enqueue(f.api, 450);
-  await assert.rejects(f.api.flushQueue(), /stub offline/);
-  assert.equal(f.api.pendingCount(), 250);
-  await f.api.flushQueue();
-  assert.equal(f.api.pendingCount(), 0);
-});
-
-test('失效后的旧批次不能覆盖队列或清除新一轮 flush 锁', async () => {
-  const old = deferred(), fresh = deferred();
-  let requests = 0;
-  const f = fixture(() => ++requests === 1 ? old.promise : fresh.promise);
-  enqueue(f.api, 450);
-  const before = f.api.flushQueue();
-  await turn();
-  f.api.invalidatePendingSync();
-  f.disk.delete('zx.op_queue');
-  f.api.queueOp({ opId: 'fresh' });
-  const after = f.api.flushQueue();
-  await turn();
-  old.resolve(response({ accepted: ['op0'], serverSeq: 99 }));
-  await before;
-  assert.equal(f.state.serverSeq, 0);
-  assert.equal(f.api.pendingCount(), 1);
-  assert.equal(f.api.flushQueue(), after);
-  fresh.resolve(response({ accepted: ['fresh'], serverSeq: 1 }));
-  await after;
-  assert.equal(requests, 2);
-  assert.equal(f.api.loadQueue().length, 1);
-  assert.equal(f.api.pendingCount(), 0);
 });

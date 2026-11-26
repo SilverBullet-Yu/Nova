@@ -43,7 +43,14 @@ test('file 协议离线降级：本地排程、执行记录重载与 CSV 导出'
   assert.equal(restored?.minutes, 17);
   assert.match(record.planVersion, /^plan-/);
   assert.equal(restored.planVersion, record.planVersion);
-  assert.equal(reloaded.api.pendingCount(), 1);
+  assert.equal(reloaded.api.pendingCount(), 0);
+  assert.equal(reloaded.api.legacyPendingCount(), 0);
+  assert.equal(disk.has('zx.op_queue'), false);
+  assert.deepEqual(JSON.parse(JSON.stringify(await reloaded.api.flushQueue())), {
+    status: 'isolated', sent: 0, accepted: [], pending: 0, serverSeq: reloaded.state.serverSeq
+  });
+  assert.equal(attempts, 2, 'flush 不应发起网络请求');
+  assert.equal(disk.has('zx.syncTrace'), false);
   const rows = reloaded.settings.csv().split('\n');
   assert.ok(rows.some(row => row.startsWith('记录,' + record.taskId + ',') &&
     row.endsWith(',' + record.planVersion)));

@@ -1,3 +1,4 @@
+'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -7,141 +8,129 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../assets/js/api.js'), 'utf8');
 const stateSource = fs.readFileSync(require.resolve('../assets/js/state.js'), 'utf8');
 const utilSource = fs.readFileSync(require.resolve('../assets/js/util.js'), 'utf8');
+const settingsSource = fs.readFileSync(require.resolve('../assets/js/flows/settings.js'), 'utf8');
+const turn = () => new Promise(resolve => setImmediate(resolve));
 
-for (const failed of [false, true]) {
-  test('清除后迟到同步不重新写入：' + (failed ? '失败' : '成功'), async () => {
-    const disk = new Map();
-    let release, reject, started;
-    const waiting = new Promise(resolve => { started = resolve; });
-    const window = { ZX:{},
-      Rhythm:{seed:require('../shared/data/seed.js')}, location:{protocol:'http:', origin:'http://localhost'},
-      localStorage:{getItem:k=>disk.get(k), setItem:(k,v)=>disk.set(k,v), removeItem:k=>disk.delete(k)} };
-    /* 真实 util.js：currentPlanVersion 的 randHex 与 traceSync 的 appendTrace 与生产同源 */
-    vm.runInNewContext(utilSource, {window, crypto, localStorage: window.localStorage});
-    vm.runInNewContext(stateSource, {window, crypto});
-    vm.runInNewContext(source, {crypto, window, localStorage: window.localStorage, setTimeout, clearTimeout, fetch:async url=>{
-      if (url.endsWith('/api/auth/session')) return {ok:true,json:async()=>({token:'demo'})};
-      return new Promise((yes,no)=>{ release=yes; reject=no; started(); });
-    }});
-    const api = window.ZX.api;
-    api.queueOp({opId:'demo'});
-    const done = api.flushQueue();
-    await waiting;
-    const state = window.ZX.state;
-    const oldSeq = state.serverSeq;
-    disk.set('zx.syncTrace', '[]');
-    let reload;
-    window.ZX.util.clone = structuredClone;
-    window.ZX.ui = {confirm: async () => true, toast() {}};
-    vm.runInNewContext(fs.readFileSync(require.resolve('../assets/js/flows/settings.js'), 'utf8'), {
-      window, setTimeout: fn => { reload = fn; }
-    });
-    window.ZX.settings.confirmWipe();
-    await Promise.resolve();
-    assert.equal(typeof reload, 'function');
-    assert.equal(disk.has('zx.op_queue'), false);
-    assert.ok(JSON.parse(disk.get('zx.trash')).snapshot);
-    assert.equal(disk.has('zx.syncTrace'), false);
-    if (failed) {
-      reject(new Error('offline'));
-      await assert.rejects(done, /offline/);
-    } else {
-      release({ok:true,json:async()=>({accepted:['demo'],serverSeq:2})});
-      await done;
+function installApi(ZX, disk, fetch) {
+  const window = {
+    ZX,
+    location: { protocol: 'http:', origin: 'http://localhost' },
+    localStorage: {
+      getItem: key => disk.has(key) ? disk.get(key) : null,
+      setItem: (key, value) => disk.set(key, String(value)),
+      removeItem: key => disk.delete(key)
     }
-    assert.equal(disk.has('zx.syncTrace'), false);
-    assert.equal(disk.has('zx.op_queue'), false);
-    assert.equal(state.serverSeq, oldSeq);
-  });
+  };
+  vm.runInNewContext(source, { crypto, window, localStorage: window.localStorage, setTimeout, clearTimeout, fetch });
+  return { window, api: window.ZX.api };
 }
 
-test('API 从离线恢复后补传，收到确认后才清除待上行状态', async () => {
+test('离线恢复只发 health，旧队列与新业务均不产生远端 op', async () => {
+  const disk = new Map([
+    ['zx.op_queue', '[{"opId":"legacy","pending":true,"value":{"note":"private"}}]']
+  ]);
+  const original = disk.get('zx.op_queue');
+  const calls = [];
   let reachable = false;
-  const uploads = [];
-  const disk = new Map();
-  const window = { location: { protocol: 'http:', origin: 'http://localhost' }, localStorage: {
-    getItem: key => disk.get(key), setItem: (key, value) => disk.set(key, value)
-  } };
-  vm.runInNewContext(source, { crypto, window, setTimeout, clearTimeout, fetch: async (url, opts) => {
+  const { api } = installApi({ state: { serverSeq: 12 } }, disk, async url => {
+    calls.push(new URL(url).pathname);
     if (!reachable) throw new Error('offline');
-    let body = {};
-    if (url.endsWith('/api/auth/session')) body = { token: 'test-token' };
-    if (url.endsWith('/api/sync/ops')) {
-      const ids = JSON.parse(opts.body).ops.map(op => op.opId);
-      uploads.push(...ids);
-      body = { accepted: ids, serverSeq: 1 };
-    }
-    return { ok: true, json: async () => body };
-  } });
-  const api = window.ZX.api;
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+
   await assert.rejects(api.health(), /offline/);
-  api.queueOp({ opId: 'offline-1', entity: 'plan', field: 'moved' });
-  assert.equal(api.pendingCount(), 1);
+  assert.equal(api.queueOp({ opId: 'offline-business', entity: 'session', field: 'recorded' }), null);
+  assert.equal(api.pendingCount(), 0);
+  assert.equal(api.legacyPendingCount(), 1);
+
   reachable = true;
   await api.health();
-  await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(uploads, ['offline-1']);
+  assert.equal(api.queueOp({ opId: 'online-business', entity: 'plan', field: 'moved' }), null);
+  const isolated = await api.flushQueue();
+  await api.flushQueue();
+  await turn();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(isolated)), {
+    status: 'isolated', sent: 0, accepted: [], pending: 1, serverSeq: 12
+  });
+  assert.deepEqual(calls, ['/api/health', '/api/health']);
+  assert.equal(disk.get('zx.op_queue'), original);
   assert.equal(api.pendingCount(), 0);
+  assert.equal(api.legacyPendingCount(), 1);
+  assert.equal(disk.has('zx.syncTrace'), false);
 });
 
-for (const failed of [false, true]) {
-  test(failed ? '传输失败保留待上行且不记录错误正文' : '零确认保留待上行且不标记成功', async () => {
-    const disk = new Map();
-    const window = { ZX: { state: { currentPlanVersion: () => 'baseline' } },
-      location: { protocol: 'http:', origin: 'http://localhost' },
-      localStorage: { getItem: k => disk.get(k), setItem: (k,v) => disk.set(k,v) } };
-    vm.runInNewContext(utilSource, { crypto, window, localStorage: window.localStorage });
-    vm.runInNewContext(source, { crypto, window, localStorage: window.localStorage, setTimeout, clearTimeout, fetch: async url => {
-      if (url.endsWith('/api/auth/session')) return { ok:true, json:async()=>({token:'synthetic-token'}) };
-      assert.ok(url.endsWith('/api/sync/ops'));
-      if (failed) throw new Error('synthetic-error');
-      return {ok:true, json:async()=>({accepted:[]})};
-    } });
-    const api = window.ZX.api;
-    api.queueOp({opId:'synthetic-op', value:'synthetic-payload'});
-    assert.equal(disk.has('zx.syncTrace'), false);
-    if (failed) await assert.rejects(api.flushQueue(), /synthetic-error/);
-    else await api.flushQueue();
-    assert.equal(api.pendingCount(), 1);
-    const raw = disk.get('zx.syncTrace');
-    const [e] = JSON.parse(raw);
-    assert.equal(JSON.parse(raw).length, 1);
-    assert.deepEqual(e, { id:e.id, tool:'sync', at:e.at, planVersion:'baseline',
-      rulesVersion:'nova-sync-p0-1', status:failed ? 'failed' : 'unconfirmed', sent:1, accepted:0 });
-    assert.match(e.id, /^sync-[0-9a-f]{32}$/);
-    assert.ok(Number.isFinite(e.at));
-    assert.doesNotMatch(raw, /synthetic/);
-  });
-}
-
-test('部分上行确认只清除已确认项，重试仅发送剩余项', async () => {
-  const disk = new Map();
-  const batches = [];
-  const window = { ZX: {}, location: { protocol: 'http:', origin: 'http://localhost' }, localStorage: {
-    getItem: key => disk.get(key), setItem: (key, value) => disk.set(key, value)
-  } };
-  vm.runInNewContext(utilSource, { crypto, window, localStorage: window.localStorage });
-  vm.runInNewContext(source, { crypto, window, localStorage: window.localStorage, setTimeout, clearTimeout, fetch: async (url, opts) => {
-    if (url.endsWith('/api/auth/session')) return { ok: true, json: async () => ({ token: 'test-token' }) };
-    assert.ok(url.endsWith('/api/sync/ops'));
-    const ids = JSON.parse(opts.body).ops.map(op => op.opId);
-    batches.push(ids);
-    return { ok: true, json: async () => ({ accepted: ids.slice(0, 1), serverSeq: batches.length }) };
-  } });
-  const api = window.ZX.api;
-  api.queueOp({ opId: 'partial-1', entity:'session', entityId:'same-task', field:'recorded', value:{id:'s_demo_1', feel:'private-note'} });
-  api.queueOp({ opId: 'partial-2', entity:'session', entityId:'same-task', field:'recorded', value:{id:'s_demo_2'} });
-  await api.flushQueue();
-  assert.equal(api.pendingCount(), 1);
-  assert.deepEqual(Array.from(api.loadQueue().filter(op => op.pending), op => op.opId), ['partial-2']);
-  await api.flushQueue();
-  assert.deepEqual(batches, [['partial-1', 'partial-2'], ['partial-2']]);
-  const raw = disk.get('zx.syncTrace') || '[]';
-  assert.deepEqual(JSON.parse(raw).map(e => [e.status, e.sent, e.accepted]), [['partial', 2, 1], ['accepted', 1, 1]]);
-  assert.deepEqual(JSON.parse(raw).map(e => e.sessions), [
-    [{id:'s_demo_1',confirmed:true},{id:'s_demo_2',confirmed:false}],
-    [{id:'s_demo_2',confirmed:true}]
+test('清除数据后旧队列与待复核记录保持隔离，重复 flush 不发网络', async () => {
+  const oldQueue = '[{"opId":"legacy","pending":true}]';
+  const oldPendingPlan = '{"id":"legacy-plan","input":{},"result":{}}';
+  const disk = new Map([
+    ['zx.op_queue', oldQueue],
+    ['zx.pending_plan', oldPendingPlan],
+    ['zx.syncTrace', '[]']
   ]);
-  assert.doesNotMatch(raw, /test-token|partial-[12]|private-note|same-task/);
+  const calls = [];
+  const window = {
+    ZX: {},
+    Rhythm: { seed: require('../shared/data/seed.js') },
+    location: { protocol: 'http:', origin: 'http://localhost', reload() { throw new Error('unexpected reload'); } },
+    localStorage: {
+      getItem: key => disk.has(key) ? disk.get(key) : null,
+      setItem: (key, value) => disk.set(key, String(value)),
+      removeItem: key => disk.delete(key)
+    }
+  };
+  vm.runInNewContext(utilSource, { window, crypto, localStorage: window.localStorage });
+  vm.runInNewContext(stateSource, { window, crypto });
+  vm.runInNewContext(source, {
+    crypto, window, localStorage: window.localStorage, setTimeout, clearTimeout,
+    fetch: async url => { calls.push(String(url)); throw new Error('must not sync'); }
+  });
+  const api = window.ZX.api;
+  const oldSeq = window.ZX.state.serverSeq;
+  assert.equal((await api.flushQueue()).status, 'isolated');
+
+  let reload;
+  window.ZX.ui = { confirm: async () => true, toast() {} };
+  vm.runInNewContext(settingsSource, { window, setTimeout: fn => { reload = fn; } });
+  await window.ZX.settings.confirmWipe();
+
+  assert.equal(typeof reload, 'function');
+  assert.equal(disk.get('zx.op_queue'), oldQueue);
+  assert.equal(disk.get('zx.pending_plan'), oldPendingPlan);
+  assert.equal(disk.has('zx.syncTrace'), false);
+  assert.ok(JSON.parse(disk.get('zx.trash')).snapshot);
+  api.invalidatePendingSync();
+  assert.equal((await api.flushQueue()).status, 'isolated');
+  await turn();
+  assert.equal(calls.length, 0);
+  assert.equal(disk.get('zx.op_queue'), oldQueue);
+  assert.equal(disk.get('zx.pending_plan'), oldPendingPlan);
+  assert.equal(api.legacyPendingCount(), 1);
+  assert.equal(disk.has('zx.syncTrace'), false);
+  assert.equal(window.ZX.state.serverSeq, oldSeq);
+});
+
+test('服务端计算请求仍可正常调用，且不生成待同步操作', async () => {
+  const disk = new Map([
+    ['zx.auth_token', JSON.stringify({ token: 'stub-token' })],
+    ['zx.op_queue', '[{"opId":"legacy","pending":true}]']
+  ]);
+  const original = disk.get('zx.op_queue');
+  const calls = [];
+  const { api } = installApi({ state: { serverSeq: 3 } }, disk, async (url, opts) => {
+    calls.push({ path: new URL(url).pathname, opts });
+    return { ok: true, status: 200, json: async () => ({ blocks: [] }) };
+  });
+
+  const result = await api.schedule({ tasks: [], slots: [] });
+  assert.deepEqual(result, { blocks: [] });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].path, '/api/schedule');
+  assert.equal(calls[0].opts.headers.Authorization, 'Bearer stub-token');
+  assert.equal(api.queueOp({ opId: 'schedule-business' }), null);
+  assert.equal((await api.flushQueue()).status, 'isolated');
+  assert.equal(calls.length, 1);
+  assert.equal(disk.get('zx.op_queue'), original);
   assert.equal(api.pendingCount(), 0);
+  assert.equal(disk.has('zx.syncTrace'), false);
 });

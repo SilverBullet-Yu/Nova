@@ -1,0 +1,4 @@
+interface:
+  display_name: "Nova UI Optimization"
+  short_description: "Polish Nova's vanilla-JS DOM-first UI without changing business logic."
+  default_prompt: "Use $summer-checkin-ui-skill to audit the named Nova UI surface. Preserve classic scripts, file:// support, existing CSS tokens, DOM-first rendering, local gradients, accessibility, reduced-motion behavior, and optional GL fallback. Do not introduce React/Tailwind, remote photography, veils, fixed reveal deadlines, dependencies, or business-logic changes. Reproduce the issue, make the smallest visual fix, and run the relevant tests plus isolated Chromium acceptance."

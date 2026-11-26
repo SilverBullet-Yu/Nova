@@ -8,6 +8,20 @@ const vm = require('node:vm');
 
 const GL_DIR = path.resolve(__dirname, '../assets/js/gl');
 
+test('背景使用本地渐变且不加载远程图片', () => {
+  const html = fs.readFileSync(path.resolve(__dirname, '../index.html'), 'utf8');
+  const css = fs.readFileSync(path.resolve(__dirname, '../assets/css/app.css'), 'utf8');
+  assert.match(html, /Historical visual reference only \(not loaded\).*Defi22.*CC BY-SA 4\.0/);
+  assert.doesNotMatch(css, /Special:FilePath\/Rainy_Lights\.jpg/);
+  assert.match(css, /linear-gradient\(180deg,var\(--bg2\),var\(--bg\) 70%\)/);
+});
+
+test('CSS3DRenderer 产物保留 Three.js 作者与 MIT 署名', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../assets/vendor/three-css3d.js'), 'utf8');
+  assert.match(source, /^\/\* Three\.js Authors \/ CSS3DRenderer · MIT License · three@0\.152\.2 \*\//);
+  assert.doesNotMatch(source, /\b(?:import|export)\s/);
+});
+
 // Deliberately small DOM: only the operations used by these modules are supported.
 // Observers and RAF are delivered explicitly, without real timers or a browser.
 class EventTargetStub {
@@ -122,7 +136,7 @@ class Object3DStub {
   add(child) { this.children.push(child); }
 }
 
-function harness({ webgl = true, rendererThrows = false, cssThrows = false } = {}) {
+function harness({ webgl = true, rendererThrows = false, clearThrows = false, renderThrows = false, cssThrows = false, cssRenderThrows = false } = {}) {
   const window = new EventTargetStub();
   const document = new EventTargetStub();
   const ids = new Map();
@@ -133,6 +147,7 @@ function harness({ webgl = true, rendererThrows = false, cssThrows = false } = {
   const pathInputs = [];
   const parsedSvg = [];
   const renders = [];
+  const warnings = [];
   let picks = 0;
   document.documentElement = new ElementStub('html');
   document.body = new ElementStub('body');
@@ -193,9 +208,12 @@ function harness({ webgl = true, rendererThrows = false, cssThrows = false } = {
       setClearColor() {}
       setPixelRatio(value) { this.pixelRatio = value; }
       setSize(w, h) { this.size = [w, h]; }
-      clear() {}
+      clear() { if (clearThrows) throw new Error('clear failed'); }
       clearDepth() {}
-      render(scene, camera) { renders.push({ scene, camera }); }
+      render(scene, camera) {
+        if (renderThrows) throw new Error('render failed');
+        renders.push({ scene, camera });
+      }
     }
   };
   class MutationObserverStub {
@@ -227,10 +245,12 @@ function harness({ webgl = true, rendererThrows = false, cssThrows = false } = {
   }
   Object.assign(window, {
     window, document, THREE,
+    getComputedStyle: el => ({ display: el.style.display || 'block' }),
     ZX: {}, innerWidth: 1200, innerHeight: 800, devicePixelRatio: 3,
-    console: { warn() {} },
+    console: { warn(...args) { warnings.push(args); } },
     MutationObserver: MutationObserverStub, DOMParser: DOMParserStub, Path2D: Path2DStub,
     requestAnimationFrame: fn => { raf.push(fn); return raf.length; },
+    cancelAnimationFrame: id => { if (Number.isInteger(id) && id >= 1 && id <= raf.length) raf.splice(id - 1, 1); },
     setTimeout: fn => { timers.push(fn); return timers.length; },
     ZX_CSS3D: {
       CSS3DRenderer: class {
@@ -239,7 +259,7 @@ function harness({ webgl = true, rendererThrows = false, cssThrows = false } = {
           this.domElement = new ElementStub();
         }
         setSize() {}
-        render() {}
+        render() { if (cssRenderThrows) throw new Error('CSS render failed'); }
       },
       CSS3DObject: class extends Object3DStub {
         constructor(el) { super(); this.element = el; }
@@ -248,15 +268,15 @@ function harness({ webgl = true, rendererThrows = false, cssThrows = false } = {
   });
   const context = vm.createContext(window);
   return {
-    window, document, element, observers, raf, draw, pathInputs, parsedSvg, renders,
+    window, document, element, observers, raf, draw, pathInputs, parsedSvg, renders, warnings,
     get picks() { return picks; },
     load(name) { vm.runInContext(fs.readFileSync(path.join(GL_DIR, name), 'utf8'), context, { filename: name }); },
     frame(now) { assert.ok(raf.length, 'a frame must be scheduled'); raf.shift()(now); },
     flushTimers() { while (timers.length) timers.shift()(); },
-    notify(target) {
+    notify(target, records = []) {
       const matching = observers.filter(observer => observer.target === target);
       assert.ok(matching.length, 'target must have a registered observer');
-      matching.forEach(observer => observer.callback([]));
+      matching.forEach(observer => observer.callback(records));
     }
   };
 }
@@ -308,6 +328,53 @@ test('engine reads live html motion setting; off freezes time and clears pulse',
   h.frame(1160);
   assert.ok(api.time() > frozen);
   assert.ok(uniforms.uPulse.value > 0);
+});
+
+test('隐藏的 GL 舞台不拾取，显示时恢复拾取', () => {
+  const h = harness();
+  h.load('engine.js');
+  assert.equal(h.window.ZX_GL.init(), true);
+  const canvas = h.document.getElementById('gl');
+  canvas.style.display = 'none';
+  h.window.dispatch('click', { clientX: 10, clientY: 20, target: new ElementStub(), preventDefault() {} });
+  h.window.dispatch('pointermove', { clientX: 10, clientY: 20, target: new ElementStub() });
+  assert.equal(h.picks, 0, '隐藏舞台不得拾取');
+  canvas.style.display = 'block';
+  h.window.dispatch('click', { clientX: 10, clientY: 20, target: new ElementStub(), preventDefault() {} });
+  assert.equal(h.picks, 1, '显示舞台应恢复拾取');
+});
+
+test('隐藏舞台停止 rAF 自调度，重新显示后恢复且不产生重复循环', () => {
+  const h = harness();
+  h.load('engine.js');
+  const canvas = h.document.getElementById('gl');
+  canvas.style.display = 'none';
+  assert.equal(h.window.ZX_GL.init(), false);
+  assert.equal(h.raf.length, 0);
+  canvas.style.display = 'block';
+  h.notify(h.document.documentElement);
+  assert.equal(h.raf.length, 1);
+  h.frame(1000);
+  assert.equal(h.raf.length, 1);
+  canvas.style.display = 'none';
+  h.notify(h.document.documentElement);
+  assert.equal(h.raf.length, 0);
+});
+
+test('快速隐藏再显示会取消旧 rAF，不留下重复循环', () => {
+  const h = harness();
+  h.load('engine.js');
+  const canvas = h.document.getElementById('gl');
+  assert.equal(h.window.ZX_GL.init(), true);
+  assert.equal(h.raf.length, 1);
+  canvas.style.display = 'none';
+  h.notify(h.document.documentElement);
+  assert.equal(h.raf.length, 0);
+  canvas.style.display = 'block';
+  h.notify(h.document.documentElement);
+  assert.equal(h.raf.length, 1);
+  h.frame(1000);
+  assert.equal(h.raf.length, 1);
 });
 
 test('engine resizes mounted modules and background before first rendered frame', () => {
@@ -362,6 +429,31 @@ for (const [label, options] of [
   });
 }
 
+for (const [label, options] of [
+  ['clear', { clearThrows: true }],
+  ['render', { renderThrows: true }]
+]) {
+  test(`WebGL renderer ${label} failure falls back to DOM without residual RAF`, () => {
+    const h = harness(options);
+    h.load('engine.js');
+    assert.equal(h.window.ZX_GL.init(), true);
+    const root = h.document.documentElement;
+    assert.equal(root.classList.contains('gl-on'), true);
+    assert.equal(h.raf.length, 1);
+    assert.doesNotThrow(() => h.frame(1000));
+    assert.equal(h.warnings.length, 1);
+    assert.match(h.warnings[0][0], /WebGL 渲染异常/);
+    assert.equal(root.dataset.gl3d, 'off');
+    assert.equal(root.classList.contains('gl-on'), false);
+    assert.equal(root.classList.contains('gl-off'), true);
+    assert.equal(h.raf.length, 0, 'render failure must not schedule another frame');
+    assert.doesNotThrow(() => h.notify(root), 'fallback mutations must not restart the loop');
+    assert.doesNotThrow(() => dispatchFallbackEvents(h));
+    assert.equal(h.picks, 0, 'DOM fallback must disable GL picking');
+    assert.equal(h.raf.length, 0);
+  });
+}
+
 test('nav draws SVG child path/rect/circle and settles on first motion-off frame', () => {
   const h = harness();
   const pathData = 'M2 3h12v10H2z';
@@ -389,9 +481,10 @@ test('nav draws SVG child path/rect/circle and settles on first motion-off frame
   assert.equal(card.scale.x, 1.05);
 });
 
-function stageHarness(initialTab = 'chat') {
+function stageHarness(initialTab = 'chat', visible = true) {
   const h = harness();
   h.document.documentElement.dataset.tab = initialTab;
+  if (!visible) h.document.getElementById('gl').style.display = 'none';
   const chat = h.element('chat');
   const message = h.element('message', chat, 'bubble');
   const text = h.element('message-text', message);
@@ -453,6 +546,18 @@ test('stage only syncs current tab, marks inactive pages, and switches without m
   assert.equal(inner('data').children.length, 0);
 });
 
+test('隐藏舞台不克隆 DOM，显示后 refresh 补齐当前页', () => {
+  const { h, chat, stream, pages } = stageHarness('chat', false);
+  assert.equal(stream.children.length, 0);
+  assert.equal(pages.today.querySelector('.gl-page-inner').children.length, 0);
+  h.notify(chat);
+  assert.equal(stream.children.length, 0);
+  h.document.getElementById('gl').style.display = 'block';
+  h.window.ZX_GL_STAGE.refresh();
+  assert.equal(stream.children.length, 1);
+  assertActivePage(pages, 'chat');
+});
+
 test('stage preserves unchanged bubbles, replaces changed descendants, and tracks append/remove', () => {
   const { h, api, chat, text, stream, pages } = stageHarness();
   assertActivePage(pages, 'chat');
@@ -466,7 +571,7 @@ test('stage preserves unchanged bubbles, replaces changed descendants, and track
   api.onResize.forEach(fn => fn(800, 600));
   assert.equal(stream.children[0], first, 'gl-in/id cleanup must not cause unchanged source to re-clone');
   text.textContent = 'streamed update';
-  h.notify(chat);
+  h.notify(chat, [{ type: 'characterData', target: text }]);
   const updated = stream.children[0];
   assert.notEqual(updated, first);
   assert.equal(updated.children[0].textContent, 'streamed update');
@@ -485,4 +590,49 @@ test('stage preserves unchanged bubbles, replaces changed descendants, and track
   assert.equal(stream.children.length, 1);
   assert.equal(secondClone.parentNode, null);
   assert.equal(stream.children[0], updated);
+});
+
+test('CSS3D 渲染异常、上下文丢失和后台初始化均安全降级且不重复初始化', () => {
+  const css = harness({ cssRenderThrows: true });
+  css.load('engine.js');
+  assert.equal(css.window.ZX_GL.init(), true);
+  css.frame(1000);
+  assert.equal(css.document.documentElement.dataset.gl3d, 'off');
+  assert.equal(css.raf.length, 0);
+
+  const lost = harness();
+  lost.load('engine.js');
+  assert.equal(lost.window.ZX_GL.init(), true);
+  const observerCount = lost.observers.length;
+  assert.equal(lost.window.ZX_GL.init(), true);
+  assert.equal(lost.observers.length, observerCount);
+  lost.document.getElementById('gl').dispatch('webglcontextlost', { preventDefault() {} });
+  assert.equal(lost.document.documentElement.dataset.gl3d, 'off');
+  assert.equal(lost.raf.length, 0);
+
+  const background = harness();
+  background.document.hidden = true;
+  background.load('engine.js');
+  assert.equal(background.window.ZX_GL.init(), false);
+  assert.equal(background.raf.length, 0);
+  background.document.hidden = false;
+  background.document.dispatch('visibilitychange');
+  assert.equal(background.raf.length, 1);
+});
+
+test('对话滚回底部后新消息继续贴底', () => {
+  const { h, api, chat, stream } = stageHarness('chat');
+  stream.scrollHeight = 1000;
+  h.notify(chat);
+  h.window.dispatch('wheel', { target: stream, deltaY: 100, preventDefault() {} });
+  api.onFrame.forEach(fn => fn(1));
+  assert.notEqual(stream.style.transform, 'translateY(0px)');
+  h.window.dispatch('wheel', { target: stream, deltaY: -100, preventDefault() {} });
+  api.onFrame.forEach(fn => fn(1));
+  assert.equal(stream.style.transform, 'translateY(0px)');
+  const reply = h.element('reply', chat, 'bubble');
+  reply.textContent = 'new reply';
+  h.notify(chat);
+  api.onFrame.forEach(fn => fn(1));
+  assert.equal(stream.style.transform, 'translateY(0px)');
 });

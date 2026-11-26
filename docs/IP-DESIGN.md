@@ -9,8 +9,8 @@
 ### 1.1 名称与身份锚点
 
 - 产品名与助理同名：`诺瓦 Nova`。页面标题为「诺瓦 Nova · 大学生日常助理」，顶栏品牌区为「Nova诺瓦 / 大学生日常助理」（`index.html`）。
-- 助理侧消息署名固定为「诺瓦」，用户侧署名为「你」（`assets/js/assistant.js`）。助理消息右下角有朱砂「诺」印落款 `.seal-no`（14×14，`--cinnabar` 底 + `--ac-ink` 字）。
-- 身份锚点是消息右下角的朱砂落款印 `.seal-no`（CSS 绘制，与形象同源）；立绘（`assets/img/mascot-v4*.svg`）**不刻字、不带印章**——小字号在形象缩放尺寸下不可读，机身保持素净。
+- 助理侧消息署名固定为「诺瓦」，用户侧署名为「你」（`assets/js/assistant.js`）。助理消息右下角有蜜桃「诺」印落款 `.seal-no`（15×15，`--peach-dk` 底 + `--ac-ink` 字）。
+- 身份锚点是消息右下角的蜜桃落款印 `.seal-no`（CSS 绘制，与形象同源）；立绘（`assets/img/mascot-v4*.svg`）**不刻字、不带印章**——小字号在形象缩放尺寸下不可读，机身保持素净。
 
 ### 1.2 性格定位（对应可验证的产品行为）
 
@@ -75,25 +75,26 @@
 
 ### 3.1 产品主题色（`assets/css/app.css` 的 `:root`）
 
+现行视觉语言为 Claymorphism（黏土，2026-11-22 选定），以 `docs/FRONTEND-CONTRACT.md` §5 与 `assets/css/app.css` 的有效 token 为准；旧奶油纸 / 天空蓝配色已不再是规范。下表取自 `app.css` 的首个 `:root` 块（`data-*` 深色档为断点覆盖，不改基础规范）。
+
 | 角色 | token | 值 |
 |---|---|---|
-| 页面底 / 卡片面 / 次级面 | `--bg` / `--panel` / `--panel2` | `#FBF7EF` / `#FFFFFF` / `#F7F4EC` |
-| 分隔线 / 正文 | `--line` `--line2` / `--txt` | `#141922` / `#141922` |
-| 次级 / 元信息 | `--txt2` / `--txt3` | `#495261` / `#6C7684` |
-| 活性色（主色）/ 半透 / 浅底 | `--ac` / `--ac2` / `--acbg` | `#3161C1` / `rgba(49,97,193,.5)` / `rgba(49,97,193,.08)` |
-| 墨蓝底反白字 | `--ac-ink` | `#FFFFFF` |
-| 樱花粉（仅装饰） | `--pink` | `#F48FB1` |
-| 荧光笔底（不承载语义） | `--hlbg` | `#FFF6C9` |
-| 朱砂（仅「正在进行」与「顺延代价」） | `--cinnabar` | `#A03B2C` |
-| 警示 / 危险 / 正常 | `--warn` / `--bad` / `--ok` | `#8A5A1E` / `#A03B2C` / `#2E6A4E` |
+| 页面底 / 卡片面 / 次级面 | `--bg` / `--panel` / `--panel2` | `#EFE9F7` / `#FFFFFF` / `#F7F4FC` |
+| 分隔线 | `--line` / `--line2` | `rgba(143,130,217,.20)` / `rgba(143,130,217,.30)` |
+| 正文 / 次级 / 元信息 | `--txt` / `--txt2` / `--txt3` | `#4A4463` / `#655E86` / `#736D92` |
+| 活性色（主色）/ 半透 / 浅底 | `--ac` / `--ac2` / `--acbg` | `#178265` / `rgba(23,130,101,.5)` / `rgba(59,175,142,.10)` |
+| 活性色按钮上的字色 | `--ac-ink` | `#0a1a10` |
+| 蜜桃（承接旧 `--pink` / `--cinnabar` 两名） | `--pink` / `--cinnabar` | `#E8955B` / `#E8955B` |
+| 荧光笔底（不承载语义） | `--hlbg` | `#EFE7FF` |
+| 警示 / 危险 / 正常 | `--warn` / `--bad` / `--ok` | `#A9713A` / `#C25B4E` / `#1E8F6C` |
 
-衍生层（`--ac-a02`…`--ac-a72`、`--warn-a*`、`--bad-a*`、`--ok-a*`）由 `color-mix()` 从基础色派生，换肤只改 `:root` 基础值。
+衍生层（`--ac-a08`…`--ac-a45`、`--warn-a*`、`--bad-a*`、`--ok-a*`）由 `color-mix()` 从基础色派生，换肤只改 `:root` 基础值。
 
 **主题色与形象用色不是同一套值**，分三种关系：
 
-- 同源同值：`--bg #FBF7EF` = `favicon-v4.svg` 底色 = `index.html` 的 `<meta name="theme-color">`；`--cinnabar #A03B2C` = 消息落款印 = 专注态的朱砂描边与进度环。
-- 同色系不同值：形象主色 `#4C7FD0`（面罩描边 / 竖条眼 / 耳根透镜）与 UI 活性色 `--ac #3161C1` 同属冷蓝但不同值；改 UI 主色不必改形象，形象也不引用 `--ac`。
-- 形象侧独立档：提醒态耳的 `#274B94` 是深墨蓝深化档，既不等于 `--warn #8A5A1E`，也不等于形象主色 `#4C7FD0`。
+- 形象主色 `#4C7FD0`（面罩描边 / 竖条眼 / 耳根透镜）属冷蓝，与 UI 活性色 `--ac #178265`（深薄荷）既不同值也不同色系，互不引用；改 UI 主色不必改形象。
+- 消息落款印已由朱砂改为蜜桃：`--peach-dk #E8955B` 底 + `--ac-ink` 字；专注态的耳、面罩描边与进度环仍用形象侧朱砂 `#A03B2C`，两套色板互不影响。
+- `favicon-v4.svg` 底色 `#FBF7EF` 是图标专用纸底；`index.html` 的 `<meta name="theme-color" content="#07130D">` 对应 `app.css` 深色档的 `--bg`，二者与浅色档 `--bg #EFE9F7` 均不同值，不构成同源同值关系。
 
 ### 3.2 墨蓝涂装（产品内使用）
 
@@ -146,7 +147,7 @@
 
 ### 5.1 生成与来源
 
-- 全部 14 个 SVG 由 `node scripts/build-mascot-v4.js` 生成到 `assets/img/`（脚本零依赖，只写该目录，不读其它目录）。该命令不在 `package.json` 的 scripts 里，需直接用 node 执行；重新生成的结果与仓库内文件逐字节一致。
+- 全部 15 个 SVG（10 个 `mascot-v4*.svg` + 4 个 `avatar-v4*.svg` + `favicon-v4.svg`）由 `node scripts/build-mascot-v4.js` 生成到 `assets/img/`；同一脚本还生成 `assets/js/mascot-inline.js`。脚本零依赖，只写这两个产物位置，不读其它目录。该命令不在 `package.json` 的 scripts 里，需直接用 node 执行；重新生成的结果与仓库内文件逐字节一致。
 - 同一脚本另生成 `assets/js/mascot-inline.js`：待机 / 聆听 / 离线三枚头像（`avatar-v4.svg`、`avatar-v4-listen.svg`、`avatar-v4-offline.svg`）的 base64 data URI 内联副本，导出 `window.ZX_MASCOT.idleAvatar` / `listenAvatar` / `offlineAvatar`。静态资源以 `Cache-Control: no-cache` 提供，后端不可达时无法加载，而离线指示与聆听切换恰好在这种时刻发生，故用不依赖网络的内联副本。该文件同属产物，禁止手改。
 - 素材只走本地相对路径，不加载第三方资源。
 
@@ -155,17 +156,16 @@
 | 位置 | 引用方式 | 尺寸 |
 |---|---|---|
 | 标签页 / 桌面图标 | `index.html`：`<link rel="icon" href="assets/img/favicon-v4.svg" type="image/svg+xml" />` | 16×16，底色 `#FBF7EF` |
-| 顶栏品牌标记 `.seal` | `index.html`：`<img src="assets/img/avatar-v4.svg" width="26" height="26" alt="" />` | 26×26 |
-| 顶栏对话入口 `.cp-open` | `index.html`：`<img src="assets/img/avatar-v4.svg" width="22" height="22" alt="" />` | 22×22 |
+| 顶栏品牌标记 `.seal` | `index.html`：`<div class="seal" aria-hidden="true"></div>`；`app.css` 以 `assets/img/avatar-v4-sprite.svg` 作 `background` 逐帧动画 | 26×26，8 帧 |
 | 顶栏离线指示 | `assets/js/main.js` `updateSync()`：`<img class="sync-offline" …>`，`src` 取 `window.ZX_MASCOT.offlineAvatar`，回退 `assets/img/avatar-v4-offline.svg` | 24×24 |
 | 输入台聆听指示 | `index.html`：`<img class="cp-listen" id="cpListen" src="assets/img/avatar-v4.svg" …>`；`assets/js/main.js` `updateListen()` 按「焦点在输入框且有非空文本」在 `window.ZX_MASCOT.listenAvatar` / `idleAvatar` 间切换 | 24×24 |
 | 对话欢迎语首屏 | `assets/js/main.js` `greetingHtml()`：`<img class="msg-mascot" src="assets/img/mascot-v4.svg" width="132" height="116" alt="诺瓦" />` | 132×116 |
 
-`favicon-v4.svg` 的底色与 `<meta name="theme-color" content="#FBF7EF">` 同值，与 `--bg` 一致。
+`favicon-v4.svg` 底色为 `#FBF7EF`；`<meta name="theme-color" content="#07130D">` 取 `app.css` 深色档 `--bg`，与浅色档 `--bg #EFE9F7` 不同值，详见 §3.1。
 
 ### 5.3 状态图的使用位置
 
-见 §4 表。对应样式类在 `assets/css/app.css`：`.msg-mascot`（132×116）、`.msg-state` / `.msg-state.state-calc`（32×28 / 24×21）、`.tk-mascot`（24×30）、`.sb-mascot`（32×28）、`.warn-flag`（22×19）、`.sync-offline`（24×24，顶栏离线头像）、`.sync-pending`（待上行数字角标）、`.cp-listen` / `.cp-listen.listening`（24×24，输入台聆听头像与聆听态呼吸）。助理消息落款印由 `.seal-no` 渲染（`--cinnabar` 底 + `--ac-ink` 字），不占用独立素材。
+见 §4 表。对应样式类在 `assets/css/app.css`：`.msg-mascot`（132×116）、`.msg-state` / `.msg-state.state-calc`（32×28 / 24×21）、`.tk-mascot`（24×30）、`.sb-mascot`（32×28）、`.warn-flag`（22×19）、`.sync-offline`（24×24，顶栏离线头像）、`.sync-pending`（保留兼容类，本地模式不再显示待上行角标）、`.cp-listen` / `.cp-listen.listening`（24×24，输入台聆听头像与聆听态呼吸）。助理消息落款印由 `.seal-no` 渲染（`--peach-dk` 底 + `--ac-ink` 字），不占用独立素材。
 
 ### 5.4 动效归属
 
@@ -185,12 +185,12 @@ SVG 内不含任何动画（经 `<img>` 引用也读不到页面上的 `data-mot
 
 | 目标 | 命令 | 判定标准 |
 |---|---|---|
-| 素材、内联副本与门禁 | `node scripts/build-mascot-v4.js` 后比对；`npm test`（`test/mascot.test.js`） | `assets/img/` 下 14 个文件与重新生成的结果逐字节一致；`assets/js/mascot-inline.js` 的三枚 data URI 解码后分别与 `avatar-v4.svg`、`avatar-v4-listen.svg`、`avatar-v4-offline.svg` 逐字节一致；生成器幂等（重跑无差异，不一致则测试失败并自动还原工作区） |
-| 状态素材齐全 | 列出 `assets/img/` | 10 个 `mascot-v4*.svg` + 3 个 `avatar-v4*.svg` + `favicon-v4.svg`，共 14 个 |
+| 素材、内联副本与门禁 | `node scripts/build-mascot-v4.js` 后比对；`npm test`（`test/mascot.test.js`） | `assets/img/` 下 15 个文件与重新生成的结果逐字节一致；`assets/js/mascot-inline.js` 的三枚 data URI 解码后分别与 `avatar-v4.svg`、`avatar-v4-listen.svg`、`avatar-v4-offline.svg` 逐字节一致；生成器幂等（重跑无差异；测试在临时目录重建，失败不写工作区，也不存在自动还原工作区） |
+| 状态素材齐全 | 列出 `assets/img/` | 10 个 `mascot-v4*.svg` + 4 个 `avatar-v4*.svg`（含 `avatar-v4-sprite.svg`）+ `favicon-v4.svg`，共 15 个 |
 | 画布尺寸正确 | 读 SVG 根元素 | 主立绘 240×210、头像 96×96、图标 16×16，`viewBox` 与宽高一致 |
 | 状态映射与素材一致 | 在 `assets/js/` 与 `index.html` 中检索 `assets/img/` 引用 | 每个被引用的文件名都在 `assets/img/` 中存在；§4 表中 9 行与实际文件逐字一致；接入状态以 §4 表末列为准 |
-| 主题色一致 | 读 `assets/css/app.css` 的 `:root` | `--bg #FBF7EF`、`--ac #3161C1`、`--cinnabar #A03B2C`、`--warn #8A5A1E` 等与 §3.1 表一致 |
+| 主题色一致 | 读 `assets/css/app.css` 的 `:root` | `--bg #EFE9F7`、`--ac #178265`、`--pink` / `--cinnabar #E8955B`、`--warn #A9713A` 等与 §3.1 表一致 |
 | 接入无报错 | `npm start` 后打开首页 | 控制台无错误；首屏出现 `mascot-v4.svg`，顶栏出现 `avatar-v4.svg`，标签页出现 `favicon-v4.svg` |
-| 离线与聆听形象 | 停服后刷新首页；在输入框输入文字，随后发送 | 顶栏出现 `.sync-offline` 离线头像且不破图（`alt` / `title` 为「离线 · 本地计算」或「离线 · 待上行 N」）；输入台头像换为聆听形象（`alt` 为「诺瓦正在聆听」），发送后回待机 |
+| 离线与聆听形象 | 停服后刷新首页；在输入框输入文字，随后发送 | 顶栏出现 `.sync-offline` 离线头像且不破图（`alt` / `title` 为「离线 · 本地可用」，有旧队列时追加「旧队列已隔离 N」）；输入台头像换为聆听形象（`alt` 为「诺瓦正在聆听」），发送后回待机 |
 | 内联副本一致 | `node scripts/build-mascot-v4.js` 后比对 | `assets/js/mascot-inline.js` 的三枚 data URI 解码后分别与 `assets/img/avatar-v4.svg`、`avatar-v4-listen.svg`、`avatar-v4-offline.svg` 逐字节一致 |
 | 回归 | `npm test` | 引擎单测与 HTTP 冒烟全绿 |

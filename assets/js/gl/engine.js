@@ -9,7 +9,7 @@
 
    关键约定：透视相机对焦 z=0 平面时 1 世界单位 = 1 CSS 像素，
    WebGL 物体与 CSS3D 元素共用同一套尺寸语言。
-   降级：WebGL 不可用或初始化异常 → html[data-3d="off"]，DOM 原样接管（零损失）。
+   降级：WebGL 不可用、初始化或渲染异常 → html[data-gl3d="off"]，DOM 原样接管（零损失）。
    经典 script，挂载 window.ZX_GL。业务层（state/api/engine/flows）零依赖本文件。
    ========================================================= */
 window.ZX = window.ZX || {};
@@ -30,6 +30,10 @@ window.ZX = window.ZX || {};
   var ray = null, pointer = { x: 0, y: 0 }, pickables = [];
   var frameHooks = [];          /* 每帧回调（nav/mascot/stage 各自注册） */
   var running = false;
+  var initialized = false;
+  var initializing = false;
+  var failed = false;
+  var rafId = null;
   var pulse = { v: 0, decay: 2.2 };
 
   /* ---------- 尺寸：相机对焦 z=0 → 1 unit = 1px ---------- */
@@ -47,24 +51,60 @@ window.ZX = window.ZX || {};
     if (ZX_GL.api.onResize) ZX_GL.api.onResize.forEach(function (fn) { try { fn(W, H); } catch (e) { } });
     /* 视口变化可能伴随 hidden→visible 抖动（旋转/分屏），恢复渲染循环，
        否则 CSS3D 矩阵停在上一次 compose（实测：主格停在被顶出视口的旧位） */
-    if (root.classList.contains('gl-on')) resume();
+    syncStage();
   }
 
   /* ---------- 渲染循环 ---------- */
+  function stageAvailable() {
+    var canvas = document.getElementById('gl');
+    var css = document.getElementById('css3d');
+    return !document.hidden && root.dataset.gl3d !== 'off' && !!canvas && !!css &&
+      getComputedStyle(canvas).display !== 'none' && getComputedStyle(css).display !== 'none';
+  }
+  function stageVisible() {
+    return stageAvailable() && root.classList.contains('gl-on');
+  }
+  function pause() {
+    running = false;
+    clock.last = 0;
+    if (rafId !== null) cancelAnimationFrame(rafId);
+    rafId = null;
+  }
+  function syncStage() {
+    if (failed || root.dataset.gl3d === 'off') { pause(); return; }
+    if (!initialized) {
+      if (!initializing && stageAvailable()) init();
+      return;
+    }
+    if (!stageVisible()) { pause(); return; }
+    resume();
+    if (window.ZX_GL_STAGE && window.ZX_GL_STAGE.refresh) window.ZX_GL_STAGE.refresh();
+  }
+  function handleResize() {
+    if (initialized) resize();
+    else syncStage();
+  }
+  window.addEventListener('resize', handleResize);
+
+  function fallback(message, error) {
+    if (window.console && console.warn) console.warn(message, error);
+    failed = true;
+    initialized = false;
+    pause();
+    window.removeEventListener('resize', handleResize);
+    root.dataset.gl3d = 'off';
+    root.classList.remove('gl-on');
+    root.classList.add('gl-off');
+  }
   function frame(now) {
+    rafId = null;
     if (!running) return;
+    if (document.hidden || !stageVisible()) { pause(); return; }
     if (!clock.last) clock.last = now;
     var dt = Math.min(0.05, (now - clock.last) / 1000);
     clock.last = now;
     if (api.motion()) clock.t += dt;
 
-    renderer.autoClear = false;
-    /* 帧循环永不自杀：RAF 在后台标签页自动节流，保活代价可忽略；
-       hidden 时跳过渲染。此前 hidden 一帧即停循环，回到前台若
-       visibilitychange 事件丢失，CSS3D 矩阵就永远停在上一次 compose
-       （实测：旋转/缩放视口后主格停在屏外旧位，页签整行消失） */
-    requestAnimationFrame(frame);
-    if (document.hidden) return;
     pulse.v = api.motion() ? Math.max(0, pulse.v - dt * pulse.decay) : 0;
     var bgU = window.ZX_GL_BG && window.ZX_GL_BG.uniforms ? window.ZX_GL_BG.uniforms() : null;
     if (bgU) { bgU.uTime.value = clock.t; bgU.uPulse.value = pulse.v; }
@@ -73,21 +113,30 @@ window.ZX = window.ZX || {};
       try { frameHooks[i](dt, clock.t); } catch (e) { /* 单个钩子异常不拖垮循环 */ }
     }
 
-    renderer.clear();
-    renderer.render(bgScene, bgCam);        /* 纸面 */
-    renderer.clearDepth();
-    renderer.render(glScene, camera);       /* 3D 物体 */
     try {
-      cssRenderer.render(cssScene, camera); /* DOM 内容层 */
+      renderer.clear();
+      renderer.render(bgScene, bgCam);
+      renderer.clearDepth();
+      renderer.render(glScene, camera);
     } catch (e) {
-      /* CSS3D 单帧异常不拖垮循环；一次性报警便于定位 */
-      if (!frame._cssErr) { frame._cssErr = true; if (window.console && console.warn) console.warn('[zx] CSS3D 渲染异常：', e); }
+      fallback('[zx] WebGL 渲染异常，回退 DOM 模式：', e);
+      return;
     }
+    try {
+      cssRenderer.render(cssScene, camera);
+    } catch (e) {
+      fallback('[zx] CSS3D 渲染异常，回退 DOM 模式：', e);
+      return;
+    }
+    rafId = requestAnimationFrame(frame);
   }
-  function resume() { if (!running) { running = true; clock.last = 0; requestAnimationFrame(frame); } }
-  document.addEventListener('visibilitychange', function () {
-    if (!document.hidden && root.classList.contains('gl-on')) resume();
-  });
+  function resume() {
+    if (!running && stageVisible()) { running = true; clock.last = 0; rafId = requestAnimationFrame(frame); }
+  }
+  document.addEventListener('visibilitychange', syncStage);
+  if (typeof MutationObserver === 'function') {
+    new MutationObserver(syncStage).observe(root, { attributes: true, attributeFilter: ['class', 'data-tab', 'data-gl3d', 'style'] });
+  }
 
   /* ---------- 指针与拾取 ---------- */
   function pick(e) {
@@ -104,13 +153,13 @@ window.ZX = window.ZX || {};
   }
   var hovered = null;
   window.addEventListener('pointermove', function (e) {
-    if (!root.classList.contains('gl-on') || !ray) return;
+    if (!root.classList.contains('gl-on') || !ray || getComputedStyle(document.getElementById('gl')).display === 'none') return;
     if (uiHit(e)) { setHover(null); return; }
     setHover(pick(e));
     if (ZX_GL.api.onPointer) ZX_GL.api.onPointer.forEach(function (fn) { fn(e.clientX, e.clientY); });
   }, { passive: true });
   window.addEventListener('click', function (e) {
-    if (!root.classList.contains('gl-on') || !ray) return;
+    if (!root.classList.contains('gl-on') || !ray || getComputedStyle(document.getElementById('gl')).display === 'none') return;
     if (uiHit(e)) return;
     var o = pick(e);
     if (o && o.userData.onClick) { e.preventDefault(); o.userData.onClick(o.userData.arg); }
@@ -142,12 +191,19 @@ window.ZX = window.ZX || {};
 
   /* ---------- 初始化（失败即整体降级，不接管 DOM） ---------- */
   function init() {
+    if (initialized || initializing) return initialized;
+    if (failed || !stageAvailable()) return false;
+    initializing = true;
     try {
       var canvas = document.getElementById('gl');
       var probe = canvas.getContext('webgl2') || canvas.getContext('webgl');
       if (!probe) throw new Error('WebGL unavailable');
 
       renderer = new T.WebGLRenderer({ canvas: canvas, alpha: true, antialias: true });
+      canvas.addEventListener('webglcontextlost', function (e) {
+        e.preventDefault();
+        fallback('[zx] WebGL 上下文丢失，回退 DOM 模式：', e);
+      });
       renderer.setClearColor(0x000000, 0);
       cssRenderer = new window.ZX_CSS3D.CSS3DRenderer();
       var cssRoot = document.getElementById('css3d');
@@ -171,7 +227,6 @@ window.ZX = window.ZX || {};
       glScene.add(new T.AmbientLight(0x8FA0B8, 0.6));
 
       resize();
-      window.addEventListener('resize', resize);
 
       /* 模块挂载：各自向 engine 注册场景物体与帧钩子（挂载失败仅缺该模块，不整体降级） */
       var mods = [ZX_GL_BG, ZX_GL_NAV, ZX_GL_MASCOT, ZX_GL_STAGE];
@@ -181,16 +236,14 @@ window.ZX = window.ZX || {};
 
       root.classList.add('gl-on');
       root.classList.remove('gl-off');
+      initialized = true;
+      initializing = false;
       resize();
       resume();
       return true;
     } catch (e) {
-      if (window.console && console.warn) console.warn('[zx] WebGL 舞台初始化失败，回退 DOM 模式：', e);
-      running = false;
-      window.removeEventListener('resize', resize);
-      root.dataset.gl3d = 'off';
-      root.classList.remove('gl-on');
-      root.classList.add('gl-off');
+      initializing = false;
+      fallback('[zx] WebGL 舞台初始化失败，回退 DOM 模式：', e);
       return false;
     }
   }

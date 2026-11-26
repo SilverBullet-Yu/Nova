@@ -18,7 +18,7 @@ window.ZX = window.ZX || {};
           '<h1>未设定阶段目标</h1>' +
           '<p>尚无可评估的目标，暂不计算可行性 R。已有计划与执行记录仍保留。</p>' +
           '<div class="sa-goal-act"><button type="button" class="btn sa-goal-new" data-goal-new>新建目标</button></div>' +
-        '</div></div>' + boardHtml() +
+        '</div></div>' + boardHtml() + deferredBlock() +
         '<div class="sec-h"><span class="t">已有日程负载</span><span class="rule"></span></div>' +
         weekChart() + '</div>';
     }
@@ -32,7 +32,7 @@ window.ZX = window.ZX || {};
           '<button type="button" class="btn sc2-replan" data-replan-run>重新安排</button>' +
           '</div>' +
       '</div><div class="vstats">' +
-        '<div class="vs"><span>剩余</span><b>' + S.goal.weeks + ' 周</b></div>' +
+        '<div class="vs"><span>剩余</span><b>' + U.esc(S.goal.weeks) + ' 周</b></div>' +
         '<div class="vs"><span>阶段</span><b>基础期</b></div>' +
       '</div></div>' +
 
@@ -58,7 +58,7 @@ window.ZX = window.ZX || {};
         '</div>' +
       '</div>' +
 
-      boardHtml() +
+      boardHtml() + deferredBlock() +
       '<div class="sec-h"><span class="n">02</span><span class="t">未来 7 天负载</span>' +
         (loadWarnFlag() ? '<img class="warn-flag" src="assets/img/mascot-v4-warn.svg" width="22" height="19" alt="负载预警：增幅已达防雪崩阈值" />' : '') +
         '<span class="rule"></span>' +
@@ -111,8 +111,9 @@ window.ZX = window.ZX || {};
     var S = ZX.state;
     if (!S.replanned) return '未重排 · 基线';
     var rec = S.replanRecord;
-    if (!rec || typeof rec.loadDelta !== 'number') return '已重排';
-    return '已重排 · 增幅 +' + U.pct(rec.loadDelta);
+    if (!rec || rec.loadDelta === null) return '已重排 · 零基线，增幅不适用';
+    if (typeof rec.loadDelta !== 'number') return '已重排';
+    return '已重排 · 增幅 ' + (rec.loadDelta >= 0 ? '+' : '') + U.pct(rec.loadDelta);
   }
 
   /* 周图数据源：
@@ -130,6 +131,10 @@ window.ZX = window.ZX || {};
 
   function baseWeekData() {
     var S = ZX.state;
+    if (S.placementModel) return S.week.map(function (d) {
+      return { d: d.d, date: d.date, segs: d.segs, buf: d.buf, total: d.total, today: d.today,
+        normalUsed: d.normalUsed, bufferUsed: d.bufferUsed, capacityMin: d.capacityMin, bufferCapacityMin: d.bufferCapacityMin };
+    });
     if (!S.replanned) return S.week.map(function (d) {
       return { d: d.d, segs: d.segs, buf: d.buf, total: d.total, today: d.today };
     });
@@ -157,6 +162,7 @@ window.ZX = window.ZX || {};
        与演示日期（如 11.14 周六）无关，直接消费会造成高亮与日期眉标矛盾 */
     var dow = U.todayDow();
     data.forEach(function (d) { d.today = d.d === dow; });
+    if (ZX.state.placementModel) return data;
     var deltas = ZX.flows.planedit.weekDeltas() || {};
     return data.map(function (d) {
       var delta = U.num(deltas[d.d], 0);
@@ -171,6 +177,25 @@ window.ZX = window.ZX || {};
     return ZX.flows.planedit.board();
   }
 
+  /* 暂缓列表与普通日程块分开，旧 deferredTo 只作兼容展示，不解释为改期。 */
+  function deferredBlock() {
+    var S = ZX.state;
+    var list = S.tasks.filter(function (t) { return t.deferred; });
+    if (!list.length) return '';
+    return '<div class="sc-skips open" data-deferred-list>' +
+      '<div class="sc-skips-h"><span class="sc-skips-t">今日暂缓（未改期）</span>' +
+        '<span class="sc-skips-n">不计入计划板 · 计划日期未变</span></div>' +
+      '<div class="sc-skips-b">' + list.map(function (t) {
+        var legacy = t.deferredTo ? ' · 旧版标记（非改期）：' + U.esc(t.deferredTo) : '';
+        return '<div class="sc-skip-i">' +
+          '<span class="subj" style="--c:' + ((SUBJ[t.s] || {}).c || 'var(--txt3)') + '">' + U.esc(t.s) + '</span>' +
+          '<span class="sc-skip-t">' + U.esc(t.title) + '</span>' +
+          '<span class="sc-skip-m mono">' + U.hm(t.est) + (t.deferredReason ? ' · ' + U.esc(t.deferredReason) : '') + legacy + '</span>' +
+          '<button type="button" class="btn ghost sc-skip-b" data-act="restore-deferred" data-id="' + U.esc(t.id) + '">恢复</button>' +
+        '</div>';
+      }).join('') + '</div></div>';
+  }
+
   function chartNote() {
     var n = ZX.flows.planedit.movedCount();
     if (!n) return '';
@@ -180,30 +205,35 @@ window.ZX = window.ZX || {};
   }
 
   function weekChart() {
+    var S = ZX.state;
     var data = weekChartData();
     var max = 360, H = 132;
     var total = data.reduce(function (a, d) { return a + d.total; }, 0);
     var buf = data.reduce(function (a, d) { return a + d.buf; }, 0);
+    var bufUsed = data.reduce(function (a, d) { return a + U.num(S.placementModel ? d.bufferUsed : d.buf, 0); }, 0);
     return '<div class="chart">' +
       '<div class="week">' + data.map(function (d) {
+        var used = S.placementModel ? U.num(d.bufferUsed, 0) : U.num(d.buf, 0);
+        var free = S.placementModel ? Math.max(0, U.num(d.bufferCapacityMin, 0) - used) : 0;
+        var capacity = S.placementModel ? U.num(d.capacityMin, 0) + U.num(d.bufferCapacityMin, 0) : null;
         return '<div class="wk ' + (d.today ? 'on' : '') + '">' +
           '<div class="wk-stack">' +
-            /* 柱顶墨线（.top）：buf>0 时弹性位是顶段，否则最后一个科时段兜住 */
             d.segs.map(function (s, i) {
               var cls = (!d.buf && i === d.segs.length - 1) ? ' class="top"' : '';
               return '<i' + cls + ' style="height:' + (s[1] / max * H) + 'px;background:' + (SUBJ[s[0]] || { c: 'var(--txt3)' }).c + '"></i>';
             }).join('') +
-            '<i class="buf' + (d.buf ? ' top' : '') + '" style="height:' + (d.buf / max * H) + 'px"></i>' +
+            '<i class="buf' + (used ? ' top' : '') + '" style="height:' + (used / max * H) + 'px"></i>' +
+            (free ? '<i class="buf buf-free" style="height:' + (free / max * H) + 'px"></i>' : '') +
           '</div>' +
-          '<div class="wk-lab">' + d.d + '</div>' +
-          '<div class="wk-val">' + U.hm(d.total) + '</div>' +
+          '<div class="wk-lab">' + d.d + (d.date ? '<small>' + U.esc(d.date.slice(5)) + '</small>' : '') + '</div>' +
+          '<div class="wk-val" title="' + (capacity === null ? '' : '总容量 ' + U.hm(capacity)) + '">' + U.hm(d.total) + '</div>' +
         '</div>';
       }).join('') +
       '</div>' +
       '<div class="legend">' +
         Object.keys(SUBJ).map(function (k) { return '<span><i style="background:' + SUBJ[k].c + '"></i>' + k + '</span>'; }).join('') +
         '<span><i class="hatch"></i>弹性位</span>' +
-        '<span class="load-sum">计划 ' + U.hm(total) + ' · 缓冲 ' + U.hm(buf) + '</span>' +
+        '<span class="load-sum">计划 ' + U.hm(total) + ' · 弹性已用 ' + U.hm(bufUsed) + ' / 容量 ' + U.hm(buf) + '</span>' +
       '</div>' +
       chartNote() +
     '</div>';

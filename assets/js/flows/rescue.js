@@ -15,10 +15,10 @@ window.ZX = window.ZX || {};
   var U = ZX.util;
 
   /* ---------- 口径常量 ----------
-     THRESHOLD / DEMO_ZERO_DAYS 是演示参数；剩余天数由真算断更天数推导；
-     缺口、工时、容量本身一律由 state 推导，改 state 就会跟着变。 */
+     THRESHOLD 是真实中断阈值；DEMO_ZERO_DAYS 只供独立演示预览使用。
+     剩余天数由局部传入天数或真实断更天数推导；缺口、工时、容量由 state 只读计算。 */
   var THRESHOLD = 3;         /* 连续 ≥3 天无记录判定为中断 */
-  var DEMO_ZERO_DAYS = 4;    /* 演示入口注入的连续无记录天数（真实天数达标时不注入） */
+  var DEMO_ZERO_DAYS = 4;    /* 独立演示入口的局部连续无记录天数，不写真实 state */
   var COMPRESS_RATE = 0.40;  /* 压缩：剩余工时下调 40% */
   var MIN_EST = 15;          /* 压缩下限 15 分钟 */
   var DEFER_DAYS = 7;        /* 顺延：截止日期 +7 天、周容量 +1 周 */
@@ -37,12 +37,31 @@ window.ZX = window.ZX || {};
     if (typeof S.consecutiveZeroDays !== 'number') S.consecutiveZeroDays = 0;
     if (S.interrupted === undefined) S.interrupted = null;
     if (S.rescueRecord === undefined) S.rescueRecord = null;
-    detect();
+    if (S.rescueRecord && U.dayKey(S.rescueRecord.at) === U.todayKey()) {
+      S.consecutiveZeroDays = 0;
+      S.interrupted = false;
+    } else {
+      detect();
+    }
   })();
 
   /* ---------- 缺口口径 ---------- */
+  function placementApi() {
+    return window.Rhythm && window.Rhythm.placementModel;
+  }
+
   function weekPlannedMin() {
-    return (ZX.state.week || []).reduce(function (a, d) { return a + U.num(d.total, 0); }, 0);
+    var S = ZX.state;
+    if (S.placementModel) {
+      var P = placementApi();
+      if (!P) throw new Error('落点模型未加载');
+      return P.summary(S.placementModel).totals.usedMin;
+    }
+    return (S.week || []).reduce(function (a, d) { return a + U.num(d.total, 0); }, 0);
+  }
+
+  function remainingWorkloadMin() {
+    return ZX.state.placementModel ? sumEst(undone()) : weekPlannedMin();
   }
 
   function dailyAvailMin() {
@@ -50,10 +69,11 @@ window.ZX = window.ZX || {};
   }
 
   /* 剩余天数真算：一周 7 天 − 已断更天数（下限 1）。
-     演示钩子注入 4 天 → 剩 3，与原「中断 4 天后本周只剩 3 天」口径一致；
-     真实断更 5 天 → 剩 2，不再是写死的 3。 */
-  function remainDays() {
-    return Math.max(1, 7 - U.num(ZX.state.consecutiveZeroDays, 0));
+     独立演示可局部传天数；真实流程从 state.consecutiveZeroDays 推导。 */
+  function remainDays(explicitDays) {
+    var n = typeof explicitDays === 'number' && isFinite(explicitDays)
+      ? explicitDays : U.num(ZX.state.consecutiveZeroDays, 0);
+    return Math.max(1, 7 - U.num(n, 0));
   }
 
   /* 剩余可用 = 每日可用 × 剩余天数（不取整，取整只发生在展示层） */
@@ -61,24 +81,30 @@ window.ZX = window.ZX || {};
     return dailyAvailMin() * U.num(days, remainDays());
   }
 
-  /* 缺口 = max(0, 计划 − 已投入 − 剩余可用) */
+  /* 缺口 = max(0, 计划 − 已投入 − 剩余可用)。
+     v3 的 planMin 统一传剩余计划；legacy 的周计划含已投入，仍在这里扣减。 */
   function gapOf(planMin, days) {
-    return Math.max(0, Math.round(U.num(planMin, 0) - ZX.state.workedMin() - availMin(days)));
+    var remaining = U.num(planMin, 0) - (ZX.state.placementModel ? 0 : ZX.state.workedMin());
+    return Math.max(0, Math.round(remaining - availMin(days)));
   }
 
-  function metrics() {
+  function metrics(explicitDays) {
     var S = ZX.state;
     var planned = weekPlannedMin();
+    var workload = remainingWorkloadMin();
     var worked = S.workedMin();
-    var days = remainDays();
+    var days = remainDays(explicitDays);
     var avail = availMin(days);
     return {
       planned: planned,
+      workload: workload,
       worked: worked,
       daily: dailyAvailMin(),
+      zeroDays: typeof explicitDays === 'number' && isFinite(explicitDays)
+        ? U.num(explicitDays, 0) : U.num(S.consecutiveZeroDays, 0),
       days: days,
       avail: avail,
-      gap: Math.max(0, Math.round(planned - worked - avail))
+      gap: gapOf(workload, days)
     };
   }
 
@@ -92,7 +118,7 @@ window.ZX = window.ZX || {};
   }
 
   function undone() {
-    return ZX.state.tasks.filter(function (t) { return !t.done && !t.abandoned && !t.substituted; });
+    return ZX.state.tasks.filter(function (t) { return !t.done && !t.skipped && !t.deferred && !t.abandoned && !t.substituted; });
   }
 
   function byWeightAsc(list) {
@@ -115,23 +141,24 @@ window.ZX = window.ZX || {};
   /* 日期 / 时段助手（parseDay / isoDay / addDays / retime）用 util.js 共用实现 */
 
   /* ---------- 三种挽救方式的推演（同一套缺口公式） ----------
-     压缩 / 降级会删减或压缩本周工作，因此「计划」收敛为
-       已投入 + 策略调整后仍未完成的工时（已流失的天不再补排）；
+     压缩 / 降级会删减或压缩本周工作：v3 直接收敛为调整后的剩余工时，
+     legacy 则保留「已投入 + 调整后未完成工时」的原口径。
      顺延不删不压，计划保持本周原样，剩余可用 +1 周。 */
-  function optionOf(key) {
+  function optionOf(key, explicitDays) {
     var S = ZX.state;
+    var days = remainDays(explicitDays);
     var rest = undone();
     var eligible = rest.filter(function (t) { return !(S.locks && S.locks[t.id]); });
 
     if (key === 'defer') {
-      var planMin = weekPlannedMin();
-      var days = remainDays() + DEFER_DAYS;
+      var planMin = remainingWorkloadMin();
+      var deferDays = days + DEFER_DAYS;
       var base = U.parseDay(S.goal.deadline) || new Date();
       return {
         key: 'defer', label: '顺延',
-        planMin: planMin, days: days,
-        avail: availMin(days),
-        gap: gapOf(planMin, days),
+        planMin: planMin, days: deferDays,
+        avail: availMin(deferDays),
+        gap: gapOf(planMin, deferDays),
         items: [],
         dropped: [],
         weeksAfter: U.num(S.feas.weeks, 1) + 1,
@@ -144,13 +171,14 @@ window.ZX = window.ZX || {};
       var dropped = byWeightAsc(eligible).slice(0, dropN).map(dropItem);
       var dropIds = dropped.map(function (d) { return d.id; });
       var keep = rest.filter(function (t) { return dropIds.indexOf(t.id) < 0; });
-      var planD = S.workedMin() + sumEst(keep);
+      /* v3 的 weekPlannedMin / gapOf 已使用剩余模型工时，不能再加 worked。 */
+      var planD = (S.placementModel ? 0 : S.workedMin()) + sumEst(keep);
       var cur = parseInt(String(S.goal.target || ''), 10);
       return {
         key: 'downgrade', label: '降级',
-        planMin: planD, days: remainDays(),
-        avail: availMin(remainDays()),
-        gap: gapOf(planD, remainDays()),
+        planMin: planD, days: days,
+        avail: availMin(days),
+        gap: gapOf(planD, days),
         items: [],
         dropped: dropped,
         targetFrom: isFinite(cur) ? cur : null,
@@ -169,14 +197,24 @@ window.ZX = window.ZX || {};
         est: Math.max(MIN_EST, Math.round(from * (1 - COMPRESS_RATE)))
       };
     });
-    var planC = S.workedMin() + sumEst(items) + sumEst(rest.filter(function (t) { return S.locks && S.locks[t.id]; }));
+    var planC = (S.placementModel ? 0 : S.workedMin()) + sumEst(items) + sumEst(rest.filter(function (t) { return S.locks && S.locks[t.id]; }));
     return {
       key: 'compress', label: '压缩',
-      planMin: planC, days: remainDays(),
-      avail: availMin(remainDays()),
-      gap: gapOf(planC, remainDays()),
+      planMin: planC, days: days,
+      avail: availMin(days),
+      gap: gapOf(planC, days),
       items: items,
       dropped: dropC
+    };
+  }
+
+  /* 独立演示预览：天数只作为局部参数参与计算，不调用 detect，不写业务状态。 */
+  function preview(explicitDays) {
+    var days = Math.max(0, U.num(explicitDays, DEMO_ZERO_DAYS));
+    return {
+      zeroDays: days,
+      metrics: metrics(days),
+      options: ['compress', 'defer', 'downgrade'].map(function (key) { return optionOf(key, days); })
     };
   }
 
@@ -221,7 +259,8 @@ window.ZX = window.ZX || {};
   /* ---------- 识别 ----------
      数据源 = 执行记录：从 sessions 统计「最近一次有记录的日子距今天几天」。
      · 今天有记录 → 0；从未有记录（新用户 / 纯种子态）→ 0，不把首日判成中断
-     · detect() 无参调用即为真实计算；显式传天数仅用于对话演示钩子 */
+     · detect() 无参调用即为真实计算；显式传天数仅保留为兼容测试锚点
+     · 独立演示使用 preview(days) 局部计算，不调用 detect */
   function zeroDaysFromSessions() {
     var S = ZX.state;
     var list = Array.isArray(S.sessions) ? S.sessions : [];
@@ -387,7 +426,102 @@ window.ZX = window.ZX || {};
   var approvedPreview = null;
   function previewKey(option) {
     var S = ZX.state;
-    return JSON.stringify([option, S.tasks, S.locks, S.dayAssign, S.goal, S.feas, S.week, S.avail, metrics()]);
+    return JSON.stringify([option, S.tasks, S.locks, S.dayAssign, S.placementModel, S.goal, S.feas, S.week, S.avail, metrics()]);
+  }
+
+  function checkedModel(result, label) {
+    if (!result || result.ok !== true || !result.model) {
+      throw new TypeError((result && result.reason) || label + '失败');
+    }
+    return result.model;
+  }
+
+  function placementTime(P, model, taskId) {
+    var segments = P.taskSegments(model, taskId);
+    if (!segments.length) return '';
+    var first = segments[0];
+    var last = segments[segments.length - 1];
+    var from = U.pad2(Math.floor(first.startMin / 60)) + ':' + U.pad2(first.startMin % 60);
+    var to = U.pad2(Math.floor((last.startMin + last.durMin) / 60)) + ':' + U.pad2((last.startMin + last.durMin) % 60);
+    return first.date === last.date ? from + '–' + to
+      : first.date.slice(5) + ' ' + from + '–' + last.date.slice(5) + ' ' + to;
+  }
+
+  function projectPlacementTasks(P, model, tasks) {
+    return tasks.map(function (task) {
+      var segments = P.taskSegments(model, task.id);
+      var next = Object.assign({}, task, {
+        time: placementTime(P, model, task.id),
+        date: segments.length ? segments[0].date : null
+      });
+      var unplaced = model.unplanned.find(function (item) { return item.taskId === task.id; });
+      if (unplaced) {
+        next.unplanned = true;
+        next.unplannedReason = unplaced.reason;
+      } else {
+        delete next.unplanned;
+        delete next.unplannedReason;
+      }
+      return next;
+    });
+  }
+
+  /* v3 先在独立副本上完成释放/缩放与任务投影；任何失败都发生在状态赋值前。
+     顺延只改周期与截止日期，不重建模型，也不改写任务落点。 */
+  function preparePlacementPatch(S, o, stamp) {
+    var P = placementApi();
+    if (!P) throw new Error('落点模型未加载');
+    var prefix = 'pm_rescue_' + stamp.toString(36) + '_';
+    var nextTasks = o.key === 'defer' ? S.tasks : S.tasks.map(function (task) {
+      if (U.findById(o.dropped, task.id)) return Object.assign({}, task, { abandoned: true, abandonedAt: stamp });
+      var hit = o.key === 'compress' && U.findById(o.items, task.id);
+      return hit ? Object.assign({}, task, { est: hit.est, degraded: true }) : task;
+    });
+    var nextGoal = Object.assign({}, S.goal || {});
+    var nextFeas = Object.assign({}, S.feas || {});
+    var patch = { tasks: nextTasks, goal: nextGoal, feas: nextFeas };
+
+    if (o.key === 'defer') {
+      nextFeas.weeks = o.weeksAfter;
+      nextGoal.weeks = o.weeksAfter;
+      nextGoal.deadline = o.deadlineAfter;
+      return patch;
+    }
+
+    var nextModel = S.placementModel;
+    o.dropped.forEach(function (dropped) {
+      nextModel = checkedModel(P.releaseTask(nextModel, dropped.id, '中断挽救放弃', prefix), '释放放弃任务');
+    });
+    if (o.key === 'compress') {
+      var unplannedIds = Object.create(null);
+      nextModel.unplanned.forEach(function (item) { unplannedIds[item.taskId] = true; });
+      o.items.forEach(function (item) {
+        if (unplannedIds[item.id]) return;
+        nextModel = checkedModel(P.resizeTask(nextModel, item.id, item.est, prefix), '压缩任务 ' + item.id);
+      });
+    } else if (o.targetAfter !== null) {
+      nextGoal.target = o.targetAfter + ' 分';
+    }
+    patch.placementModel = nextModel;
+    patch.tasks = projectPlacementTasks(P, nextModel, nextTasks);
+    return patch;
+  }
+
+  function commitPlacementPatch(S, patch) {
+    var previous = {};
+    var keys = Object.keys(patch).concat(['week', 'weekShift', 'dayAssign', 'buffer']);
+    keys.forEach(function (key) { previous[key] = S[key]; });
+    try {
+      Object.assign(S, patch);
+      if (S.placementModel) {
+        if (typeof S.syncPlacementProjection !== 'function') throw new Error('缺少落点投影同步');
+        if (S.syncPlacementProjection() === false) throw new Error('落点投影同步失败');
+      }
+    } catch (err) {
+      /* 同步阶段也保持整笔回滚，避免 week/dayAssign/buffer 只写了一半。 */
+      keys.forEach(function (key) { S[key] = previous[key]; });
+      throw err;
+    }
   }
 
   function apply() {
@@ -400,33 +534,11 @@ window.ZX = window.ZX || {};
       ZX.ui.toast('计划已变化，请重新预览并确认。', 'warn');
       return;
     }
-    approvedPreview = null;
     var before = metrics();
     var stamp = Date.now();
     var zeroDays = U.num(S.consecutiveZeroDays, 0);
     var weeksBefore = U.num(S.feas.weeks, 1);
-
-    if (o.key === 'compress') {
-      var dropIds = o.dropped.map(function (d) { return d.id; });
-      S.tasks = S.tasks.filter(function (t) { return dropIds.indexOf(t.id) < 0; }).map(function (t) {
-        var hit = U.findById(o.items, t.id);
-        if (!hit) return t;
-        var next = Object.assign({}, t, { est: hit.est, time: U.retime(t.time, hit.est), degraded: true });
-        return S.normTask ? S.normTask(next) : next;
-      });
-    } else if (o.key === 'downgrade') {
-      var dropIds2 = o.dropped.map(function (d) { return d.id; });
-      S.tasks = S.tasks.filter(function (t) { return dropIds2.indexOf(t.id) < 0; });
-      if (o.targetAfter !== null) S.goal.target = o.targetAfter + ' 分';
-    } else {
-      S.feas.weeks = o.weeksAfter;
-      S.goal.weeks = o.weeksAfter;
-      S.goal.deadline = o.deadlineAfter;
-    }
-
-    S.consecutiveZeroDays = 0;
-    S.interrupted = false;
-    S.rescueRecord = {
+    var record = {
       strategy: o.key,
       at: stamp,
       deltaMin: Math.max(0, before.gap - o.gap),
@@ -434,6 +546,44 @@ window.ZX = window.ZX || {};
       gapBefore: before.gap,
       gapAfter: o.gap
     };
+
+    if (S.placementModel) {
+      try {
+        var patch = preparePlacementPatch(S, o, stamp);
+        patch.consecutiveZeroDays = 0;
+        patch.interrupted = false;
+        patch.rescueRecord = record;
+        commitPlacementPatch(S, patch);
+      } catch (err) {
+        ZX.ui.toast('挽救未能应用：' + (err && err.message ? err.message : String(err)) + '。当前计划未变更。', 'warn');
+        return;
+      }
+    } else {
+      /* legacy 保留原物理删除与 U.retime 压缩行为，兼容旧周投影测试。 */
+      if (o.key === 'compress') {
+        var dropIds = o.dropped.map(function (d) { return d.id; });
+        S.tasks = S.tasks.filter(function (t) { return dropIds.indexOf(t.id) < 0; }).map(function (t) {
+          var hit = U.findById(o.items, t.id);
+          if (!hit) return t;
+          var next = Object.assign({}, t, { est: hit.est, time: U.retime(t.time, hit.est), degraded: true });
+          return S.normTask ? S.normTask(next) : next;
+        });
+      } else if (o.key === 'downgrade') {
+        var dropIds2 = o.dropped.map(function (d) { return d.id; });
+        S.tasks = S.tasks.filter(function (t) { return dropIds2.indexOf(t.id) < 0; });
+        if (o.targetAfter !== null) S.goal.target = o.targetAfter + ' 分';
+      } else {
+        S.feas.weeks = o.weeksAfter;
+        S.goal.weeks = o.weeksAfter;
+        S.goal.deadline = o.deadlineAfter;
+      }
+
+      S.consecutiveZeroDays = 0;
+      S.interrupted = false;
+      S.rescueRecord = record;
+    }
+
+    approvedPreview = null;
 
     var payload = {
       strategy: o.key,
@@ -581,6 +731,7 @@ window.ZX = window.ZX || {};
     banner: banner,
     metrics: metrics,
     optionOf: optionOf,
+    preview: preview,
     apply: apply
   };
 

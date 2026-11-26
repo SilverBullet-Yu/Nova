@@ -48,7 +48,16 @@ function resolveStatic(pathname) {
   const allowed = abs === path.join(ROOT, 'index.html')
     || abs.startsWith(path.join(ROOT, 'assets') + path.sep)
     || abs.startsWith(path.join(ROOT, 'shared') + path.sep);
-  return allowed ? abs : null;
+  if (!allowed) return null;
+  try {
+    const real = fs.realpathSync(abs);
+    const realAllowed = real === path.join(ROOT, 'index.html')
+      || real.startsWith(path.join(ROOT, 'assets') + path.sep)
+      || real.startsWith(path.join(ROOT, 'shared') + path.sep);
+    return realAllowed ? real : null;
+  } catch (e) {
+    return null;
+  }
 }
 
 function serveStatic(res, pathname) {
@@ -57,18 +66,31 @@ function serveStatic(res, pathname) {
     sendError(res, 'E2001', '静态资源不存在：' + pathname, 404);
     return;
   }
-  fs.stat(abs, (err, st) => {
-    if (err || !st.isFile()) {
+  const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0);
+  fs.open(abs, flags, (openErr, fd) => {
+    if (openErr) {
       sendError(res, 'E2001', '静态资源不存在：' + pathname, 404);
       return;
     }
-    const ext = path.extname(abs).toLowerCase();
-    res.writeHead(200, {
-      'Content-Type': MIME[ext] || 'application/octet-stream',
-      'Content-Length': st.size,
-      'Cache-Control': 'no-cache'
+    fs.fstat(fd, (statErr, st) => {
+      if (statErr || !st.isFile()) {
+        fs.close(fd, () => sendError(res, 'E2001', '静态资源不存在：' + pathname, 404));
+        return;
+      }
+      const ext = path.extname(abs).toLowerCase();
+      res.writeHead(200, {
+        'Content-Type': MIME[ext] || 'application/octet-stream',
+        'Content-Length': st.size,
+        'Cache-Control': 'no-cache'
+      });
+      const stream = fs.createReadStream(abs, { fd: fd, autoClose: true });
+      /* 打开后仍可能遇到读取错误；响应头已发出则断开，否则回 500。 */
+      stream.on('error', function () {
+        if (res.headersSent) res.destroy();
+        else sendError(res, 'E5001', '静态资源读取失败：' + pathname, 500);
+      });
+      stream.pipe(res);
     });
-    fs.createReadStream(abs).pipe(res);
   });
 }
 

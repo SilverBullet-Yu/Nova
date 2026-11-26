@@ -12,6 +12,9 @@
     "test": "node --test \"test/*.test.js\"",
     "pretest": "node scripts/build-engine.js",
     "audit": "node scripts/css-audit.mjs",
+    "check:engine": "node scripts/build-engine.js --check",
+    "bench:replan": "node scripts/bench-replan.js",
+    "bench:placement": "node scripts/bench-placement.js",
     "build:engine": "node scripts/build-engine.js"
   },
   "engines": {

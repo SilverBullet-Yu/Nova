@@ -7,21 +7,20 @@ const H = require('./helpers');
 const src = fs.readFileSync(require.resolve('../assets/js/flows/goal.js'), 'utf8');
 /* 沙箱公共装配：真实 util.js（trace 随机 id / 日期口径与生产同源）+ 固定星期三 */
 function goalSandbox(ZX, disk) {
-  const sandbox = { window: { ZX, localStorage: { getItem: k => disk.get(k), setItem: (k, v) => disk.set(k, v) } }, document: { addEventListener() {} } };
+  const sandbox = { window: { ZX, Rhythm: { placementModel: require('../shared/placement-model.js') }, localStorage: { getItem: k => disk.get(k), setItem: (k, v) => disk.set(k, v) } }, document: { addEventListener() {} } };
   H.installUtil(sandbox);
   ZX.util.todayDow = () => '三';
   return sandbox;
 }
 test('排程失败时保留旧目标和待提交草案', async () => {
-  const draft = { name: 'new', weeks: 5, weeklyH: 10, demand: 10 };
+  const draft = { name: 'new', deadline: '2027-12-25', weeks: 5, weeklyH: 10, demand: 10 };
   const state = { goalDraft: draft, planDraft: [{id:'a', est:30}], goal: {name:'old'}, feas:{}, resetTimer() {} };
   const ZX = { state, render() {}, setTab() {}, ui:{toast(){}}, assistant:{say(){}}, engine:{feasibilityNow:()=>({R:1}),schedule:async()=>{throw new Error('offline');}} };
   const disk = new Map();
   state.currentPlanVersion = () => 'baseline';
   vm.runInNewContext(src, goalSandbox(ZX, disk));
-  ZX.flows.goal.apply();
-  assert.equal(disk.size, 0);
-  await Promise.resolve();
+  await ZX.flows.goal.apply();
+  assert.equal(disk.has('zx.overlay'), false);
   assert.equal(state.goal.name, 'old');
   assert.equal(state.goalDraft, draft);
   const [event] = JSON.parse(disk.get('zx.scheduleTrace') || '[]');
@@ -37,7 +36,7 @@ test('确认后编辑草案，迟到排程只写失效追踪，不应用计划',
   let release;
   let renders = 0;
   const oldGoal = {name:'old'};
-  const state = { goalDraft: {name:'synthetic', weeks:5, weeklyH:10, demand:10},
+  const state = { goalDraft: {name:'synthetic', deadline:'2027-12-25', weeks:5, weeklyH:10, demand:10},
     planDraft: [{id:'a', s:'数学', title:'synthetic task', est:30, weight:1}],
     goal:oldGoal, currentPlanVersion:()=> 'baseline' };
   const ZX = {state, render(){renders++;}, ui:{toast(){}},
@@ -45,11 +44,11 @@ test('确认后编辑草案，迟到排程只写失效追踪，不应用计划',
       release = () => resolve(schedule(input));
     })} };
   vm.runInNewContext(src, goalSandbox(ZX, disk));
-  ZX.flows.goal.apply();
+  const submission = ZX.flows.goal.apply();
   assert.equal(disk.size, 0);
   state.planDraft[0].title = 'edited synthetic task';
   release();
-  await Promise.resolve();
+  await submission;
   assert.equal(state.goal, oldGoal);
   assert.equal(state.planDraft[0].title, 'edited synthetic task');
   assert.equal(renders, 0);
@@ -63,28 +62,28 @@ test('连续确认后，迟到的旧排程结果不能覆盖已提交的新计�
   const pending = [];
   let resultHtml;
   let renders = 0;
-  const state = { goalDraft: { name: 'first', weeks: 5, weeklyH: 10, demand: 10 }, planDraft: [{id:'a', s:'数学', title:'第一份', est:30, weight:1}], goal:{name:'old'}, feas:{}, resetTimer(){}, normTask:t=>t };
+  const state = { goalDraft: { name: 'first', deadline: '2027-12-25', weeks: 5, weeklyH: 10, demand: 10 }, planDraft: [{id:'a', s:'数学', title:'第一份', est:30, weight:1}], goal:{name:'old'}, feas:{}, resetTimer(){}, normTask:t=>t };
   const ZX = { state, render(){renders++;}, setTab(){}, ui:{toast(){}}, assistant:{say(html){resultHtml = html;}}, engine:{feasibilityNow:()=>({R:1}), schedule: input => new Promise(resolve => pending.push(() => resolve(schedule(input))))} };
   const disk = new Map();
   state.currentPlanVersion = () => state.goal.name === 'old' ? 'baseline' : 'applied-version';
   vm.runInNewContext(src, goalSandbox(ZX, disk));
-  ZX.flows.goal.apply();
+  const firstSubmission = ZX.flows.goal.apply();
   state.goalDraft.name = 'second';
   state.planDraft[0].title = '第二份';
-  ZX.flows.goal.apply();
+  const secondSubmission = ZX.flows.goal.apply();
   assert.equal(state.goal.name, 'old');
   assert.equal(renders, 0);
   vm.runInNewContext(fs.readFileSync(require.resolve('../assets/js/flows/settings.js'), 'utf8'), { window: { ZX } });
   assert.doesNotMatch(ZX.settings.csv(), /阶段目标/);
   assert.equal(pending.length, 2);
   pending[1]();
-  await Promise.resolve();
+  await secondSubmission;
   assert.equal(state.goal.name, 'second');
   assert.equal(state.tasks[0].title, '第二份');
   assert.equal(state.goalDraft, null);
   assert.equal(renders, 1);
   pending[0]();
-  await Promise.resolve();
+  await firstSubmission;
   assert.equal(state.goal.name, 'second');
   assert.equal(state.tasks[0].title, '第二份');
   assert.equal(renders, 1);

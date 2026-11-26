@@ -43,14 +43,18 @@ window.ZX = window.ZX || {};
   var session = 0;          /* 会话代号：退出再重开后，迟到响应不得污染新会话 */
   var revision = 0;         /* 每次渲染可操作卡片都换版本，聊天记录里的旧卡不可复用 */
   var currentCard = null;
+  var cardPlanVersion = null;
+  var submitAttempt = 0;
 
   function beginCard(actions) {
     revision++;
+    cardPlanVersion = null;
     currentCard = { phase: phase, actions: actions };
   }
   function actionAttrs(act) {
     return ' data-cl="' + act + '" data-cl-session="' + session +
-      '" data-cl-revision="' + revision + '" data-cl-phase="' + phase + '"';
+      '" data-cl-revision="' + revision + '" data-cl-phase="' + phase + '"' +
+      (cardPlanVersion ? ' data-cl-plan="' + U.esc(cardPlanVersion) + '"' : '');
   }
 
   function active() { return phase !== 'idle'; }
@@ -308,8 +312,23 @@ window.ZX = window.ZX || {};
   }
 
   /* ---------- 落地：组装草案后交给 goal.apply()（排程→生效全链路） ---------- */
+  function renderRetry(planVersion) {
+    beginCard(['retry-apply', 'edit']);
+    cardPlanVersion = planVersion;
+    say('<p>排程没有完成，当前计划未变更。建议仍保留，可以重试；如果计划已变化，需要重新确认。</p>' +
+      '<div class="ecard"><div class="ecard-h"><b>排程待重试</b><span class="tag warn">建议已保留</span></div>' +
+      '<div class="ecard-b">' + suggestRows() + '</div>' +
+      '<div class="ecard-f"><button class="btn"' + actionAttrs('retry-apply') + '>重试排程</button>' +
+      '<button class="btn ghost"' + actionAttrs('edit') + '>回去调整</button></div></div>', '澄清 · 排程重试');
+  }
+
   function applySuggestion() {
-    if (!sug || !sug.tasks.length) return;
+    if (!sug || !sug.tasks.length || busy) return;
+    var deadline = U.parseDay(profile.deadline);
+    if (!deadline || deadline <= U.today0() || !isFinite(sug.weeklyH) || sug.weeklyH < 1 || sug.weeklyH > 80) {
+      say('<p>截止日期必须晚于今天，每周投入需为 1–80 小时；请先修正，当前计划未变更。</p>', '澄清 · 校验');
+      return;
+    }
     var S = ZX.state;
     if (!S || typeof ZX.flows.goal.apply !== 'function') return;
     S.goalDraft = {
@@ -326,9 +345,33 @@ window.ZX = window.ZX || {};
     S.planDraft = sug.tasks.map(function (x) {
       return { id: x.id, s: x.s, title: x.title, est: x.est, weight: x.weight, order: x.order };
     });
-    endSession();
+    var planVersion = S.currentPlanVersion ? S.currentPlanVersion() : null;
+    var attempt = ++submitAttempt;
+    busy = true;
+    currentCard = null;
     say('<p>好，按这份建议提交引擎排程。可用时段来自「我的」页 7×4 设置，弹性位照常保留。</p>', '澄清 · 提交排程');
-    ZX.flows.goal.apply();
+    var submission;
+    try {
+      submission = ZX.flows.goal.apply();
+    } catch (e) {
+      submission = false;
+    }
+    if (!submission || typeof submission.then !== 'function') {
+      busy = false;
+      if (submission === false) renderRetry(planVersion);
+      else endSession();
+      return;
+    }
+    Promise.resolve(submission).then(function (ok) {
+      if (attempt !== submitAttempt || phase === 'idle') return;
+      busy = false;
+      if (ok !== false) { endSession(); return; }
+      renderRetry(planVersion);
+    }, function () {
+      if (attempt !== submitAttempt || phase === 'idle') return;
+      busy = false;
+      renderRetry(planVersion);
+    });
   }
 
   /* ---------- 路由钩子：assistant.route() 在关键词匹配前调用 ---------- */
@@ -359,6 +402,17 @@ window.ZX = window.ZX || {};
     if (act === 'cancel') { endSession(); return; }
     if (act === 'edit') { currentCard = null; phase = 'ask'; say('<p>好，说说不满意的地方。</p>', '澄清 · 继续调整'); return; }
     if (act === 'build') { buildPlan(); return; }
+    if (act === 'retry-apply') {
+      var expectedPlan = data.clPlan;
+      var currentPlan = ZX.state.currentPlanVersion ? ZX.state.currentPlanVersion() : null;
+      if (expectedPlan && expectedPlan !== currentPlan) {
+        say('<p>计划已变化，旧重试卡已失效；请查看最新建议后重新确认。</p>', '澄清 · 重试已失效');
+        renderSuggestion();
+        return;
+      }
+      applySuggestion();
+      return;
+    }
     if (act === 'apply') { applySuggestion(); return; }
     if (act === 'cal-h' || act === 'cal-w' || act === 'cal-d') { applyCal(act); return; }
   });

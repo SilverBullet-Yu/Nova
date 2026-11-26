@@ -7,11 +7,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { feasibility } = require('../shared/engine/feasibility.js');
+const { feasibility, THRESHOLD } = require('../shared/engine/feasibility.js');
 const { schedule } = require('../shared/engine/schedule.js');
 const { replan, confirmReplan, undoReplan } = require('../shared/engine/replan.js');
 const { attribute } = require('../shared/engine/attribute.js');
 const { seed } = require('../shared/data/seed.js');
+const buildEngine = require('../scripts/build-engine.js');
 
 /* ── 通用夹具 ─────────────────────────────────────────────────────────── */
 
@@ -327,6 +328,37 @@ test('schedule：固定任务的日上限、连续上限和容量不足分别归
   }
 });
 
+test('schedule：固定任务优先采用有时长的可用起点，输入顺序不改变结果', () => {
+  const task = { id: 'fixed', subject: '数学', estMin: 60, date: '一', startMin: 600 };
+  for (const shadow of [
+    { date: '一', startMin: 600, durMin: 60, available: false },
+    { date: '一', startMin: 600, durMin: 0 }
+  ]) {
+    const valid = { date: '一', startMin: 600, durMin: 60 };
+    for (const slots of [[shadow, valid], [valid, shadow]]) {
+      const result = schedule({ tasks: [task], slots, params: { bufferRatio: 0 } });
+      assert.deepEqual(result.blocks.map(b => [b.startMin, b.durMin, b.locked]), [[600, 60, true]]);
+      assert.deepEqual(result.unplanned, []);
+    }
+  }
+});
+
+test('schedule：固定任务延伸时不可用或零长度槽不遮挡同起点的可用槽', () => {
+  const task = { id: 'fixed', subject: '数学', estMin: 60, date: '一', startMin: 600 };
+  for (const shadow of [
+    { date: '一', startMin: 630, durMin: 30, available: false },
+    { date: '一', startMin: 630, durMin: 0 }
+  ]) {
+    const first = { date: '一', startMin: 600, durMin: 30 };
+    const next = { date: '一', startMin: 630, durMin: 30 };
+    for (const slots of [[first, shadow, next], [first, next, shadow]]) {
+      const result = schedule({ tasks: [task], slots, params: { bufferRatio: 0 } });
+      assert.deepEqual(result.blocks.map(b => [b.startMin, b.durMin]), [[600, 30], [630, 30]]);
+      assert.deepEqual(result.unplanned, []);
+    }
+  }
+});
+
 /* ── 重排 ─────────────────────────────────────────────────────────────── */
 
 test('replan：确定性（同输入两次全等）', () => {
@@ -576,6 +608,8 @@ test('replan：替代后原任务退出待办，第二次重排不会重复替�
   assert.equal(res2.diff.some((d) => d.op === 'substitute'), false);
   assert.equal(res2.strategies[2].applied, false);
   assert.equal(res2.nextTasks.find((t) => t.id === 'a').substituted, true);
+  assert.deepEqual(res2.nextWeek.map(day => [day.minutes, day.bufferUsed, day.releasedMinutes, day.releasedBufferMinutes]),
+    res1.nextWeek.map(day => [day.minutes, day.bufferUsed, day.releasedMinutes, day.releasedBufferMinutes]));
 });
 
 test('replan：锁定任务是硬约束（不压缩 / 不放弃，且不进入 diff）', () => {
@@ -730,4 +764,44 @@ test('seed：科目色值沿用现有 CSS 变量名', () => {
   assert.equal(seed.subjectColors['英语'], 'var(--m-en)');
   assert.equal(seed.subjectColors['408'], 'var(--m-408)');
   assert.equal(seed.subjectColors['政治'], 'var(--m-pol)');
+});
+
+test('可行性阈值不可变且派生值溢出时拒绝', () => {
+  assert.ok(Object.isFrozen(THRESHOLD));
+  assert.throws(() => { THRESHOLD.ample = 0; }, TypeError);
+  assert.equal(feasibility({ weeklyH: 0, weeks: 1, discount: 1, demand: 100 }).verdict, '阻断');
+  assert.throws(() => feasibility({ weeklyH: Number.MAX_VALUE, weeks: 2, discount: 1, demand: 1 }), RangeError);
+});
+
+test('schedule 对保留字科目/日期使用无原型索引并拒绝小数分钟', () => {
+  for (const subject of ['__proto__', 'constructor', 'toString']) {
+    const out = schedule({ tasks: [{ id: 'x', subject, estMin: 30 }], slots: [{ date: 'D', startMin: 480, durMin: 30 }] });
+    assert.equal(out.blocks.length, 1);
+  }
+  const out = schedule({ tasks: [{ id: 'x', subject: '数学', estMin: 30 }], slots: [{ date: '__proto__', startMin: 480, durMin: 30 }] });
+  assert.equal(out.blocks.length, 1);
+  assert.throws(() => schedule({ tasks: [{ id: 'x', estMin: 30.5 }], slots: [] }), TypeError);
+  assert.throws(() => schedule({ tasks: [], slots: [{ date: 'D', startMin: 480, durMin: 30.5 }] }), TypeError);
+});
+
+test('replan 原型键锁定、输入不变量和空壳确认均被拒绝', () => {
+  const week = Array.from({ length: 7 }, () => ({ date: 'D', minutes: 100, capacity: 115, buffer: 60 }));
+  week.forEach((d, i) => { d.date = 'D' + i; });
+  const locked = replan({
+    tasks: [{ id: '__proto__', est: 40, weight: 0.1 }, { id: 'p', est: 140, weight: 0.9 }],
+    week,
+    locks: JSON.parse('{"__proto__":true}')
+  });
+  assert.equal(locked.diff.some(d => d.taskId === '__proto__'), false);
+  assert.equal(locked.nextTasks.find(t => t.id === '__proto__').abandoned, undefined);
+  assert.throws(() => replan({ tasks: [{ id: 'x', est: 10 }, { id: 'x', est: 20 }], week: [week[0]] }), TypeError);
+  assert.throws(() => replan({ tasks: [{ id: 'x', est: -1 }], week: [week[0]] }), TypeError);
+  assert.throws(() => replan({ tasks: [], week: Array.from({ length: 8 }, (_, i) => ({ date: 'D' + i })) }), RangeError);
+  assert.throws(() => replan({ tasks: [], week: [{ date: 'D', minutes: 10, releasedMinutes: 11 }] }), RangeError);
+  assert.throws(() => confirmReplan({ needsConfirmation: true }), TypeError);
+});
+
+test('引擎产物与源码同步且构建渲染可通过语法检查', () => {
+  assert.equal(buildEngine.check().current, true);
+  assert.doesNotThrow(() => new (require('node:vm').Script)(buildEngine.render()));
 });

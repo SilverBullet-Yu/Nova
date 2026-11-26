@@ -13,7 +13,7 @@
   'use strict';
 
   /* 四档阈值（契约硬编码，不可随请求变化） */
-  var THRESHOLD = { ample: 1.2, reasonable: 0.9, tight: 0.7 };
+  var THRESHOLD = Object.freeze({ ample: 1.2, reasonable: 0.9, tight: 0.7 });
 
   function isNum(v) {
     return typeof v === 'number' && isFinite(v);
@@ -43,6 +43,9 @@
     /* 与现有 demo 保持一致：先按 2 位小数取整再判档 */
     var R = Number((T / D).toFixed(2));
     var margin = T - D;
+    if (!isNum(T) || !isNum(R) || !isNum(margin)) {
+      throw new RangeError('feasibility: 计算结果超出有限数值范围');
+    }
 
     var verdict = R >= THRESHOLD.ample ? '充裕'
       : R >= THRESHOLD.reasonable ? '合理'

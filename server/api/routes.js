@@ -5,7 +5,7 @@
  * 错误统一形状：{ error: { code, message } }
  */
 
-const { randomUUID } = require('node:crypto');
+const { randomUUID, createHash } = require('node:crypto');
 const { feasibility } = require('../../shared/engine/feasibility.js');
 const { schedule } = require('../../shared/engine/schedule.js');
 const { replan, confirmReplan, undoReplan } = require('../../shared/engine/replan.js');
@@ -19,6 +19,46 @@ const { ApiError } = require('./errors.js');
 const VERSION = require('../../package.json').version;
 
 const ERRORS = require('./errors.js').ERRORS;
+const MAX_SCHEDULE_TASKS = 500;
+const MAX_SCHEDULE_SLOTS = 2000;
+
+function positiveByteBudget(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1) throw new Error(name + ' 必须是正安全整数');
+  return value;
+}
+
+const MAX_DRAFT_BYTES = positiveByteBudget('NOVA_DRAFT_BUDGET_BYTES', 8 * 1024 * 1024);
+const MAX_RECEIPT_BYTES = positiveByteBudget('NOVA_RECEIPT_BUDGET_BYTES', 4 * 1024 * 1024);
+
+function jsonBytes(value) {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
+function setBudgeted(map, key, value, maxBytes, maxPerUser, now, maxEntries) {
+  const incomingBytes = jsonBytes(value);
+  if (incomingBytes > maxBytes) throw new ApiError('E4002', '单条草案或收据超过字节预算');
+  map.delete(key);
+  map.set(key, value);
+  for (const [id, entry] of map) if (entry.expiresAt <= now) map.delete(id);
+  if (maxPerUser) {
+    let count = 0;
+    for (const entry of map.values()) if (entry.userId === value.userId) count++;
+    for (const [id, entry] of map) {
+      if (count <= maxPerUser) break;
+      if (entry.userId === value.userId && id !== key) { map.delete(id); count--; }
+    }
+  }
+  while (map.size) {
+    const total = Array.from(map.values()).reduce((sum, entry) => sum + jsonBytes(entry), 0);
+    if (total <= maxBytes && (!maxEntries || map.size <= maxEntries)) break;
+    const oldest = map.keys().next().value;
+    if (oldest === key && map.size === 1) throw new ApiError('E4002', '草案或收据总字节预算不足');
+    map.delete(oldest);
+  }
+}
 
 function isPlainObject(v) {
   return !!v && typeof v === 'object' && !Array.isArray(v);
@@ -60,12 +100,11 @@ function createRouter(store, auth) {
   const planReceipts = new Map();
   const draftTtlMs = 5 * 60 * 1000;
   const maxDrafts = 128;
+  const maxDraftsPerUser = 16;
   const receiptTtlMs = 24 * 60 * 60 * 1000;
   const maxReceipts = 512;
+  const maxReceiptsPerUser = 64;
 
-  function revision(userId) {
-    return [store.getSeq(userId), store.getLatestReplan(userId)?.seq || 0, store.getPlanBaseline(userId)?.version || ''].join(':');
-  }
   /* ── GET /api/health ── */
   function health() {
     return {
@@ -108,6 +147,9 @@ function createRouter(store, auth) {
     if (b.slots === undefined) throw new ApiError('E1001', '缺少字段 slots');
     needArray(b.tasks, 'tasks');
     needArray(b.slots, 'slots');
+    if (b.tasks.length > MAX_SCHEDULE_TASKS || b.slots.length > MAX_SCHEDULE_SLOTS) {
+      throw new ApiError('E4002', '排程规模超过上限：tasks ≤ ' + MAX_SCHEDULE_TASKS + '，slots ≤ ' + MAX_SCHEDULE_SLOTS);
+    }
     if (b.params !== undefined && b.params !== null && !isPlainObject(b.params)) {
       throw new ApiError('E1001', 'params 必须是对象');
     }
@@ -118,7 +160,7 @@ function createRouter(store, auth) {
     const b = needObject(body);
     if (typeof b.id !== 'string' || !/^[0-9a-f-]{36}$/.test(b.id)) throw new ApiError('E1001', '计划请求 ID 无效');
     const key = userId + ':' + b.id;
-    const signature = JSON.stringify([b.base, b.input, b.result]);
+    const signature = createHash('sha256').update(JSON.stringify([b.base, b.input, b.result])).digest('hex');
     const previous = planReceipts.get(key);
     if (previous) {
       if (previous.expiresAt <= Date.now()) {
@@ -131,9 +173,12 @@ function createRouter(store, auth) {
     }
     const result = scheduleRoute(b.input);
     if (!result.blocks.length) throw new ApiError('E1001', '没有可提交的排程结果');
-    const baseline = store.getPlanBaseline(userId);
+    const snapshot = store.readSnapshot(userId);
+    const baseline = snapshot.planBaseline
+      ? { version: snapshot.planBaseline.version, stale: snapshot.planBaseline.seq !== snapshot.seq }
+      : null;
     const version = baseline ? baseline.version : null;
-    const current = revision(userId);
+    const current = snapshot.revision;
     if (JSON.stringify(result) !== JSON.stringify(b.result)) {
       return { status: 'conflict', reason: 'result-changed', version };
     }
@@ -143,20 +188,15 @@ function createRouter(store, auth) {
     if (!valid && (b.ticket || b.base !== version || (baseline && baseline.stale))) {
       const ticket = draft && draft.signature === signature && draft.revision === current && draft.expiresAt > Date.now()
         ? draft.ticket : randomUUID();
-      for (const [k, d] of planReviews) if (d.expiresAt <= Date.now()) planReviews.delete(k);
-      if (planReviews.size >= maxDrafts && !planReviews.has(key)) planReviews.delete(planReviews.keys().next().value);
-      planReviews.set(key, { ticket, signature, revision: current, expiresAt: Date.now() + draftTtlMs });
+      setBudgeted(planReviews, key, { userId, ticket, signature, revision: current, expiresAt: Date.now() + draftTtlMs },
+        MAX_DRAFT_BYTES, maxDraftsPerUser, Date.now(), maxDrafts);
       return { status: 'conflict', reason: baseline ? 'baseline-changed' : 'baseline-missing', version, ticket };
     }
     const response = { status: 'committed', version: randomUUID() };
-    store.recordSchedule(userId, response.version, result);
+    store.recordSchedule(userId, response.version, result, current);
     planReviews.delete(key);
-    /* 收据限界：过期清扫 + 容量上限（FIFO 淘汰），防长驻进程无界增长（与 drafts 同构） */
-    for (const [k, r] of planReceipts) if (r.expiresAt <= Date.now()) planReceipts.delete(k);
-    if (planReceipts.size >= maxReceipts && !planReceipts.has(key)) {
-      planReceipts.delete(planReceipts.keys().next().value);
-    }
-    planReceipts.set(key, { signature, response, expiresAt: Date.now() + receiptTtlMs });
+    setBudgeted(planReceipts, key, { userId, signature, response, expiresAt: Date.now() + receiptTtlMs },
+      MAX_RECEIPT_BYTES, maxReceiptsPerUser, Date.now(), maxReceipts);
     return response;
   }
 
@@ -167,11 +207,17 @@ function createRouter(store, auth) {
     if (b.week === undefined) throw new ApiError('E1001', '缺少字段 week');
     needArray(b.tasks, 'tasks');
     needArray(b.week, 'week');
+    if (b.tasks.length > MAX_SCHEDULE_TASKS || b.week.length > 7) {
+      throw new ApiError('E4002', '重排规模超过上限：tasks ≤ ' + MAX_SCHEDULE_TASKS + '，week ≤ 7');
+    }
     if (b.params !== undefined && b.params !== null && !isPlainObject(b.params)) {
       throw new ApiError('E1001', 'params 必须是对象');
     }
     if (b.history !== undefined && b.history !== null && !isPlainObject(b.history)) {
       throw new ApiError('E1001', 'history 必须是对象');
+    }
+    if (b.allowBuffer !== undefined && typeof b.allowBuffer !== 'boolean') {
+      throw new ApiError('E1001', 'allowBuffer 必须是布尔值');
     }
     const result = replan({
       tasks: b.tasks,
@@ -179,14 +225,14 @@ function createRouter(store, auth) {
       params: b.params || {},
       history: b.history || {},
       locks: b.locks,
+      allowBuffer: b.allowBuffer === true,
       timestamp: b.timestamp === undefined ? null : b.timestamp
     });
     if (result.accepted !== true && result.needsConfirmation !== true) return result;
     const now = Date.now();
-    for (const [id, draft] of drafts) if (draft.expiresAt <= now) drafts.delete(id);
-    if (drafts.size >= maxDrafts) drafts.delete(drafts.keys().next().value);
     const draftId = randomUUID();
-    drafts.set(draftId, { userId, revision: revision(userId), expiresAt: now + draftTtlMs, result, locks: b.locks, params: b.params });
+    setBudgeted(drafts, draftId, { userId, revision: store.readSnapshot(userId).revision, expiresAt: now + draftTtlMs, result, locks: b.locks, params: b.params },
+      MAX_DRAFT_BYTES, maxDraftsPerUser, now, maxDrafts);
     return { ...result, draftId };
   }
 
@@ -202,9 +248,9 @@ function createRouter(store, auth) {
       throw new ApiError('E2001', '找不到重排草案');
     }
     if (draft.confirmed) return draft.confirmed;
-    if (draft.revision !== revision(userId)) throw new ApiError('E3001', '计划状态已变化，请重新预览');
+    if (draft.revision !== store.readSnapshot(userId).revision) throw new ApiError('E3001', '计划状态已变化，请重新预览');
     const confirmed = draft.result.needsConfirmation ? confirmReplan(draft.result) : draft.result;
-    store.recordReplan(userId, confirmed, { version: randomUUID(), locks: draft.locks, params: draft.params });
+    store.recordReplan(userId, confirmed, { version: randomUUID(), locks: draft.locks, params: draft.params }, draft.revision);
     draft.confirmed = confirmed;
     return confirmed;
   }
@@ -335,15 +381,21 @@ function createRouter(store, auth) {
     if (!entry) {
       /* 路径存在但方法不符 → E1001；路径不存在 → E2001 */
       const otherMethod = Object.keys(routes).some((k) => k.slice(k.indexOf(' ')) === key.slice(key.indexOf(' ')));
-      return Promise.reject(new ApiError(otherMethod ? 'E1001' : 'E2001', otherMethod ? '方法不支持：' + key : '接口不存在：' + key));
+      return Promise.reject(new ApiError(otherMethod ? 'E1001' : 'E2001', otherMethod ? '方法不支持' : '接口不存在'));
     }
     return Promise.resolve().then(() => entry.handler(ctx)).then(
       (body) => ({ status: 200, body: body }),
       (err) => {
         if (err instanceof ApiError) throw err;
-        /* 引擎入参异常统一映射为 E1001 */
+        if (err && err.code === 'USER_REVOKED') {
+          throw new ApiError('E4030', '用户身份已撤销');
+        }
+        if (err && err.code === 'REVISION_CONFLICT') {
+          throw new ApiError('E3001', err.message);
+        }
+        /* 引擎入参异常统一映射为 E1001；内部预算与原始 message 不返回客户端。 */
         if (err instanceof TypeError || err instanceof RangeError) {
-          throw new ApiError('E1001', err.message);
+          throw new ApiError('E1001', ERRORS.E1001.message);
         }
         throw new ApiError('E5001', err && err.message ? err.message : '服务内部错误');
       }

@@ -15,22 +15,30 @@
      assets/vendor/three.min.js          ← 原样拷贝（UMD，全局 THREE）
      assets/vendor/three-css3d.js        ← CSS3DRenderer 转换（全局 ZX_CSS3D）
    ========================================================= */
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { Script } from 'node:vm';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const EXPECTED_VERSION = '0.152.2';
 const pkg = process.argv[2];
 if (!pkg) { console.error('用法：node scripts/build-vendor-three.mjs <解包后的 package 目录>'); process.exit(1); }
 
-mkdirSync(join(ROOT, 'assets', 'vendor'), { recursive: true });
-writeFileSync(join(ROOT, 'assets', 'vendor', 'three.min.js'), readFileSync(join(pkg, 'build', 'three.min.js')));
+const packageJson = JSON.parse(readFileSync(join(pkg, 'package.json'), 'utf8'));
+if (packageJson.version !== EXPECTED_VERSION) {
+  throw new Error('three 版本必须是 ' + EXPECTED_VERSION + '，当前为 ' + packageJson.version);
+}
 
-/* CSS3DRenderer：import 块 → THREE 解构；export 尾 → window.ZX_CSS3D */
-let css3d = readFileSync(join(pkg, 'examples', 'jsm', 'renderers', 'CSS3DRenderer.js'), 'utf8');
-css3d = css3d.replace(
+const three = readFileSync(join(pkg, 'build', 'three.min.js'));
+const cssSource = readFileSync(join(pkg, 'examples', 'jsm', 'renderers', 'CSS3DRenderer.js'), 'utf8');
+let importConverted = false;
+let exportConverted = false;
+let css3d = cssSource.replace(
   /import\s*\{([^}]*)\}\s*from\s*'three';/,
   (_, names) => {
+    importConverted = true;
     const list = names.split(',').map((s) => s.trim()).filter(Boolean)
       .map((n) => n.includes(' as ') ? n.split(/\s+as\s+/)[1] + ': ' + n.split(/\s+as\s+/)[0] : n)
       .join(', ');
@@ -39,8 +47,34 @@ css3d = css3d.replace(
 );
 css3d = css3d.replace(
   /export\s*\{([^}]*)\};?/,
-  (_, names) => 'window.ZX_CSS3D = { ' + names.split(',').map((s) => s.trim()).filter(Boolean).join(', ') + ' };'
+  (_, names) => {
+    exportConverted = true;
+    return 'window.ZX_CSS3D = { ' + names.split(',').map((s) => s.trim()).filter(Boolean).join(', ') + ' };';
+  }
 );
-writeFileSync(join(ROOT, 'assets', 'vendor', 'three-css3d.js'), css3d);
+if (!importConverted || !exportConverted || /\b(?:import|export)\s/.test(css3d)) {
+  throw new Error('CSS3DRenderer 的 ESM 转换不完整，拒绝写入 vendor');
+}
+css3d = '/* Three.js Authors / CSS3DRenderer · MIT License · three@' + EXPECTED_VERSION + ' */\n' + css3d;
+new Script(three.toString('utf8'), { filename: 'three.min.js' });
+new Script(css3d, { filename: 'three-css3d.js' });
+
+function atomicWrite(file, data) {
+  const tmp = file + '.' + process.pid + '.' + randomBytes(8).toString('hex') + '.tmp';
+  let created = false;
+  try {
+    writeFileSync(tmp, data, { flag: 'wx' });
+    created = true;
+    renameSync(tmp, file);
+    created = false;
+  } finally {
+    if (created) { try { unlinkSync(tmp); } catch (e) { /* retain original error */ } }
+  }
+}
+
+const outDir = join(ROOT, 'assets', 'vendor');
+mkdirSync(outDir, { recursive: true });
+atomicWrite(join(outDir, 'three.min.js'), three);
+atomicWrite(join(outDir, 'three-css3d.js'), css3d);
 
 console.log('vendor 完成：assets/vendor/three.min.js（UMD 全局 THREE）+ assets/vendor/three-css3d.js（全局 ZX_CSS3D）');

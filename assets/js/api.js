@@ -1,24 +1,18 @@
 /* =========================================================
-   诺瓦 Nova · 后端通信 + 降级 + op 队列
+   诺瓦 Nova · 服务端计算接口 + 本地主数据隔离
    契约：docs/HANDOFF.md 第 5 / 6 节
-   - 超时 3000ms，超时或网络失败 → 抛错（由 engine.js 降级兜底）
-   - 写操作先入 localStorage op 队列（键 zx.op_queue）
-   - 鉴权：服务端签发 Bearer 凭证，业务请求统一携带
+   - 服务端仅保留 feasibility / schedule / replan / attribute / llm 计算能力
+   - 本地主数据与业务确认均在本机完成；旧 zx.op_queue 只读隔离，不再上行
+   - 鉴权：计算请求统一携带服务端签发的 Bearer 凭证
    ========================================================= */
 window.ZX = window.ZX || {};
 
 (function (ZX) {
   'use strict';
 
-  var U = ZX.util;
   var TIMEOUT = 3000;
-  function llmTimeout() {
-    var value = Number(window.__ZX_LLM_TIMEOUT_MS__);
-    return isFinite(value) && value > 0 ? Math.max(5000, Math.min(125000, value)) : 35000;
-  }
   var DEFAULT_BASE = 'http://127.0.0.1:8787';
   var QUEUE_KEY = 'zx.op_queue';
-  var MAX_QUEUE = 200;
 
   /* ---------- 身份凭证 ----------
      · 来源：POST /api/auth/session，服务端随机生成 userId 并签发 HMAC 凭证
@@ -27,8 +21,6 @@ window.ZX = window.ZX || {};
      · 不含任何可自造身份的字段：userId 只读自服务端响应，不回传服务端做身份判定 */
   var TOKEN_KEY = 'zx.auth_token';
   var AUTH_PATH = '/api/auth/session';
-
-  var opCounter = 0;
 
   function resolveBase() {
     var override = window.__ZX_API_BASE__;
@@ -185,13 +177,10 @@ window.ZX = window.ZX || {};
   /* 统一出口：收到 HTTP 响应即视为在线；只有网络失败/超时才标记离线 */
   function call(method, path, body) {
     return signedRequest(method, path, body).then(function (r) {
-      var recovered = status.checked && !status.online;
       status.online = true;
       status.checked = true;
       status.lastError = null;
       emit();
-      /* 首次启动由 probeBackend 在采纳状态后补传；同步请求本身不递归触发。 */
-      if (recovered && path !== '/api/sync/ops') flushQueue().catch(function () {});
       return r;
     }, function (e) {
       var reached = !!(e && typeof e.status === 'number');
@@ -203,7 +192,7 @@ window.ZX = window.ZX || {};
     });
   }
 
-  /* ---------- op 队列（C1 / C4 写路径） ---------- */
+  /* ---------- 旧 op 队列：只读隔离，禁止改写或上行 ---------- */
   function loadQueue() {
     try {
       var raw = window.localStorage.getItem(QUEUE_KEY);
@@ -213,168 +202,35 @@ window.ZX = window.ZX || {};
     } catch (e) { return []; }
   }
 
-  function saveQueue(arr) {
-    /* 只裁剪已确认历史，未确认写入不得因队列长度丢失。 */
-    var history = 0;
-    var kept = arr.slice().reverse().filter(function (op) {
-      return op.pending || ++history <= MAX_QUEUE;
-    }).reverse();
-    try { window.localStorage.setItem(QUEUE_KEY, JSON.stringify(kept)); }
-    catch (e) { /* 隐私模式 / 配额不足：不影响主链路 */ }
-  }
+  /* 本地主数据模式：保留调用兼容，但不再生成远端操作。 */
+  function queueOp() { return null; }
 
-  function nextOpId() {
-    opCounter += 1;
-    return 'op_' + Date.now().toString(36) + '_' + opCounter;
-  }
+  /* 支持界面只展示本地状态，不把隔离队列计为待同步。 */
+  function pendingCount() { return 0; }
 
-  /* clientTs 由前端生成（前端行为，允许用时钟） */
-  function queueOp(op) {
-    var o = op || {};
-    var rec = {
-      opId: o.opId || nextOpId(),
-      entity: o.entity || 'task',
-      entityId: o.entityId || '',
-      field: o.field || '',
-      value: (o.value === undefined) ? null : o.value,
-      clientTs: Date.now(),
-      baseSeq: (ZX.state && typeof ZX.state.serverSeq === 'number') ? ZX.state.serverSeq : 0,
-      pending: true
-    };
-    var q = loadQueue();
-    q.push(rec);
-    saveQueue(q);
-    emit();
-    if (status.online) { try { flushQueue().catch(function () {}); } catch (e) {} }
-    return rec;
-  }
-
-  function pendingCount() {
+  function legacyPendingCount() {
     var q = loadQueue(), n = 0;
-    for (var i = 0; i < q.length; i++) if (q[i].pending) n++;
+    for (var i = 0; i < q.length; i++) if (q[i] && q[i].pending) n++;
     return n;
   }
 
-  function traceSync(status, payload, acceptedIds, planVersion) {
-    try {
-      var sessions = payload.filter(function (op) {
-        return op.entity === 'session' && op.field === 'recorded' && op.value &&
-          typeof op.value.id === 'string' && /^s_[0-9a-z]{1,16}_[0-9]{1,16}$/.test(op.value.id);
-      }).map(function (op) {
-        return { id: op.value.id, confirmed: acceptedIds.indexOf(op.opId) >= 0 };
-      });
-      var event = {
-        id: 'sync-' + U.randHex(), tool: 'sync', at: Date.now(), planVersion: planVersion,
-        rulesVersion: 'nova-sync-p0-1', status: status, sent: payload.length,
-        accepted: payload.filter(function (op) { return acceptedIds.indexOf(op.opId) >= 0; }).length
-      };
-      if (sessions.length) event.sessions = sessions;
-      U.appendTrace('zx.syncTrace', event);
-    } catch (e) { /* 留痕失败不影响队列 */ }
-  }
-
-  var syncGeneration = 0;
-  var syncInFlight = null;
-  function invalidatePendingSync() { syncGeneration++; syncInFlight = null; }
+  function invalidatePendingSync() { /* 本地模式没有在途同步 */ }
 
   function flushQueue() {
-    if (syncInFlight) return syncInFlight;
-    var generation = syncGeneration;
-    var attempted = new Set();
-    function batch(last) {
-      if (generation !== syncGeneration) return Promise.resolve(last);
-      /* 每轮重新读盘，合并传输期间新增项；本轮未确认项留待下次 flush 重试。 */
-      var pending = loadQueue().filter(function (op) {
-        return op.pending && !attempted.has(op.opId);
-      }).slice(0, MAX_QUEUE);
-      if (!pending.length) {
-        return Promise.resolve(last || { accepted: [], serverSeq: (ZX.state ? ZX.state.serverSeq : 0) });
-      }
-      var payload = pending.map(function (o) {
-        attempted.add(o.opId);
-        return {
-          opId: o.opId, entity: o.entity, entityId: o.entityId,
-          field: o.field, value: o.value, clientTs: o.clientTs, baseSeq: o.baseSeq
-        };
-      });
-      var planVersion = ZX.state && ZX.state.currentPlanVersion ? ZX.state.currentPlanVersion() : null;
-      return syncOps(payload).then(function (res) {
-        if (generation !== syncGeneration) return res;
-        var ids = (res && Array.isArray(res.accepted)) ? res.accepted : [];
-        var accepted = payload.filter(function (op) { return ids.indexOf(op.opId) >= 0; })
-          .map(function (op) { return op.opId; });
-        var cur = loadQueue();
-        for (var j = 0; j < cur.length; j++) {
-          if (accepted.indexOf(cur[j].opId) >= 0) cur[j].pending = false;
-        }
-        saveQueue(cur);
-        if (res && typeof res.serverSeq === 'number' && ZX.state) ZX.state.serverSeq = res.serverSeq;
-        var count = accepted.length;
-        traceSync(count === payload.length ? 'accepted' : count ? 'partial' : 'unconfirmed', payload, accepted, planVersion);
-        emit();
-        /* 零确认立即停止，不对未确认项忙循环。 */
-        return count ? batch(res) : res;
-      }, function (err) {
-        if (generation === syncGeneration) traceSync('failed', payload, [], planVersion);
-        throw err;
-      });
-    }
-    var running = Promise.resolve().then(function () { return batch(); }).finally(function () {
-      if (syncInFlight === running) syncInFlight = null;
+    return Promise.resolve({
+      status: 'isolated', sent: 0, accepted: [], pending: legacyPendingCount(),
+      serverSeq: (ZX.state && typeof ZX.state.serverSeq === 'number') ? ZX.state.serverSeq : 0
     });
-    syncInFlight = running;
-    return running;
   }
 
-  /* ---------- 对外接口（HANDOFF 第 6 节） ---------- */
+  /* ---------- 对外接口：只暴露计算与健康检查 ---------- */
   var PLAN_KEY = 'zx.pending_plan';
-  var PLAN_BASE = 'zx.server_plan_version';
-  var planInFlight = null;
-  function readPlanKey(key) {
-    try { return JSON.parse(window.localStorage.getItem(key) || 'null'); } catch (e) { return null; }
-  }
-  function writePlanKey(key, value) {
-    window.localStorage.setItem(key, JSON.stringify(value));
-  }
-  function pendingPlan() { return readPlanKey(PLAN_KEY); }
-  function clearPendingPlan() { window.localStorage.removeItem(PLAN_KEY); }
-  function stagePlan(input, result) {
-    var base = readPlanKey(PLAN_BASE);
-    var p = { id: crypto.randomUUID(), input: input, result: result };
-    if (base) p.base = base.version;
-    if (ZX.state && ZX.state.currentPlanVersion) p.localVersion = ZX.state.currentPlanVersion();
-    writePlanKey(PLAN_KEY, p);
-    return p;
-  }
-  function reviewPlan(ticket) {
-    var p = pendingPlan();
-    if (!p) return Promise.resolve(null);
-    if (planInFlight) return planInFlight;
-    var body = ticket ? Object.assign({}, p, { ticket: ticket }) : p;
-    planInFlight = call('POST', '/api/plan/review', body).then(function (r) {
-      var current = pendingPlan();
-      if (r && r.status === 'committed' && current && current.id === p.id) {
-        writePlanKey(PLAN_BASE, { version: r.version });
-        clearPendingPlan();
-      }
-      return r;
-    }).finally(function () { planInFlight = null; });
-    return planInFlight;
-  }
-  function getState() {
-    return call('GET', '/api/state').then(function (r) {
-      if (!pendingPlan()) {
-        try { writePlanKey(PLAN_BASE, { version: r.planBaseline ? r.planBaseline.version : null }); } catch (e) { /* 本地存储不可用 */ }
-      }
-      return r;
-    });
+  function pendingPlan() {
+    try { return JSON.parse(window.localStorage.getItem(PLAN_KEY) || 'null'); } catch (e) { return null; }
   }
   function feasibility(p) { return call('POST', '/api/feasibility', p || {}); }
   function schedule(p) { return call('POST', '/api/schedule', p || {}); }
   function replan(p) { return call('POST', '/api/replan', p || {}); }
-  function confirmReplan(draftId) { return call('POST', '/api/replan/confirm', { draftId: draftId }); }
-  function undo(snapshot) { return call('POST', '/api/replan/undo', { snapshot: snapshot }); }
-  function syncOps(ops) { return call('POST', '/api/sync/ops', { ops: ops || [] }); }
   function health() { return call('GET', '/api/health'); }
   /* LLM 理解与分析层：失败/未配置由服务端以 E5010/5011/5012 报出，调用方按码降级 */
   function llmClarify(p) { return call('POST', '/api/llm/clarify', p || {}); }
@@ -384,18 +240,11 @@ window.ZX = window.ZX || {};
     /* op 队列键名的单一事实源（settings.js 的 wipe 也按此键清队列） */
     QUEUE_KEY: QUEUE_KEY,
 
-    /* 后端通信 */
-    getState: getState,
-    stagePlan: stagePlan,
+    /* 服务端计算与健康检查 */
     pendingPlan: pendingPlan,
-    clearPendingPlan: clearPendingPlan,
-    reviewPlan: reviewPlan,
     feasibility: feasibility,
     schedule: schedule,
     replan: replan,
-    confirmReplan: confirmReplan,
-    undo: undo,
-    syncOps: syncOps,
     health: health,
     llmClarify: llmClarify,
     llmAnalyze: llmAnalyze,
@@ -405,7 +254,8 @@ window.ZX = window.ZX || {};
     flushQueue: flushQueue,
     invalidatePendingSync: invalidatePendingSync,
     pendingCount: pendingCount,
-    /* 测试锚点：sync-recovery.test.js 用它检查队列 pending 形态 */
+    legacyPendingCount: legacyPendingCount,
+    /* 测试锚点：只读检查隔离队列，不提供改写能力 */
     loadQueue: loadQueue,
 
     /* 连接状态 */

@@ -14,6 +14,15 @@ function boot(storage) {
   for (const path of ['../assets/js/util.js', '../assets/js/state.js', '../assets/js/flows/exec.js']) vm.runInContext(readFileSync(require.resolve(path), 'utf8'), ctx);
   return { ZX, ops };
 }
+test('日期解析拒绝不存在日期，缺时间戳不产生 1970 记录，补录拒绝未来与非法日期', () => {
+  const { ZX } = boot(new Map());
+  assert.equal(ZX.util.parseDay('2026-02-31'), null);
+  assert.equal(ZX.util.parseDay('2026-13-01'), null);
+  assert.equal(ZX.util.parseDay('2024-02-29').getDate(), 29);
+  assert.equal(ZX.util.dayKey(undefined), '');
+  assert.equal(ZX.util.dayKey(NaN), '');
+});
+
 test('执行记录关联计划版本，刷新保留版本，改期后记录使用新版本', () => {
   const storage = new Map();
   const { ZX, ops } = boot(storage);
@@ -33,7 +42,11 @@ test('执行记录关联计划版本，刷新保留版本，改期后记录使�
 test('本地重排快照跨刷新恢复，清除后不再恢复', () => {
   const storage = new Map();
   const { ZX } = boot(storage);
-  const snapshot = { tasks: structuredClone(ZX.state.tasks), week: structuredClone(ZX.state.week), timestamp: 123, moved: [] };
+  const taskId = ZX.state.tasks[0].id;
+  const snapshot = {
+    tasks: structuredClone(ZX.state.tasks), week: structuredClone(ZX.state.week), timestamp: 123, moved: [],
+    afterTasks: structuredClone(ZX.state.tasks), afterDayAssign: { [taskId]: '三' }
+  };
   ZX.state.snapshot = snapshot;
   ZX.state.replanned = true;
   ZX.state.saveOverlay();
@@ -41,7 +54,6 @@ test('本地重排快照跨刷新恢复，清除后不再恢复', () => {
   assert.equal(next.replanned, true);
   assert.deepEqual(JSON.parse(JSON.stringify(next.snapshot)), snapshot);
   const { ZX: restored } = boot(storage);
-  const taskId = snapshot.tasks[0].id;
   restored.state.snapshot.moved = [{ taskId, from: '日', to: '三' }];
   restored.state.dayAssign[taskId] = '三';
   restored.state.replanHistory = [{ undone: false, planVersionAfter: restored.state.currentPlanVersion() }];
@@ -95,7 +107,7 @@ test('确认删除阶段目标后，刷新保留计划和记录，CSV 不再导�
   ZX.exec.record({ taskId, minutes: 25 });
   ZX.state.saveOverlay();
   assert.match(ZX.settings.csv(), /私人阶段目标/);
-  storage.set('zx.trash', JSON.stringify({ at: Date.now(), snapshot: { goal: ZX.state.goal, feas: ZX.state.feas, tasks: ZX.state.tasks, sessions: ZX.state.sessions } }));
+  storage.set('zx.trash', JSON.stringify({ at: Date.now(), snapshot: ZX.state.exportSnapshot() }));
   await ZX.settings.confirmRemoveGoal();
   const trash = JSON.parse(storage.get('zx.trash')).snapshot;
   assert.equal(trash.goal, undefined);
@@ -103,11 +115,9 @@ test('确认删除阶段目标后，刷新保留计划和记录，CSV 不再导�
   assert.equal(trash.tasks[0].id, taskId);
   assert.equal(trash.sessions[0].minutes, 25);
   const next = init();
-  const serverSeed = { ...seed, goal: { ...seed.goal, name: '旧服务端目标' } };
-  assert.equal(next.state.adoptServerState({ seed: serverSeed }), true);
-  assert.equal(next.state.goal.name, '旧服务端目标');
+  assert.equal(next.state.adoptServerState, undefined);
+  assert.equal(next.api.clearPendingPlan, undefined);
   assert.equal(next.state.bootOverlayLoaded(), true);
-  next.state.applyOverlay();
   assert.equal(next.state.goal.source, 'removed');
   assert.equal(next.state.tasks[0].id, taskId);
   assert.equal(next.state.sessions[0].minutes, 25);
@@ -118,7 +128,7 @@ test('确认删除阶段目标后，刷新保留计划和记录，CSV 不再导�
     ...trash, goal: { name: '私人阶段目标', source: 'user' }, feas: { demand: 99 },
     sessions: [{ ...trash.sessions[0], minutes: 42 }]
   } }));
-  assert.equal(next.settings.restore(), true);
+  assert.equal(await next.settings.restore(), true);
   const restored = init();
   assert.equal(restored.state.goal.source, 'removed');
   assert.equal(restored.state.feas.demand, 0);

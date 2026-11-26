@@ -35,20 +35,26 @@ window.ZX = window.ZX || {};
     return '';
   }
 
-  /* ---------- 顶栏同步指示器：三态 ----------
-     ⑧ 离线：顶栏同步位改用诺瓦的离线褪色头像（avatar-v4-offline.svg）承担状态指示，
-     文字状态收进图片 alt / title；待上行数量保留为数字角标，信息不丢。 */
+  /* ---------- 本地主数据指示器：服务端只报告计算可达性 ---------- */
   function updateSync() {
     var online = ZX.api.isOnline();
-    var pending = ZX.api.pendingCount();
+    var legacy = ZX.api.legacyPendingCount ? ZX.api.legacyPendingCount() : 0;
     var dot = U.$('#syncDot'), text = U.$('#syncText');
     if (dot && text) {
-      if (online) {
+      if (ZX.state && (ZX.state.overlaySaveFailed || ZX.state.localLoadFailed)) {
+        dot.className = 'dot warn';
+        text.textContent = ZX.state.localLoadFailed
+          ? '本地数据加载失败 · 已暂停覆盖'
+          : '本机保存失败 · 刷新可能丢失';
+      } else if (online) {
         dot.className = 'dot';
-        text.textContent = pending > 0 ? ('本地优先 · 待上行 ' + pending)
-          : (ZX.api.pendingPlan && ZX.api.pendingPlan() ? '本地优先 · 计划待复核' : '本地优先 · 已同步');
+        text.textContent = legacy > 0
+          ? '本地主数据 · 旧队列已隔离 ' + legacy
+          : '本地主数据 · 服务端仅计算';
       } else {
-        var label = pending > 0 ? ('离线 · 待上行 ' + pending) : '离线 · 本地计算';
+        var label = legacy > 0
+          ? '离线 · 本地可用 · 旧队列已隔离 ' + legacy
+          : '离线 · 本地可用';
         dot.className = 'dot off hide';
         var img = text.querySelector('.sync-offline');
         if (!img) {
@@ -56,28 +62,35 @@ window.ZX = window.ZX || {};
           var src = (window.ZX_MASCOT && window.ZX_MASCOT.offlineAvatar)
             ? window.ZX_MASCOT.offlineAvatar : 'assets/img/avatar-v4-offline.svg';
           text.innerHTML = '<img class="sync-offline" src="' + src + '" width="24" height="24" alt="" />' +
-            '<span class="sync-pending"></span>';
+            '<span class="sync-pending off"></span>';
           img = text.querySelector('.sync-offline');
         }
         img.alt = label;
         img.title = label;
         var num = text.querySelector('.sync-pending');
         if (num) {
-          num.textContent = pending > 0 ? String(pending) : '';
-          num.className = pending > 0 ? 'sync-pending' : 'sync-pending off';
+          num.textContent = '';
+          num.className = 'sync-pending off';
         }
       }
     }
     var pDot = U.$('#plannerDot'), pText = U.$('#plannerText');
     if (pDot && pText) {
       pDot.className = online ? 'dot ac' : 'dot off';
-      pText.textContent = online ? '日程引擎 在线' : '日程引擎 离线';
+      pText.textContent = online ? '计算引擎 在线' : '计算引擎 离线 · 本地可用';
     }
     var review = U.$('#reviewPlan');
-    if (review && ZX.api.pendingPlan) review.hidden = !ZX.api.pendingPlan();
+    if (review) review.hidden = true;
     var opEl = U.$('#opPending');
-    if (opEl) opEl.textContent = pending;
+    if (opEl) opEl.textContent = legacy + ' 项已隔离';
   }
+
+  /* 直接保存入口也会通知，不依赖整页 render 或移动端隐藏的同步栏。 */
+  ZX.onOverlaySaveStatus = function () {
+    var warning = U.$('#saveWarning');
+    if (warning) warning.hidden = !(ZX.state && ZX.state.overlaySaveFailed);
+    if (ZX.api && typeof ZX.api.isOnline === 'function' && typeof ZX.api.pendingCount === 'function') updateSync();
+  };
 
   /* ---------- 工作台 ---------- */
   var railButtons = [];
@@ -108,6 +121,14 @@ window.ZX = window.ZX || {};
   ZX.render = function (options) {
     var S = ZX.state;
     document.documentElement.dataset.tab = S.tab;
+    var homeSummary = U.$('#homeSummary');
+    if (homeSummary && S.tab === 'chat' && ZX.homeSummary) {
+      try { homeSummary.innerHTML = ZX.homeSummary.render(); }
+      catch (e) {
+        homeSummary.textContent = '今日摘要暂时无法显示';
+        if (window.console && console.error) console.error('[zx] home summary failed:', e);
+      }
+    }
     try {
       var f = S.feasibility();
       var rEl = U.$('#ctxR');
@@ -137,7 +158,9 @@ window.ZX = window.ZX || {};
     }
     /* 渲染即持久化：任何状态变更后都会走到这里，统一落本地 overlay
        （新目标 / 记录 / 跳过 / 补录跨刷新存活；见 state.js 顶部注释） */
-    if (!(options && options.skipOverlaySave) && ZX.state.saveOverlay) ZX.state.saveOverlay();
+    if (!(options && options.skipOverlaySave) && ZX.state.saveOverlay) {
+      ZX.state.saveOverlay();
+    }
   };
 
   ZX.setTab = function (id, options) {
@@ -185,11 +208,10 @@ window.ZX = window.ZX || {};
     if (act === 'finish') { ZX.assistant.finishTask(b.dataset.id, false); return; }
     if (act === 'done') { ZX.assistant.finishTask(b.dataset.id, true); return; }
     if (act === 'buffer') { ZX.assistant.toggleBuffer(); return; }
-    if (act === 'review-plan') { ZX.reviewPendingPlan(true); return; }
-    if (act === 'confirm-replan') { if (b.dataset.draft && ZX.flows.replan) ZX.flows.replan.confirmReplan(b.dataset.draft); return; }
+    if (act === 'confirm-replan') { if (ZX.flows.replan) ZX.flows.replan.confirmReplan(b.dataset.draft); return; }
     if (act === 'undo') { if (ZX.flows.replan) ZX.flows.replan.undoReplan(); return; }
+    if (act === 'restore-deferred') { if (ZX.flows.exec) ZX.flows.exec.restoreDeferred(b.dataset.id); return; }
     if (act === 'tired') { ZX.assistant.adoptTired(); return; }
-    if (act === 'preset') { ZX.assistant.togglePreset(); return; }
     if (act === 'tg') { ZX.assistant.toggleNotif(b.dataset.key); return; }
     if (act === 'pref') { ZX.util.togglePref(b.dataset.key); ZX.render(); return; }
 
@@ -284,59 +306,9 @@ window.ZX = window.ZX || {};
     sendToNova(c.dataset.say, 320);
   });
 
-  /* ---------- 后端探测（启动时 + 每次 API 调用失败时更新状态，不轮询） ---------- */
-  var planReviewRunning = false;
-  var deferredReview = null;
-  ZX.reviewPendingPlan = function (manual, staged) {
-    if (staged === true) updateSync();
-    var pending = ZX.api.pendingPlan();
-    if (planReviewRunning || !pending || (manual !== true && (deferredReview === pending.id || !ZX.api.isOnline()))) return;
-    if (pending.localVersion && pending.localVersion !== ZX.state.currentPlanVersion()) {
-      deferredReview = pending.id;
-      if (manual === true) ZX.ui.toast('本机计划已变化，请重新生成并确认计划。旧排程未上传。', 'warn');
-      return;
-    }
-    planReviewRunning = true;
-    ZX.api.reviewPlan().then(async function (r) {
-      while (r && r.status === 'conflict' && ZX.api.pendingPlan()?.id === pending.id) {
-        deferredReview = pending.id;
-        if (!r.ticket) {
-          ZX.ui.toast('云端重算结果已变化，保留本机计划；请重新生成并确认计划。', 'warn');
-          return;
-        }
-        var ok = await ZX.ui.confirm({ title: '再次确认计划同步',
-          body: '<p>云端计划基线已变化或缺失。本机排程已通过服务端重算；继续将以本机确认的排程更新云端基线，取消则保留本机计划并暂不上传。</p>' });
-        if (!ok || ZX.api.pendingPlan()?.id !== pending.id ||
-            (pending.localVersion && pending.localVersion !== ZX.state.currentPlanVersion())) return;
-        r = await ZX.api.reviewPlan(r.ticket);
-      }
-      if (r && r.status === 'committed') ZX.ui.toast('计划基线已同步', 'ok');
-    }).catch(function () { ZX.ui.toast('计划保留在本机，待联网复核。', 'warn'); })
-      .finally(function () { planReviewRunning = false; updateSync(); });
-  };
-
+  /* ---------- 服务端探测：只确认计算可达性，不采纳或提交业务状态 ---------- */
   function probeBackend() {
-    ZX.api.health().then(function () {
-      return ZX.api.getState().then(function (payload) {
-        /* 静默覆盖：成功后用后端数据替换本地状态并刷新视图 */
-        if (payload) {
-          var changed = ZX.state.adoptServerState(payload);
-          /* 本地优先：回访用户的 overlay 承载未上行的本地数据，采纳后覆写保持本地视角；
-             换设备（启动时无 overlay）则不回读——启动渲染写下的只是种子投影，
-             覆写会吃掉服务端回放的改期 / 锁定等状态 */
-          if (ZX.state.bootOverlayLoaded()) ZX.state.applyOverlay();
-          if (changed) ZX.render();
-        }
-      }, function () {
-        /* state 接口失败：本地种子数据保持不变，仅重新确认一次可达性 */
-        return ZX.api.health().catch(function () { });
-      });
-    }).then(function () {
-      if (!ZX.api.isOnline()) return;
-      return ZX.api.flushQueue().catch(function () { }).then(ZX.reviewPendingPlan);
-    }).catch(function () {
-      /* 离线：完全保持本地种子数据，功能走本地降级链路 */
-    });
+    ZX.api.health().catch(function () { });
   }
 
   /* ---------- 启动 ---------- */
@@ -348,7 +320,7 @@ window.ZX = window.ZX || {};
     var h = new Date().getHours();
     var greet = h < 11 ? '上午好' : h < 18 ? '下午好' : '晚上好';
     var done = S.tasks.filter(function (t) { return t.done; });
-    var todo = S.tasks.filter(function (t) { return !t.done && !t.skipped && !t.abandoned && !t.substituted; });
+    var todo = ZX.flows.exec.activeTasks().filter(function (t) { return !t.done; });
     /* 剩余量口径与今日页 KPI 同源（exec.metrics 过滤跳过项） */
     var m = ZX.flows.exec.metrics();
     var rest = '';
@@ -371,16 +343,10 @@ window.ZX = window.ZX || {};
     ZX.state.folds = ZX.ui.loadFolds();
     if (ZX.flows && ZX.flows.settings) ZX.flows.settings.init();
     ZX.api.onStatus(updateSync);
-    var wasOnline = false;
-    ZX.api.onStatus(function (status) {
-      var recovered = !wasOnline && status.online;
-      wasOnline = status.online;
-      if (recovered) setTimeout(ZX.reviewPendingPlan, 0);
-    });
     window.addEventListener('online', function () {
-      ZX.api.health().then(function () { ZX.reviewPendingPlan(); }).catch(function () {});
+      ZX.api.health().catch(function () { });
     });
-    updateSync();   /* 初始同步态：离线时顶栏显示「离线 · 本地计算」 */
+    updateSync();   /* 初始本地态：离线时顶栏显示「离线 · 本地可用」 */
     updateListen(); /* 初始聆听态：输入台头像换内联副本（离线时也能显示） */
 
     U.$('#chips').innerHTML = CHIPS.map(function (c) {
@@ -399,7 +365,7 @@ window.ZX = window.ZX || {};
     setInterval(function () { if (ZX.state.running) ZX.assistant.tickTimer(); }, 1000);
 
     /* GL 舞台（全量重构）：WebGL+CSS3D 双渲染器接管视觉层。
-       初始化失败时 engine 自动置 html[data-3d="off"]，以上 DOM 逻辑原样运行（零损失降级）。
+       初始化失败时 engine 自动置 html[data-gl3d="off"]，以上 DOM 逻辑原样运行（零损失降级）。
        业务层（state/api/engine/flows）与 GL 无耦合，两模式共用。 */
     if (document.documentElement.dataset.gl3d === 'on' && window.ZX_GL) {
       ZX_GL.init();

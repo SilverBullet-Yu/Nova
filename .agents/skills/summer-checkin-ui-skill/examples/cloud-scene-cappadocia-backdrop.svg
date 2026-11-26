@@ -1,0 +1,105 @@
+<!-- ======================================================================
+     Summer Checkin UI Skill · examples/cloud-scene-cappadocia-backdrop.svg
+     场景：cloud 云端暖灰夜色 · 卡帕多奇亚热气球朝霞
+     用法：直接拷贝本文件的 <svg>…</svg>（不要外层注释），替换 HTML body 下的
+          <img class="backdrop" …>。保留 class="backdrop" 即可套上所有 backdrop CSS。
+     零外链、零 CORS、零 ORB、首帧 100% 能看见画面。
+     画宽高：1920×1080 · 适配所有场景的 backrop：position:fixed; inset:0; object-fit:cover
+     来源：Skill 内置原创 SVG · 无任何作者/版权标注需求（仅 HTML 注释存档即可）
+   ====================================================================== -->
+<svg class="backdrop" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1e2a3d"/>
+      <stop offset="28%" stop-color="#3d3d5c"/>
+      <stop offset="50%" stop-color="#c47a4a"/>
+      <stop offset="68%" stop-color="#efb069"/>
+      <stop offset="82%" stop-color="#f6d47e"/>
+      <stop offset="100%" stop-color="#e9c07a"/>
+    </linearGradient>
+    <radialGradient id="sun" cx="50%" cy="0%" r="60%">
+      <stop offset="0%" stop-color="#fff5cf" stop-opacity="1"/>
+      <stop offset="30%" stop-color="#ffe79a" stop-opacity=".85"/>
+      <stop offset="65%" stop-color="#f4bb5c" stop-opacity=".35"/>
+      <stop offset="100%" stop-color="#f4bb5c" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="mt1" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#4d4a5e"/>
+      <stop offset="100%" stop-color="#2a2a38"/>
+    </linearGradient>
+    <linearGradient id="mt2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3c373a"/>
+      <stop offset="100%" stop-color="#1e1b1e"/>
+    </linearGradient>
+    <linearGradient id="mt3" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2a2628"/>
+      <stop offset="100%" stop-color="#100d0e"/>
+    </linearGradient>
+    <radialGradient id="b1" cx="50%" cy="35%" r="60%">
+      <stop offset="0%" stop-color="#ffd7c5"/>
+      <stop offset="40%" stop-color="#f38a6e"/>
+      <stop offset="100%" stop-color="#b0452e"/>
+    </radialGradient>
+    <radialGradient id="b2" cx="50%" cy="35%" r="60%">
+      <stop offset="0%" stop-color="#e2ecff"/>
+      <stop offset="40%" stop-color="#6d97e0"/>
+      <stop offset="100%" stop-color="#2d4d91"/>
+    </radialGradient>
+    <radialGradient id="b3" cx="50%" cy="35%" r="60%">
+      <stop offset="0%" stop-color="#fff6c9"/>
+      <stop offset="40%" stop-color="#f1c860"/>
+      <stop offset="100%" stop-color="#b97f20"/>
+    </radialGradient>
+    <radialGradient id="b4" cx="50%" cy="35%" r="60%">
+      <stop offset="0%" stop-color="#dff6d6"/>
+      <stop offset="40%" stop-color="#69b56f"/>
+      <stop offset="100%" stop-color="#2d7338"/>
+    </radialGradient>
+    <radialGradient id="b5" cx="50%" cy="35%" r="60%">
+      <stop offset="0%" stop-color="#ecd6f5"/>
+      <stop offset="40%" stop-color="#9b6fc8"/>
+      <stop offset="100%" stop-color="#593187"/>
+    </radialGradient>
+  </defs>
+  <rect x="0" y="0" width="1920" height="1080" fill="url(#sky)"/>
+  <rect x="0" y="-60" width="1920" height="700" fill="url(#sun)"/>
+  <path d="M0,760 L110,680 L260,730 L430,660 L570,710 L740,650 L900,720 L1080,640 L1260,700 L1440,620 L1600,690 L1770,660 L1920,720 L1920,1080 L0,1080 Z" fill="url(#mt1)" opacity=".88"/>
+  <path d="M0,850 L90,780 L150,810 L220,730 L260,770 L310,700 L350,760 L420,690 L460,740 L520,670 L560,730 L620,670 L660,720 L720,650 L760,700 L830,640 L880,710 L950,660 L1010,720 L1080,660 L1120,720 L1180,640 L1220,700 L1290,640 L1340,710 L1420,650 L1480,710 L1560,640 L1600,700 L1680,650 L1740,710 L1820,670 L1920,730 L1920,1080 L0,1080 Z" fill="url(#mt2)" opacity=".94"/>
+  <path d="M0,950 L60,900 L100,930 L150,870 L200,920 L270,850 L310,880 L360,820 L400,870 L450,800 L500,870 L560,810 L620,860 L670,800 L720,860 L780,810 L830,860 L890,810 L950,880 L1010,810 L1080,880 L1140,830 L1200,880 L1260,820 L1310,880 L1370,830 L1430,870 L1490,820 L1550,870 L1610,820 L1660,880 L1720,830 L1780,880 L1840,850 L1920,900 L1920,1080 L0,1080 Z" fill="url(#mt3)"/>
+  <g transform="translate(280,370)">
+    <ellipse cx="0" cy="0" rx="48" ry="58" fill="url(#b5)"/>
+    <rect x="-10" y="58" width="20" height="3" fill="#231f22"/>
+    <path d="M-8,61 L8,61 L10,82 L-10,82 Z" fill="#1c171a"/>
+  </g>
+  <g transform="translate(560,300)">
+    <ellipse cx="0" cy="0" rx="72" ry="88" fill="url(#b2)"/>
+    <path d="M0,-88 Q -30,0 0,88 Q 30,0 0,-88 Z" fill="#ffffff" fill-opacity=".08"/>
+    <rect x="-15" y="88" width="30" height="4" fill="#1e1a1d"/>
+    <path d="M-12,92 L12,92 L14,122 L-14,122 Z" fill="#191518"/>
+  </g>
+  <g transform="translate(1280,260)">
+    <ellipse cx="0" cy="0" rx="106" ry="130" fill="url(#b3)"/>
+    <path d="M0,-130 Q -45,0 0,130 Q 45,0 0,-130 Z" fill="#ffffff" fill-opacity=".1"/>
+    <rect x="-24" y="130" width="48" height="6" fill="#1e1816"/>
+    <path d="M-18,136 L18,136 L22,176 L-22,176 Z" fill="#17120f"/>
+    <line x1="-72" y1="100" x2="-18" y2="136" stroke="#1e1816" stroke-width="1.2"/>
+    <line x1="72"  y1="100" x2="18"  y2="136" stroke="#1e1816" stroke-width="1.2"/>
+  </g>
+  <g transform="translate(960,430)">
+    <ellipse cx="0" cy="0" rx="66" ry="80" fill="url(#b4)"/>
+    <rect x="-13" y="80" width="26" height="4" fill="#131914"/>
+    <path d="M-10,84 L10,84 L12,110 L-12,110 Z" fill="#101410"/>
+  </g>
+  <g transform="translate(1580,400)">
+    <ellipse cx="0" cy="0" rx="86" ry="106" fill="url(#b1)"/>
+    <rect x="-18" y="106" width="36" height="5" fill="#1a1210"/>
+    <path d="M-14,111 L14,111 L17,146 L-17,146 Z" fill="#130c0a"/>
+  </g>
+  <g opacity=".22" fill="#fff5cf">
+    <circle cx="350" cy="520" r="1.6"/>
+    <circle cx="720" cy="560" r="2"/>
+    <circle cx="1100" cy="600" r="1.4"/>
+    <circle cx="1420" cy="580" r="1.6"/>
+    <circle cx="1700" cy="620" r="1.4"/>
+  </g>
+</svg>

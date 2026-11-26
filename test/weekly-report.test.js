@@ -35,7 +35,7 @@ test('数据页区分今日达成率与缺少分母的周指标，不显示演�
 });
 
 test('周报将种子调整标为演示，不声称已写入日程', () => {
-  const state = {tasks:[], sessions:[], stats:{actions:['示例调整']}};
+  const state = {tasks:[], sessions:[], weekStats:{actions:['示例调整']}};
   const ZX = {state, util:{num:(v,d)=>Number.isFinite(v)?v:d, isoWeek:()=>1,
     pad2:String, nowStr:()=>'', esc:String}, ui:{fold:()=>''},
     flows:{exec:{metrics:()=>({rate:0})}}};

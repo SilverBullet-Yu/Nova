@@ -1,21 +1,22 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-tab="chat" data-grid="on" data-glow="on" data-motion="on" data-3d="on">
+<html lang="zh-CN" data-tab="chat" data-grid="on" data-glow="on" data-motion="on" data-gl3d="on">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-<meta name="theme-color" content="#EFE9F7" />
+<meta name="theme-color" content="#07130D" />
 <meta name="description" content="诺瓦 Nova：面向大学生的私人日常助理。以课表为硬骨架，把作业 DDL 与考试节点排进空档；自然语言排程、四级重排与中断挽救，全部由确定性引擎计算，可解释、可复现、零惩罚。" />
 <meta property="og:title" content="诺瓦 Nova · 大学生日常助理" />
 <meta property="og:description" content="以课表为硬骨架，说一句话就能排程、重排、复盘。确定性引擎驱动，同一输入必得同一输出。" />
 <meta property="og:type" content="website" />
-<meta name="color-scheme" content="light" />
+<meta name="color-scheme" content="dark" />
 <title>诺瓦 Nova · 大学生日常助理</title>
 <link rel="icon" href="assets/img/favicon-v4.svg" type="image/svg+xml" />
+<!-- Historical visual reference only (not loaded): “Rainy Lights.jpg” by Defi22, CC BY-SA 4.0. Source: https://commons.wikimedia.org/wiki/File:Rainy_Lights.jpg. Nova uses local gradients. -->
 <script>
   /* 首帧前应用本地视觉偏好，避免主题闪烁（与 assets/js/util.js 共用同一存储键）。
      动效裁决：显式选择（true/false）优先；从未选择时才跟随系统 reduce-motion。
-     3D 裁决（prefs.gl3d）：显式 false 关闭 WebGL 舞台（回 DOM 模式）；默认 on，
-     运行期 WebGL 不可用时由 gl/engine.js 再降级为 data-3d="off"。 */
+     3D 舞台不由偏好开关控制：以 html[data-gl3d="on"] 初始标记启用，
+     运行期 WebGL 不可用或初始化异常时由 gl/engine.js 降级为 data-gl3d="off"。 */
   (function () {
     try {
       var p = JSON.parse(localStorage.getItem('zx.ui_prefs') || '{}') || {};
@@ -26,13 +27,14 @@
         : p.motion === true ? 'on'
         : (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches ? 'off' : 'on');
       r.dataset.font = (p.font === 'm' || p.font === 'l') ? p.font : '';
-      r.dataset.gl3d = p.gl3d === false ? 'off' : 'on';
     } catch (e) { /* 隐私模式禁用 localStorage 时保持默认 */ }
   })();
 </script>
 <link rel="stylesheet" href="assets/css/app.css" />
 </head>
 <body>
+<div id="saveWarning" class="save-warning" role="alert" hidden>本机保存失败，当前修改可能在刷新后丢失。</div>
+<input id="backupFileInput" type="file" accept=".json,application/json" aria-label="选择 Nova 完整备份文件" hidden />
 <a class="skip-link" href="#input">跳到输入框</a>
 
 <!-- ── WebGL 舞台（底层画布）：氛围纸面 / 3D 页签 / 诺瓦形象 / 脉冲粒子 ── -->
@@ -57,11 +59,11 @@
     <nav class="tnav" id="rail" aria-label="主导航"></nav>
   </header>
 
-  <button class="btn" id="reviewPlan" type="button" data-act="review-plan" hidden>计划待复核 · 点击重试</button>
 
   <!-- 语义源树：GL 模式下被场景克隆呈现（display:none），降级模式原样可见 -->
   <div class="shell">
     <section class="copilot">
+      <div class="home-intro"><div class="home-eyebrow">YOUR SPACE, YOUR PACE</div><h1>把今天，慢慢安排好。</h1><p>从一句话开始，剩下的交给诺瓦。</p></div>
       <div class="cp-body" id="chat" role="log" aria-live="polite" aria-relevant="additions" aria-label="与诺瓦的对话记录"></div>
       <div class="cp-foot">
         <div class="cp-acts-h"><span>一站式指令</span><span>关键词匹配 · 确定性计算</span></div>
@@ -78,6 +80,7 @@
       </div>
     </section>
 
+    <aside class="home-today" aria-label="今日计划"><div class="home-eyebrow">THE DAY AHEAD</div><h2>今日计划</h2><p>让每件事都有自己的位置</p><div id="homeSummary"></div><button type="button" class="home-open" data-act="tab" data-tab="today">查看今日安排　↗</button></aside>
     <main class="bench" id="main">
       <div class="bench-head">
         <div class="bt" id="btTitle"><b></b></div>
@@ -90,12 +93,19 @@
       </div>
       <div class="bench-body" id="view"></div>
     </main>
+    <aside class="workbench-aside" aria-label="页面提示">
+      <div class="workbench-aside-page" data-side="today"><div class="home-eyebrow">THE DAY AHEAD</div><h2>今日计划</h2><p>让每件事都有自己的位置</p><div class="workbench-tip"><b>今日任务</b><span>从眼前的一件事开始</span></div><div class="workbench-tip"><b>弹性安排</b><span>留出可以调整的空间</span></div><div class="workbench-tip"><b>执行记录</b><span>完成后记录自己的进度</span></div><button class="home-open" type="button" data-act="tab" data-tab="plan">查看计划安排　↗</button></div>
+      <div class="workbench-aside-page" data-side="plan"><div class="home-eyebrow">YOUR PLAN</div><h2>计划小贴士</h2><p>有方向，也给自己留有余地</p><div class="workbench-tip"><b>阶段目标</b><span>以当前目标为中心安排</span></div><div class="workbench-tip"><b>弹性安排</b><span>优先保留可调整的空档</span></div><div class="workbench-tip"><b>需要调整？</b><span>预览后再确认新的计划</span></div><button class="home-open" type="button" data-replan-run>重新安排　↗</button></div>
+      <div class="workbench-aside-page" data-side="data"><div class="home-eyebrow">YOUR PROGRESS</div><h2>本周回顾</h2><p>一点一滴，都在向前</p><div class="workbench-tip"><b>有效学习</b><span>从执行记录中汇总</span></div><div class="workbench-tip"><b>科目结构</b><span>看见时间的分配</span></div><div class="workbench-tip"><b>偏差归因</b><span>为下一步调整提供依据</span></div></div>
+      <div class="workbench-aside-page" data-side="me"><div class="home-eyebrow">YOUR PREFERENCES</div><h2>偏好设置</h2><p>让诺瓦更适合你的节奏</p><div class="workbench-tip"><b>可用时段</b><span>按照一周节奏自由设置</span></div><div class="workbench-tip"><b>数据与隐私</b><span>导出、删除与恢复入口</span></div><div class="workbench-tip"><b>显示与动效</b><span>按需调整显示偏好</span></div></div>
+    </aside>
   </div>
 
 </div>
 
 <!-- 共享双模数据与引擎产物（引擎唯一实现在 shared/engine/，此文件由 npm run build:engine 生成） -->
 <script src="shared/data/seed.js"></script>
+<script src="shared/placement-model.js"></script>
 <script src="assets/js/rhythm.build.js"></script>
 
 <!-- WebGL 舞台（全量重构）：vendored three UMD（file:// 经典 script，见 scripts/build-vendor-three.mjs） -->
@@ -127,6 +137,7 @@
 <script src="assets/js/flows/exec.js"></script>
 <script src="assets/js/flows/planedit.js"></script>
 <script src="assets/js/flows/settings.js"></script>
+<script src="assets/js/home-summary.js"></script>
 <script src="assets/js/main.js"></script>
 </body>
 </html>

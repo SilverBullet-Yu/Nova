@@ -14,6 +14,8 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
+const crypto = require('node:crypto');
 
 const ROOT = path.resolve(__dirname, '..');
 const SOURCES = ['feasibility.js', 'schedule.js', 'replan.js', 'attribute.js'];
@@ -33,19 +35,54 @@ function readSource(name) {
   if (code.indexOf('root.Rhythm') < 0) {
     throw new Error('shared/engine/' + name + ' 缺少 UMD 的 root.Rhythm 挂载，浏览器产物将不可用');
   }
+  new vm.Script(code, { filename: file });
+  const sandbox = { self: {} };
+  vm.runInNewContext(code, sandbox, { filename: file });
+  const exportName = name.replace(/\.js$/, '');
+  if (!sandbox.self.Rhythm || !sandbox.self.Rhythm[exportName]) {
+    throw new Error('shared/engine/' + name + ' 未导出 window.Rhythm.' + exportName);
+  }
   return '/* ==== shared/engine/' + name + ' ==== */\n' + code.replace(/\s+$/, '') + '\n';
 }
 
-function build() {
+function render() {
   const output = BANNER + '\n' + SOURCES.map(readSource).join('\n');
-  fs.writeFileSync(OUT, output, 'utf8');
+  new vm.Script(output, { filename: OUT });
+  return output;
+}
+
+function build() {
+  const output = render();
+  const tmp = OUT + '.' + process.pid + '.' + crypto.randomBytes(8).toString('hex') + '.tmp';
+  let created = false;
+  try {
+    fs.writeFileSync(tmp, output, { encoding: 'utf8', flag: 'wx' });
+    created = true;
+    fs.renameSync(tmp, OUT);
+    created = false;
+  } finally {
+    if (created) { try { fs.unlinkSync(tmp); } catch (e) { /* retain original error */ } }
+  }
   return { file: OUT, bytes: Buffer.byteLength(output), modules: SOURCES.length };
 }
 
-if (require.main === module) {
-  const r = build();
-  process.stdout.write('引擎产物已生成：' + path.relative(ROOT, r.file) +
-    '（' + r.modules + ' 个模块，' + r.bytes + ' 字节）\n');
+function check() {
+  const expected = render();
+  const current = fs.existsSync(OUT) ? fs.readFileSync(OUT, 'utf8') : null;
+  return { file: OUT, current: current === expected, bytes: Buffer.byteLength(expected), modules: SOURCES.length };
 }
 
-module.exports = { build: build };
+if (require.main === module) {
+  const mode = process.argv[2];
+  if (mode !== undefined && mode !== '--check') throw new Error('未知参数：' + mode);
+  const r = mode === '--check' ? check() : build();
+  if (mode === '--check' && !r.current) {
+    process.stderr.write('引擎产物与源码不一致，请运行 npm run build:engine\n');
+    process.exitCode = 1;
+  } else {
+    process.stdout.write((mode === '--check' ? '引擎产物校验：' : '引擎产物已生成：') + path.relative(ROOT, r.file) +
+      '（' + r.modules + ' 个模块，' + r.bytes + ' 字节）\n');
+  }
+}
+
+module.exports = { build: build, render: render, check: check };

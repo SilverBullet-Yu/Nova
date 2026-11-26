@@ -1,3 +1,4 @@
+/* Three.js Authors / CSS3DRenderer · MIT License · three@0.152.2 */
 const { Matrix4, Object3D, Quaternion, Vector3 } = window.THREE;
 
 /**

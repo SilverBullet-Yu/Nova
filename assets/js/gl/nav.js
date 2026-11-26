@@ -32,7 +32,7 @@ window.ZX_GL_NAV = (function () {
     var r = 14, w = CARD_W - 4, h = CARD_H - 4, x = 2, y = 2;
     if (state === 'on') {
       /* 薄荷黏土块：主体平涂 + 顶亮/底暗内缘（inset 亮暗模拟，无外描边） */
-      ctx.fillStyle = '#178265';
+      ctx.fillStyle = '#8FE3CF';
       ctx.beginPath();
       ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
       ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
@@ -42,7 +42,7 @@ window.ZX_GL_NAV = (function () {
       ctx.beginPath();
       ctx.moveTo(x + r, y + 1.5); ctx.lineTo(x + w - r, y + 1.5);
       ctx.stroke();
-      ctx.strokeStyle = 'rgba(9,74,56,.35)';
+      ctx.strokeStyle = 'rgba(10,50,39,.44)';
       ctx.beginPath();
       ctx.moveTo(x + r, y + h - 1.5); ctx.lineTo(x + w - r, y + h - 1.5);
       ctx.stroke();
@@ -51,7 +51,7 @@ window.ZX_GL_NAV = (function () {
     ctx.save();
     ctx.translate(x + 14, y + (CARD_H - 4) / 2 - 7.5);
     ctx.scale(15 / 16, 15 / 16);
-    ctx.strokeStyle = state === 'on' ? '#FFFFFF' : '#4A4463';
+    ctx.strokeStyle = state === 'on' ? '#0A1A10' : '#8FB7AA';
     ctx.lineWidth = 1.6; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     var icon = new DOMParser().parseFromString('<svg xmlns="http://www.w3.org/2000/svg">' + tab.icon + '</svg>', 'image/svg+xml');
     Array.prototype.forEach.call(icon.documentElement.children, function (shape) {
@@ -68,7 +68,7 @@ window.ZX_GL_NAV = (function () {
     });
     ctx.restore();
     ctx.font = '600 13px "PingFang SC","HarmonyOS Sans SC","MiSans","Microsoft YaHei",sans-serif';
-    ctx.fillStyle = state === 'on' ? '#FFFFFF' : '#4A4463';
+    ctx.fillStyle = state === 'on' ? '#0A1A10' : '#B9D9CD';
     ctx.textBaseline = 'middle';
     ctx.fillText(tab.label, x + 36, y + (CARD_H - 4) / 2 + 1);
     var tex = new THREE.CanvasTexture(cv);

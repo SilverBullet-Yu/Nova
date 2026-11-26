@@ -25,8 +25,15 @@ window.ZX = window.ZX || {};
       '</div><div class="vstats">' +
         '<div class="vs"><span>周可用</span><b>' + S.user.weeklyH + ' h</b></div>' +
         '<div class="vs"><span>每日上限</span><b>' + S.user.dailyCapMin + ' min</b></div>' +
-        '<div class="vs"><span>高效时段</span><b>19–22</b></div>' +
+        '<div class="vs"><span>高效时段</span><b>未分析</b></div>' +
       '</div></div>' +
+
+      (S.localLoadError ? '<div class="banner sd-restore" role="alert">' +
+        '<div><div class="bt">本地数据加载失败</div>' +
+        '<div class="bs">' + U.esc(S.localLoadError.message) + ' · 原数据已保留且暂停覆盖</div></div>' +
+        '<span class="spacer"></span>' +
+        '<button type="button" class="btn sd-restore-btn" data-act="import-backup">导入完整备份</button>' +
+      '</div>' : '') +
 
       (trash ? '<div class="banner sd-restore">' +
         '<div><div class="bt">删除的数据还能恢复，剩 ' + trash.daysLeft + ' 天</div>' +
@@ -59,33 +66,36 @@ window.ZX = window.ZX || {};
 
       '<div class="sec-h"><span class="n">02</span><span class="t">通知策略</span><span class="rule"></span><span class="r">分级可关</span></div>' +
       '<div class="panel"><div class="panel-b">' +
-        swRow('每日提醒', '19:00 · 今日 ' + S.tasks.filter(function (t) { return !t.done && !t.skipped && !t.abandoned && !t.substituted; }).length + ' 项', 'daily') +
+        swRow('每日提醒', '19:00 · 今日 ' + ZX.flows.exec.activeTasks().filter(function (t) { return !t.done; }).length + ' 项', 'daily') +
         swRow('周报', '周日 20:00 · 最少打扰', 'weekly') +
         swRow('进度预警', '必须附带补救方案', 'alert') +
         swRow('中断挽救', '连续 ' + ZX.flows.rescue.THRESHOLD + ' 天无记录时触发', 'rescue') +
-        '<div class="sw"><div><span class="n">夜间静默</span><small>22:00–08:00 · 服务端裁决</small></div><span class="spacer"></span><span class="tg on lock" aria-hidden="true"></span></div>' +
+        '<div class="sw"><div><span class="n">夜间静默</span><small>22:00–08:00 · 不参与本地排程</small></div><span class="spacer"></span><span class="tg on lock" aria-hidden="true"></span></div>' +
       '</div></div>' +
 
       ZX.ui.fold('me:data', {
         title: '数据与隐私',
-        meta: S.exportLog ? '上次导出 ' + S.exportLog.rows + ' 行' : '导出 · 删除 · 7 天恢复',
+        meta: S.exportLog ? '上次导出 ' + S.exportLog.rows + ' 行' : '本地主数据 · 完整备份',
         body:
-          '<p class="pref-note">配置 LLM 后，目标澄清的对话文本与需求画像会经 Nova 后端发送给所配置的模型服务商，用于澄清与拆解建议。联网时，相关操作还会向配置的 Nova 后端发送计算所需的任务、时段与计划参数，或同步计划变更、可用时段和执行记录；离线时先在本机计算和保存。</p>' +
-          '<div class="row2"><span class="k">待同步</span><span class="v" id="opPending">' + ZX.api.pendingCount() + '</span></div>' +
-          '<div class="row2"><span class="k">同步序号</span><span class="v">' + S.serverSeq + '</span></div>' +
-          '<div class="row2"><span class="k">上次同步</span><span class="v">' + U.nowStr() + '</span></div>' +
-          '<div class="row2"><span class="k">待确认冲突</span><span class="v">0</span></div>' +
-          '<div class="row2"><span class="k">离线可用</span><span class="v">读 / 写 / 计时</span></div>' +
+          '<p class="pref-note">计划、执行记录、目标与可用时段只保存在本机浏览器。配置 LLM 后，澄清文本与需求画像会发送给所配置的模型服务商；服务端仅接收计算所需参数，不上行业务状态。离线时仍可计算、保存、计时和备份。</p>' +
+          '<div class="row2"><span class="k">数据模式</span><span class="v">本地主数据</span></div>' +
+          '<div class="row2"><span class="k">服务端角色</span><span class="v">仅计算辅助</span></div>' +
+          '<div class="row2"><span class="k">旧队列</span><span class="v" id="opPending">' +
+            (ZX.api.legacyPendingCount ? ZX.api.legacyPendingCount() : 0) + ' 项已隔离</span></div>' +
+          '<div class="row2"><span class="k">离线可用</span><span class="v">读 / 写 / 计时 / 备份</span></div>' +
           (S.exportLog
-            ? '<div class="row2"><span class="k">上次导出</span><span class="v">' +
+            ? '<div class="row2"><span class="k">上次 CSV 导出</span><span class="v">' +
               U.esc(S.exportLog.filename) + ' · ' + S.exportLog.rows + ' 行</span></div>'
             : '') +
-          '<div class="sd-data-act"><button class="btn" data-act="export">导出计划与记录</button>' +
+          '<div class="sd-data-act"><button type="button" class="btn" data-act="export">导出计划与记录</button>' +
             '<span class="sd-data-n">生成 CSV · 本机下载</span></div>' +
+          '<div class="sd-data-act"><button type="button" class="btn" data-act="export-backup">导出完整备份</button>' +
+            '<button type="button" class="btn" data-act="import-backup">导入完整备份</button>' +
+            '<span class="sd-data-n">JSON · 覆盖前保留 7 天恢复 · 不含凭据与旧队列</span></div>' +
           '<div class="sd-danger">' +
             (S.goal && S.goal.source === 'user' ? '<button class="btn danger" data-act="remove-goal">删除阶段目标</button>' : '') +
             '<button class="btn danger" data-act="wipe">删除全部数据</button>' +
-            '<span class="sd-danger-n">本机计划与记录 · 7 天内可恢复</span>' +
+            '<span class="sd-danger-n">删除本机业务数据，旧队列与待复核记录保留隔离 · 7 天内可恢复</span>' +
           '</div>'
       }) +
 
@@ -107,7 +117,7 @@ window.ZX = window.ZX || {};
     return '<button type="button" class="sd-cell' + (silent ? ' silent' : '') + '"' +
       ' data-act="avail" data-day="' + d + '" data-slot="' + s + '"' +
       ' aria-pressed="' + (on ? 'true' : 'false') + '"' +
-      (silent ? ' title="夜间静默，不可排程"' : '') +
+      (silent ? ' title="夜间静默，不可排程" disabled aria-disabled="true"' : '') +
       ' aria-label="' + DAYS[d] + ' ' + SLOTS[s] +
       (silent ? '（夜间静默，不可排程）' : (on ? '（可排程）' : '（不可排程）')) + '"></button>';
   }
