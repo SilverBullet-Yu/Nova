@@ -14,7 +14,7 @@
 
 | 文件 | 职责 |
 |---|---|
-| `index.html` | 页面骨架：`#gl` WebGL 画布、`#css3d` 内容层、顶栏、对话区 `.copilot`、工作台 `.bench`、主导航语义源 `#rail`；首帧前读 `zx.ui_prefs` 写 `html[data-grid/glow/motion/font]`，`data-gl3d="on"` 为静态初始标记（详见 §6）。当前五页均以 DOM 显示导航；GL 初始化状态不改变当前页面呈现 |
+| `index.html` | 页面骨架：`#gl` WebGL 画布、`#css3d` 内容层、顶栏、对话区 `.copilot`、工作台 `.bench`、主导航语义源 `#rail`；首帧前读 `zx.ui_prefs` 写 `html[data-grid/glow/motion/font/gl3d]`（2026-11-28 起 `gl3d` 纳入偏好闸门，详见 §6）。当前五页均以 DOM 显示导航；GL 初始化状态不改变当前页面呈现 |
 | `assets/js/util.js` | 通用工具与视觉偏好（`ZX.util`）：`esc` / `hm` / `num` / 日期时段 / `prefs`·`applyPrefs`·`savePrefs`·`togglePref`·`setPref` |
 | `assets/js/ui.js` | 共享 UI 原语（`ZX.ui`）：`sheet` / `confirm` / `toast` / `fold` / `flowSheet` / `footNav` / `countTo` |
 | `assets/js/api.js` | 健康检查、Bearer 凭证与计算接口；旧 op 队列只读隔离，不提供业务状态读写（`ZX.api`） |
@@ -40,7 +40,7 @@
 
 `index.html` 当前顺序（以实际引用清单为准，改动前确认依赖）：
 
-1. head 内联脚本先读取首帧偏好（`grid` / `glow` / `motion` / `font`），随后加载 `assets/css/app.css`。
+1. head 内联脚本先读取首帧偏好（`grid` / `glow` / `motion` / `font` / `gl3d`），随后加载 `assets/css/app.css`。
 2. 共享层：`shared/data/seed.js` → `shared/placement-model.js` → `assets/js/rhythm.build.js`。
 3. vendor：`assets/vendor/three.min.js` → `assets/vendor/three-css3d.js`。
 4. GL 模块：`assets/js/gl/engine.js` → `background.js` → `nav.js` → `mascot3d.js` → `stage.js`（后四项同属 `assets/js/gl/`）。此时注册模块，实际初始化在 `main.js` 完成 DOM 启动之后。
@@ -113,7 +113,7 @@
 | `zx.auth_token` | `api.js` | `{ token, userId, expiresAt }`，仅用于服务端计算鉴权 | `POST /api/auth/session` 成功后写入；本地按 `expiresAt` 预判失效；不进入备份 |
 | `zx.pending_plan` | `api.js` | 旧待复核计划原样保留 | 只提供读取入口；不自动复核、不上送、不影响本机计划；删除本机业务数据时仍保留隔离 |
 | `zx.server_plan_version` | 历史遗留 | 旧服务端计划版本记录 | 当前前端不读取、不写入；不得作为本机计划真值 |
-| `zx.ui_prefs` | `util.js` / `index.html` | util 与首帧脚本均只处理 `{ grid, glow, motion, font }` | 「我的 → 显示与动效」保存这四项；3D 舞台由运行时闸门控制，不读写偏好字段，见 §6 |
+| `zx.ui_prefs` | `util.js` / `index.html` | util 与首帧脚本处理 `{ grid, glow, motion, gl3d, font }` | 「我的 → 显示与动效」保存这些项；`gl3d` 为 3D 舞台偏好开关（2026-11-28 加入），运行期 WebGL 异常降级仍由引擎写入 `data-gl3d="off"`，见 §6 |
 | `zx.trash` | `settings.js` | 删除全部数据或备份导入覆盖前的业务快照 `{ at, snapshot }`；snapshot 含 `planVersion` | 覆盖 / 删除前写入；保留 7 天，到期清除；可显式恢复；保存或回读失败时业务字段与计划版本均回滚；不含 token / 旧队列 |
 | `zx.flash` | `settings.js` | 一次性提示文案 | 删除后写入，重载时由 `settings.init()` 消费并 toast |
 
@@ -172,9 +172,9 @@
 - 唯一总闸是 `html[data-motion="off"]`：`animation-duration` 与 `transition-duration` 归 0，`body::before` 取消动画，`.cp-body` 取消平滑滚动。所有动效必须能被它关掉。
 - 裁决顺序：显式用户选择优先于系统 `prefers-reduced-motion`。只有 `zx.ui_prefs.motion` 缺省（从未选择过）时才跟随系统 reduce；一旦用户显式置 `true`，即使系统开启「减少动态效果」也照常播放。
 - 落点三处：`assets/js/util.js` 的 `prefs()` / `applyPrefs()`、`index.html` 首帧内联脚本（避免主题闪烁）、`assets/css/app.css` 的 `html[data-motion="off"]` 段。
-- 可配置项（均存 `zx.ui_prefs`）：`grid` 细点底纹、`glow` 纸面纹理、`motion` 界面动效、`font` 字号 `''` / `'m'` / `'l'`（映射 `html[data-font]` 与 `--fs-body` 15px / 16px / 17px）。布尔项白名单 `PREF_KEYS` 为 `['grid','glow','motion']`，`font` 走 `setPref()` 单值路径。
-- 首帧 GL 闸门：`html[data-gl3d="on"]` 为 `index.html` 的静态初始标记，不再由 `zx.ui_prefs.gl3d` 读取。`main.js` 在 DOM 启动后仅于 `on` 时尝试 `ZX_GL.init()`；隐藏舞台不分配 renderer，待 resize 或属性/可见性变化后懒初始化。成功加 `.gl-on`，初始化失败写 `data-gl3d="off"` 并加 `.gl-off`，回退 DOM。GL 引擎 / CSS 注释与运行时闸门统一使用 **`data-gl3d`**；首帧偏好脚本的读取异常不影响该闸门。
-- `zx.ui_prefs` 只含 `util.js` 白名单中的 `grid` / `glow` / `motion` 与单值 `font`，不存在会被覆盖丢失的 `gl3d` 额外字段；「我的」页没有 GL 开关。当前五页均为 DOM-first，`#gl`/`#css3d` 隐藏，GL 模块保留但正常产品路径不呈现可见舞台；S1 验收的是隐藏时暂停与异常降级，不将其表述为可见 GL/CSS3D 视觉验收。
+- 可配置项（均存 `zx.ui_prefs`）：`grid` 细点底纹、`glow` 纸面纹理、`motion` 界面动效、`font` 字号 `''` / `'m'` / `'l'`（映射 `html[data-font]` 与 `--fs-body` 15px / 16px / 17px）、`gl3d` 3D 舞台。布尔项白名单 `PREF_KEYS` 为 `['grid','glow','motion','gl3d']`（2026-11-28 起），`font` 走 `setPref()` 单值路径。
+- 首帧 GL 闸门：`index.html` 首帧脚本按 `zx.ui_prefs.gl3d` 写 `html[data-gl3d]`（缺省/非 `false` 一律 `on`）；`main.js` 在 DOM 启动后仅于 `on` 时尝试 `ZX_GL.init()`；隐藏舞台不分配 renderer，待 resize 或属性/可见性变化后懒初始化。「我的」开关切换经 `applyPrefs()` 写 `data-gl3d`，GL 引擎的 MutationObserver 监听该属性：`off` 暂停渲染循环，重新 `on` 且未初始化过则懒初始化；引擎自身渲染失败置 `failed` 后不再随开关重试（写 `data-gl3d="off"` 并加 `.gl-off`，回退 DOM）。GL 引擎 / CSS 注释与运行时闸门统一使用 **`data-gl3d`**；首帧偏好脚本的读取异常不影响该闸门（保持静态 `on` 初始标记语义）。
+- `zx.ui_prefs` 含 `util.js` 白名单中的 `grid` / `glow` / `motion` / `gl3d` 与单值 `font`；`gl3d` 缺省 `true`，与静态初始标记一致，老用户存储无该字段时行为不变。当前五页均为 DOM-first，`#gl`/`#css3d` 隐藏，GL 模块保留但正常产品路径不呈现可见舞台；S1 验收的是隐藏时暂停与异常降级，不将其表述为可见 GL/CSS3D 视觉验收。
 
 ## 7. 文案与语气
 

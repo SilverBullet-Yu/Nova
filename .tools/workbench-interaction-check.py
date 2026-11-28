@@ -73,7 +73,7 @@ with sync_playwright() as p:
             context = browser.new_context(viewport={'width': width, 'height': height}, reduced_motion='reduce')
             # 每个视口使用独立本机存储；时段与弹性位操作只走页面本地状态和 UI。
             context.route('**/*', guard_request)
-            context.add_init_script("(()=>{const apply=()=>{const r=document.documentElement;if(!r)return false;r.dataset.gl3d='" + ('off' if mode == 'dom' else 'on') + "';return true;};if(!apply()){const o=new MutationObserver(()=>{if(apply())o.disconnect();});o.observe(document,{childList:true,subtree:true});}localStorage.setItem('zx.ui_prefs',JSON.stringify({motion:false}));})()")
+            context.add_init_script("(()=>{const apply=()=>{const r=document.documentElement;if(!r)return false;r.dataset.gl3d='" + ('off' if mode == 'dom' else 'on') + "';return true;};if(!apply()){const o=new MutationObserver(()=>{if(apply())o.disconnect();});o.observe(document,{childList:true,subtree:true});}localStorage.setItem('zx.ui_prefs',JSON.stringify({motion:false,gl3d:" + ('false' if mode == 'dom' else 'true') + "}));})()")
             page = context.new_page()
             errors = []
             page.on('pageerror', lambda error: errors.append(str(error)))

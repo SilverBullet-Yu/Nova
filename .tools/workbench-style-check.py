@@ -20,8 +20,8 @@ with sync_playwright() as p:
     for mode in ('dom', 'gl'):
         for width, height in ((1440, 900), (390, 844)):
             context = browser.new_context(viewport={'width': width, 'height': height}, reduced_motion='reduce')
-            # gl3d 已废弃偏好读取，改由 html[data-gl3d] 运行时闸门控制；init script 在任何页面脚本前设置该属性。
-            context.add_init_script("(()=>{const apply=()=>{const r=document.documentElement;if(!r)return false;r.dataset.gl3d='" + ('off' if mode == 'dom' else 'on') + "';return true;};if(!apply()){const o=new MutationObserver(()=>{if(apply())o.disconnect();});o.observe(document,{childList:true,subtree:true});}localStorage.setItem('zx.ui_prefs',JSON.stringify({motion:false}));})()")
+            # gl3d 已纳入偏好闸门（2026-11-28）：init script 同时写偏好与属性，首帧脚本按偏好重申同一值。
+            context.add_init_script("(()=>{const apply=()=>{const r=document.documentElement;if(!r)return false;r.dataset.gl3d='" + ('off' if mode == 'dom' else 'on') + "';return true;};if(!apply()){const o=new MutationObserver(()=>{if(apply())o.disconnect();});o.observe(document,{childList:true,subtree:true});}localStorage.setItem('zx.ui_prefs',JSON.stringify({motion:false,gl3d:" + ('false' if mode == 'dom' else 'true') + "}));})()")
             context.route('**/api/**', lambda route: route.abort())
             page = context.new_page()
             errors = []

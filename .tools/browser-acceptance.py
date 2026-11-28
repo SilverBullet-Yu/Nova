@@ -296,14 +296,14 @@ def stop_server(proc: subprocess.Popen | None) -> None:
 
 
 def prefs_script(gl3d: bool) -> str:
-    # gl3d 已废弃偏好读取，3D 舞台仅由 html[data-gl3d] 运行时闸门控制；
-    # init script 在任何页面脚本（含首帧偏好脚本）前执行，直接设置该属性即可精确控制模式。
+    # gl3d 已纳入偏好闸门（2026-11-28）：init script 同时写 zx.ui_prefs.gl3d 与属性；
+    # 首帧偏好脚本会按偏好重申同一值，两处一致即精确控制模式。
     return (
         "(()=>{const apply=()=>{const r=document.documentElement;if(!r)return false;"
         "r.dataset.gl3d='" + ("on" if gl3d else "off") + "';return true;};"
         "if(!apply()){const o=new MutationObserver(()=>{if(apply())o.disconnect();});"
         "o.observe(document,{childList:true,subtree:true});}"
-        "localStorage.setItem('zx.ui_prefs',JSON.stringify({motion:false,grid:true,glow:true}));})()"
+        "localStorage.setItem('zx.ui_prefs',JSON.stringify({motion:false,grid:true,glow:true,gl3d:" + ("true" if gl3d else "false") + "}));})()"
     )
 
 

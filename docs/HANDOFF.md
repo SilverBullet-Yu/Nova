@@ -14,7 +14,7 @@
 | `shared/workflow.js` | 后端（前端只读） | 本机重排草案生命周期工厂（preview / confirm / reject），由 `assets/js/flows/replan.js` 与测试消费；不创建服务端业务草案 |
 | `server/**` | 后端 | HTTP 入口、路由、鉴权、计算服务与按身份分区的历史 JSON 数据；历史业务接口仅服务端保留，前端不使用 |
 | `assets/**` | 前端 | 页面脚本与样式；`assets/js/gl/` 为 GL 视觉层，`assets/vendor/` 为本地 Three.js / CSS3DRenderer 产物 |
-| `index.html` | 前端 | 页面骨架、首帧视觉偏好闸门（`grid` / `glow` / `motion` / `font`）、`data-gl3d` 初始标记与资源引用清单；加载顺序见 `FRONTEND-CONTRACT.md` §2 |
+| `index.html` | 前端 | 页面骨架、首帧视觉偏好闸门（`grid` / `glow` / `motion` / `font` / `gl3d`）与资源引用清单；加载顺序见 `FRONTEND-CONTRACT.md` §2 |
 | `scripts/**` | 后端 | 引擎 / 形象构建与 CSS 审计；`scripts/build-vendor-three.mjs` 从 Three.js `0.152.2` 包生成本地 vendor |
 | `test/**` | 后端 | 引擎单测、HTTP 冒烟、前端 Node VM 单测、资产门禁等；测试持续新增，文件清单以 `node -e 'console.log(require("node:fs").readdirSync("test").filter(p=>p.endsWith(".test.js")).sort().join("\n"))'` 实时输出为准 |
 | `docs/**` | 管理者 | 契约与说明文档 |

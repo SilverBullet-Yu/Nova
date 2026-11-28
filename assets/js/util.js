@@ -140,16 +140,16 @@ window.ZX = window.ZX || {};
     'consecutiveZeroDays', 'interrupted', 'rescueRecord', 'replanHistory', 'replanSnapshot'];
   var OPTIONAL_SNAPSHOT_FIELDS = ['buffer', 'tiredAdopted'];
 
-  /* ---------- 视觉偏好：科技网格 / 辉光 / 动效 / 字号 ---------- */
+  /* ---------- 视觉偏好：科技网格 / 辉光 / 动效 / 字号 / 3D 舞台 ---------- */
   var PREF_KEY = 'zx.ui_prefs';
-  var PREF_KEYS = ['grid', 'glow', 'motion'];
+  var PREF_KEYS = ['grid', 'glow', 'motion', 'gl3d'];
   var FONTS = ['', 'm', 'l'];
 
   function prefs() {
     /* 动效：显式选择优先于系统提示——只有从未选择过（raw.motion 非布尔）时
        才跟随 prefers-reduced-motion；产品开关置 on 后系统设置不再拦截 */
     var reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
-    var p = { grid: true, glow: true, motion: !reduce, font: '' };
+    var p = { grid: true, glow: true, motion: !reduce, gl3d: true, font: '' };
     try {
       var raw = JSON.parse(localStorage.getItem(PREF_KEY) || '{}') || {};
       PREF_KEYS.forEach(function (k) { if (raw[k] === false) p[k] = false; });
@@ -165,6 +165,7 @@ window.ZX = window.ZX || {};
     r.dataset.grid = v.grid ? 'on' : 'off';
     r.dataset.glow = v.glow ? 'on' : 'off';
     r.dataset.motion = v.motion ? 'on' : 'off';
+    r.dataset.gl3d = v.gl3d ? 'on' : 'off';
     r.dataset.font = FONTS.indexOf(v.font) > 0 ? v.font : '';
     return v;
   }

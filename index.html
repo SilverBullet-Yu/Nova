@@ -15,8 +15,9 @@
 <script>
   /* 首帧前应用本地视觉偏好，避免主题闪烁（与 assets/js/util.js 共用同一存储键）。
      动效裁决：显式选择（true/false）优先；从未选择时才跟随系统 reduce-motion。
-     3D 舞台不由偏好开关控制：以 html[data-gl3d="on"] 初始标记启用，
-     运行期 WebGL 不可用或初始化异常时由 gl/engine.js 降级为 data-gl3d="off"。 */
+     3D 舞台：zx.ui_prefs.gl3d=false 时首帧即 data-gl3d="off"（2026-11-28 起纳入偏好），
+     缺省保持静态 "on" 初始标记；运行期 WebGL 不可用或初始化异常
+     仍由 gl/engine.js 降级为 data-gl3d="off"，用户开关不覆盖引擎降级。 */
   (function () {
     try {
       var p = JSON.parse(localStorage.getItem('zx.ui_prefs') || '{}') || {};
@@ -27,6 +28,7 @@
         : p.motion === true ? 'on'
         : (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches ? 'off' : 'on');
       r.dataset.font = (p.font === 'm' || p.font === 'l') ? p.font : '';
+      r.dataset.gl3d = p.gl3d === false ? 'off' : 'on';
     } catch (e) { /* 隐私模式禁用 localStorage 时保持默认 */ }
   })();
 </script>
