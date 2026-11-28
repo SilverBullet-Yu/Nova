@@ -249,6 +249,32 @@ test('今日页、数据页和首页摘要消费新字段，未知分母显示�
   assert.match(today, /锁定 1 项/);
 });
 
+test('今日页首屏仅展示核心统计，时间带与次要统计默认收起', () => {
+  const { ZX, S } = boot();
+  setTasks(S, [{ id: 'a', est: 60, plannedEst: 60 }]);
+  const html = ZX.views.today();
+  assert.match(html, /<details class="vs-more">/);
+  assert.match(html, /<details class="sc-disclosure sc-timeline">/);
+  assert.doesNotMatch(html, /<details[^>]+open/);
+  assert.match(html, /任务完成率/);
+  assert.match(html, /实际投入/);
+  assert.match(html, /剩余预估/);
+});
+
+test('计划页首屏保留可行性与日程，节律和计算公式默认收起', () => {
+  const { ZX, S, ctx } = boot();
+  S.goal = { name: '合成目标', target: '100', deadline: '2027-12-25', weeks: 8 };
+  S.feas = { weeklyH: 10, weeks: 8, discount: 0.85, demand: 60 };
+  ZX.engine.feasibilityNow = require('../shared/engine/feasibility.js').feasibility;
+  ZX.flows.planedit = { board: () => '<div class="sc2-board">日程</div>', movedCount: () => 0, lockedCount: () => 0, weekDeltas: () => ({}) };
+  vm.runInContext(fs.readFileSync(path.join(root, 'assets/js/views/plan.js'), 'utf8'), ctx);
+  const html = ZX.views.plan();
+  assert.match(html, /<details class="sc-disclosure sc-feas-details">/);
+  assert.match(html, /<details class="sc-disclosure sc-plan-details">/);
+  assert.doesNotMatch(html, /<details[^>]+open/);
+  assert.ok(html.indexOf('可行性 R') < html.indexOf('学期节律'));
+});
+
 test('空今日只有已知零计划时显示横线，不伪造计划完成率', () => {
   const { ZX, S } = boot();
   setTasks(S, []);
@@ -260,4 +286,11 @@ test('空今日只有已知零计划时显示横线，不伪造计划完成率',
   assert.equal(m.plannedRate, null);
   assert.equal(m.rate, null);
   assert.match(ZX.views.today(), /计划工时完成率<\/span><b[^>]*>—/);
+
+  const messages = [];
+  ZX.assistant = { say: html => messages.push(html) };
+  setTasks(S, [{ id: 'zero', est: 0, plannedEst: 0 }]);
+  ZX.exec.commitRecord('zero', 0, 100, '', 1, 2);
+  assert.equal(ZX.exec.metrics().plannedBasis, 'known');
+  assert.match(messages.at(-1), /计划工时完成率 <b class="ac">—<\/b>/);
 });

@@ -981,8 +981,11 @@
     var quotas = Object.create(null);
     var dates = [];
     placement.originalSegments.forEach(function (original) {
-      if (dates.indexOf(original.date) < 0) dates.push(original.date);
-      quotas[original.date] = (quotas[original.date] || 0) + original.durMin;
+      var date = findDay(m, original.date) ? original.date : m.days.find(function (day) {
+        return new Date(day.date + 'T00:00:00Z').getUTCDay() === new Date(original.date + 'T00:00:00Z').getUTCDay();
+      }).date;
+      if (dates.indexOf(date) < 0) dates.push(date);
+      quotas[date] = (quotas[date] || 0) + original.durMin;
     });
     var rawSegments = [];
     var remaining = minutes;

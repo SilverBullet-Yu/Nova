@@ -42,7 +42,7 @@ window.ZX_GL_STAGE = (function () {
   function stageVisible() {
     var canvas = document.getElementById('gl');
     var css = document.getElementById('css3d');
-    return !document.hidden && !!canvas && !!css && getComputedStyle(canvas).display !== 'none' && getComputedStyle(css).display !== 'none';
+    return document.documentElement.dataset.gl3d !== 'off' && !document.hidden && !!canvas && !!css && getComputedStyle(canvas).display !== 'none' && getComputedStyle(css).display !== 'none';
   }
 
   function cloneClean(node, deep) {

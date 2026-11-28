@@ -175,12 +175,50 @@ window.ZX = window.ZX || {};
   }
 
   /* ---------- 拆解建议（LLM 分析 → 建议卡） ---------- */
+
+  /* 近况参考快照：只传聚合数值与产品固定枚举键（归因类型），
+     不含任务标题、正文或科目名；服务端截 1200 字符进提示词，仅供调整节奏与风险。 */
+  function historySnapshot() {
+    var S = ZX.state || {};
+    var sessions = Array.isArray(S.sessions) ? S.sessions : [];
+    var now = Date.now();
+    var win = now - 7 * 86400000;
+    var min = 0, backfill = 0, count = 0;
+    var days = {};
+    sessions.forEach(function (s) {
+      if (!s) return;
+      var at = (s.endAt != null) ? s.endAt : s.startAt;
+      if (!Number.isFinite(at) || at < win || at >= now) return;
+      var m = U.num(s.minutes, 0);
+      if (!Number.isFinite(m) || m < 0) return;
+      count++;
+      if (s.isBackfill) backfill += m; else min += m;
+      var k = U.dayKey(at);
+      if (k) days[k] = true;
+    });
+    var counts = S.attrCounts || {};
+    var attr = {};
+    Object.keys(counts).forEach(function (k) {
+      var v = U.num(counts[k], 0);
+      if (v > 0) attr[k] = v;
+    });
+    var hist = Array.isArray(S.replanHistory) ? S.replanHistory : [];
+    var adopted = hist.filter(function (r) { return r && r.undone !== true; }).length;
+    var out = {
+      recent7d: { activeDays: Object.keys(days).length, minutes: min, sessions: count, backfillMinutes: backfill },
+      replan: { adopted: adopted, total: hist.length },
+      consecutiveZeroDays: U.num(S.consecutiveZeroDays, 0)
+    };
+    if (Object.keys(attr).length) out.attribution = attr;
+    return out;
+  }
+
   function buildPlan() {
     currentCard = null;
     busy = true;
     var t = typing();
     var my = session;
-    ZX.api.llmAnalyze({ profile: profile }).then(function (r) {
+    ZX.api.llmAnalyze({ profile: profile, history: historySnapshot() }).then(function (r) {
       if (t) t.remove();
       if (my !== session || phase === 'idle') return;
       busy = false;

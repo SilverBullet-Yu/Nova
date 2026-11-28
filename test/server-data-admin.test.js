@@ -15,9 +15,10 @@ function directory() {
 function freshStore(file) {
   process.env.NOVA_STORE_FILE = file;
   delete process.env.NOVA_STORE_PARTITIONED;
-  const resolved = require.resolve('../server/store/memory.js');
-  delete require.cache[resolved];
-  return require(resolved);
+  const store = require('../server/store/memory.js');
+  store.setStoreFile(file, false);
+  store.reload();
+  return store;
 }
 
 function seedStore(file) {
@@ -301,6 +302,32 @@ test('legacy backup-all/verify-backup/restore-all 保留全部分区且校验不
   assert.equal(JSON.parse(fs.readFileSync(audit, 'utf8')).status, 'prepared');
   assert.equal(JSON.parse(fs.readFileSync(audit + '.restore-intent.json', 'utf8')).status, 'confirmed');
   assert.equal(JSON.parse(fs.readFileSync(audit + '.result.json', 'utf8')).status, 'restored');
+});
+
+test('verify-backup 与 restore-all 拒绝 planBaseline=[]，不生成重启即坏的分区库', () => {
+  const dir = directory();
+  const source = path.join(dir, 'source.json');
+  seedStore(source);
+  const bundle = path.join(dir, 'bundle.json');
+  assert.equal(cli(['backup-all', '--out', bundle, '--store', source]).status, 0);
+  const damaged = JSON.parse(fs.readFileSync(bundle, 'utf8'));
+  damaged.data['admin-user'].planBaseline = [];
+  const damagedText = JSON.stringify(damaged);
+  fs.writeFileSync(bundle, damagedText, 'utf8');
+
+  const verified = cli(['verify-backup', '--file', bundle]);
+  assert.equal(verified.status, 1, verified.stderr);
+  assert.match(verified.stderr, /plan baseline/);
+  assert.equal(fs.readFileSync(bundle, 'utf8'), damagedText);
+
+  const target = path.join(dir, 'restored.json');
+  const audit = path.join(dir, 'restore.json');
+  const restored = cli(['restore-all', '--file', bundle, '--store', target, '--confirm', 'restore-all', '--out', audit]);
+  assert.equal(restored.status, 1, restored.stderr);
+  assert.match(restored.stderr, /plan baseline/);
+  for (const file of [target, target + '.manifest.json', target + '.partitioned.json', target + '.parts', target + '.lock', audit]) {
+    assert.equal(fs.existsSync(file), false, file + ' 不应创建');
+  }
 });
 
 test('prune-op-index 帮助明确管理员裁定保留期限、前端禁用与旧 op 重试风险', () => {

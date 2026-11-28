@@ -140,6 +140,10 @@ function createServer() {
         return;
       }
       userId = identity.userId;
+      if (store.isUserRevoked(userId)) {
+        sendError(res, 'E4030', '用户身份已撤销', 403, cors);
+        return;
+      }
     }
 
     /* ── 写接口限流：阈值随路由注册表 limit 字段声明；已认证按 userId 隔离，签发凭证按来源 IP 隔离 ── */

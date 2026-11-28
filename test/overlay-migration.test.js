@@ -249,6 +249,30 @@ test('分类 C：损坏 JSON、未来版本、缺字段、非法模型、悬空�
   for (const input of cases) assert.equal(classifyInput(input).classification, 'C');
 });
 
+test('B 类输出前执行前端导入同等数值校验，非法权重/折扣等不生成备份', () => {
+  const mutations = [
+    ['负权重', snapshot => { snapshot.tasks[0].weight = -1; }],
+    ['折扣超过 1', snapshot => { snapshot.feas.discount = 2; }],
+    ['折扣为字符串', snapshot => { snapshot.feas.discount = '0.85'; }],
+    ['任务完成度超过 100', snapshot => { snapshot.tasks[0].completion = 101; }],
+    ['会话分钟为负', snapshot => { snapshot.sessions[0].minutes = -1; }],
+    ['目标周数为负', snapshot => { snapshot.goal.weeks = -1; }],
+    ['会话结束早于开始', snapshot => { snapshot.sessions[0].endAt = 100; }],
+    ['归因计数为负', snapshot => { snapshot.attrCounts['效率不足'] = -1; }, false]
+  ];
+  const dir = tempDir(test);
+  for (const [label, mutate, frontendParserRejects = true] of mutations) {
+    const snapshot = baseSnapshot();
+    mutate(snapshot);
+    if (frontendParserRejects) assert.throws(() => parseBackup(JSON.stringify(backup(snapshot))), undefined, label + ' 应被前端拒绝');
+    const input = overlay(snapshot, 3);
+    assert.equal(classifyInput(input).classification, 'C', label);
+    const out = path.join(dir, label + '.json');
+    expectCode(() => migrateInput(input, { ...rebuildOptions(), out }), 'cannotAutoMigrate', 'C');
+    assert.equal(fs.existsSync(out), false, label + ' 不得生成迁移输出');
+  }
+});
+
 test('B/C 默认拒绝写出并明确 cannotAutoMigrate', () => {
   const dir = tempDir(test);
   for (const [input, classification] of [[overlay(baseSnapshot(), 1), 'B'], [overlay({ ...baseSnapshot(), tasks: [] , week: [] }, 1), 'C']]) {

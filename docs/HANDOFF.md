@@ -54,7 +54,7 @@
 
 ### 3.2 `schedule(input)`
 
-- 入参：`tasks`、`slots` 必填数组，`params` 可选对象。`tasks[]` 为 `{ id, subject, estMin, weight, date?, startMin?, title? }`，工时**只读** `estMin`；`slots[]` 为 `{ date, startMin, durMin, available, isBuffer }`，仅严格等于 `false` 的 `available` 视为不可用。工时、起点和时长必须是非负整数分钟；HTTP 层限制 `tasks ≤ 500`、`slots ≤ 2000`。
+- 入参：`tasks`、`slots` 必填数组，`params` 可选对象。`tasks[]` 为 `{ id, subject, estMin, weight, date?, startMin?, title? }`，工时**只读** `estMin`；`slots[]` 为 `{ date, startMin, durMin, available, isBuffer }`，仅严格等于 `false` 的 `available` 视为不可用。工时、起点和时长必须是非负整数分钟；任务 ID 必须非空且唯一（缺省 ID 仅由未提供 `id` 时生成）；HTTP 层限制 `tasks ≤ 500`、`slots ≤ 2000`。
 - `params` 默认值：`bufferRatio` `0.15`、`maxContiguousMin` `150`、`dailyCapMin` `300`。
 - 出参恰好三个键：`blocks`、`unplanned`、`version`（恒 `planner-1.0.0`）。`blocks[]` 为 `{ id, taskId, subject, date, startMin, durMin, isBuffer, locked, reason }`，`unplanned[]` 为 `{ taskId, reason }`。
 
@@ -69,7 +69,7 @@
 
 ### 3.3 `replan(input)`
 
-- 入参：`tasks`、`week` 必填数组；`params`、`history`、`locks` 可选对象；`allowBuffer` 可选布尔值，默认 `false`；`timestamp` 可选。`tasks[]` 工时读 `est`（与 `schedule` 的 `estMin` 各钉死一种格式，不做别名兼容）；`week[]` 为 `{ date, minutes, buffer, capacity?, bufferUsed?, releasedMinutes?, releasedBufferMinutes? }`，`capacity` 是普通容量、`buffer` 是弹性容量，缺省分别取 `dailyCapMin` 与 `0`；输入顺序即周内顺序，不排序，日期必须唯一且最多 7 天；`locks` 为 `{ taskId: true }`，只认显式 `true` 的键。
+- 入参：`tasks`、`week` 必填数组；`params`、`history`、`locks` 可选对象；`allowBuffer` 可选布尔值，默认 `false`；`timestamp` 可选。`tasks[]` 工时读非负整数 `est`（与 `schedule` 的 `estMin` 各钉死一种格式，不做别名兼容）；`week[]` 为 `{ date, minutes, buffer, capacity?, bufferUsed?, releasedMinutes?, releasedBufferMinutes? }`，`capacity` 是普通容量、`buffer` 是弹性容量，缺省分别取 `dailyCapMin` 与 `0`；输入顺序即周内顺序，不排序，日期必须唯一且最多 7 天；`locks` 为 `{ taskId: true }`，只认显式 `true` 的键。
 - `params` 默认值：`loadGrowthCap` `0.20`、`compressFloor` `0.60`、`compressedShareCap` `0.30`、`consecutiveNoImproveCap` `3`、`dailyCapMin` `300`、`maxTasks` `500`、`maxOperations` `50000`。`bufferRatio` 为兼容字段，当前不参与重排计算；任务数、周期和计算预算有不可被请求放宽的硬上限。
 - 出参：`strategies`、`diff`、`loadDelta`、`growthApplicable`、`accepted`、`needsConfirmation`、`verdict`、`snapshot`、`guards`、`nextTasks`、`nextPlacements`、`nextWeek`。`strategies[]` 恒 4 条 `{ level, name, applied, growth, reason }`（`name` 依次为顺延/压缩/替代/放弃）；`diff[]` 为 `{ op, taskId, subject, from, to, detail }`，`op` ∈ `defer`/`compress`/`substitute`/`abandon`；`snapshot` 为 `{ tasks, week, timestamp, placementModel? }`；`guards` 为 `{ loadGrowthOk, bufferPreserved, consecutiveOk, compressedShareOk }`；`verdict` ∈ `ok`/`needsConfirmation`/`blocked`。零基线时 `loadDelta=null`、`growthApplicable=false`。
 
@@ -88,7 +88,7 @@
 2. `bufferPreserved`：任一日普通负载不得超过 `capacity`，弹性负载不得超过 `buffer`；两类容量独立检查，未使用弹性不会被清空，显式启用时允许实际占用。
 3. `consecutiveOk`：连续 `consecutiveNoImproveCap` 次未改善即停止并转目标校准，`verdict='blocked'`。
 
-补充：`locks` 中的锁定任务是硬约束，不参与顺延装载，也不会被压缩、替代或放弃，且不出现在 `diff` 中。`confirmReplan(result)` 只接受 `verdict='needsConfirmation'` 且四级策略、diff、snapshot、nextTasks/nextPlacements 结构完整的结果，返回新的 `accepted=true` 对象且不改入参，否则抛 `TypeError`；当前前端只在本机调用它，不创建或确认服务端草案。`undoReplan(snapshot)` 返回 `{ tasks, week, placementModel? }`，逐条还原快照，**不重算**，当前也只在本机执行。服务端旧 confirm / undo 接口仅服务端保留，前端不使用。
+补充：`locks` 中的锁定任务是硬约束，不参与顺延装载，也不会被压缩、替代或放弃，且不出现在 `diff` 中；L2 结果仍为锁定任务保留空占位，应用落点时不得释放其原有区块。`confirmReplan(result)` 只接受 `verdict='needsConfirmation'` 且四级策略、diff、快照、guards、nextTasks/nextPlacements 内部结构完整的结果，返回新的 `accepted=true` 对象且不改入参，否则抛 `TypeError`；当前前端只在本机调用它，不创建或确认服务端草案。`undoReplan(snapshot)` 返回 `{ tasks, week, placementModel? }`，逐条还原快照，**不重算**，当前也只在本机执行。服务端旧 confirm / undo 接口仅服务端保留，前端不使用。
 
 ### 3.4 `attribute(input)`
 
@@ -128,7 +128,7 @@
 | POST | `/api/attribute` | **仅服务端保留，前端不使用** | 需 | 请求体不得为空；6 个数值字段均可选 | `attribute()` 返回 | E4010, E1001, E4290 |
 | POST | `/api/sync/ops` | **仅服务端保留，前端不使用** | 需 | `ops` 必填数组；每条须有非空字符串 `opId`、`entity`、`field`，`entityId` 为字符串或安全整数（允许空串，落在 `''` 合并桶）；`clientTs` 可选有限数值 | `{ accepted: [opId], serverSeq }` | E4010, E1001, E4002, E4030, E4290 |
 | POST | `/api/llm/clarify` | 使用（理解） | 需 | `messages` 必填数组（≤40 条，每条 `role` 为 `user`/`assistant`，`content` 非空字符串）；`profile` 可选对象 | `{ reply, profile, done, missing }`；`profile` 为服务端归一后的白名单画像；`done=true` 时槽位必齐 | E4010, E1001, E5010, E5011, E5012, E4290 |
-| POST | `/api/llm/analyze` | 使用（分析建议） | 需 | `profile` 必填对象（goalName/deadline/weeklyH/goalType 齐备）；`history` 可选对象 | `{ summary, demandH, weeklyH, tasks[{s,title,est,weight}], risks[], advice }`；不含排程块；`est` 15–240、`weight` 0–1、条目 ≤8 | E4010, E1001, E5010, E5011, E5012, E4290 |
+| POST | `/api/llm/analyze` | 使用（分析建议） | 需 | `profile` 必填对象（goalName/deadline/weeklyH/goalType 齐备）；`history` 可选对象（前端发送聚合近况快照，口径见 §6 澄清条目） | `{ summary, demandH, weeklyH, tasks[{s,title,est,weight}], risks[], advice }`；不含排程块；`est` 15–240、`weight` 0–1、条目 ≤8 | E4010, E1001, E5010, E5011, E5012, E4290 |
 
 路径不存在返回 `E2001`；路径存在但方法不符返回 `E1001`。
 
@@ -156,11 +156,11 @@
 ## 6. 本地主数据与前端通信约定
 
 - **唯一业务主数据**：`localStorage['zx.overlay']`，`format='nova-overlay'`、`version=3`、`syncMode='local-only'`，并带 `installId`、`revision`、`updatedAt`。业务快照包含 `planVersion`、`tasks`、`sessions`、`goal`、`feas`、`week`、`weekShift`、`placementModel`、`dayAssign`、`locks`、`avail`、`availSource`、`notif`、`attrCounts`、`replanHistory`、`replanSnapshot`。v3 `placementModel` 保存具体日期、IANA 时区、稳定任务/区块 ID、原始/当前落点、普通容量、弹性容量及由区块推导的实际用量；`week` 只是投影。旧 v1/v2 无模型证据时保持 legacy，不从 `total-buf` 或当前日期反推。服务端状态不得覆盖、合并或回放它。
-- **加载熔断**：损坏 JSON、无效格式 / 版本、v3 元数据、落点模型或业务结构损坏、未来 `version>3`，均保留原键并暂停 overlay 覆盖；旧 v1/v2 仍可读并在下一次成功保存时升级 v3。只有显式导入通过校验的备份或确认删除全部数据才解除。保存失败单独提示，不伪称已持久化。
+- **加载熔断**：损坏 JSON、无效格式 / 版本、v3 元数据、落点模型或业务结构损坏、未来 `version>3`，均保留原键并暂停 overlay 覆盖；v3 必须含 `planVersion` 与 `SNAPSHOT_FIELDS` 全部字段（允许字段值为 `null` 的仍按各字段契约校验），缺字段不以种子补齐。旧 v1/v2 仍可读并在下一次成功保存时升级 v3。只有显式导入通过校验的备份或确认删除全部数据才解除。保存失败单独提示，不伪称已持久化。
 - **跨标签页冲突**：保存前重读存储并与本页最后持久化的业务快照比较；外部业务变更、删除或非法元数据会拒绝写入并置粘滞 `overlayConflict`。`storage` 事件同步检测本页未保存修改；仅元数据变化且业务相同时接受新 revision。冲突页暂停保存、删除、重排确认/撤销，提示先导出本页备份再刷新；刷新后按当前存储恢复。导入失败回滚先重读当前值，只在仍等于旧值或本次已验证/尝试写入值时恢复；另一页的新写入/删除优先保留，意外当前 raw 不覆盖并进入加载熔断。支持 Web Locks 的浏览器以 `nova-local-overlay` 串行化导入、删除与恢复事务；不支持时使用 fail-closed 顺序检查。不可读 overlay 的强制替换只允许当前 raw 仍等于本次加载的不可读 raw，另一页已修复为有效 overlay 时拒绝覆盖。显式删除先预检，失败时恢复本次回收站写入；损坏/未来版本可显式删除。删除已执行但回读异常时保留 trash 并提示刷新核查。trash 清理与恢复成功后只删除本次读到的 raw；恢复同时还原 `consecutiveZeroDays`、`interrupted`、`rescueRecord`，快照统一布尔化。修复可读的未来版本时保留原 revision 并递增，非法 JSON 无法取得 revision。这不是 localStorage 原子 CAS，不承诺多页同时读写的线性一致性。
 - **关键状态事务**：`ZX.state.transact()` 先克隆业务与计时相关状态，执行变更并检查 `saveOverlay()`；失败时恢复内存，且仅当当前存储仍是旧值或本次尝试/验证值时才回滚 raw，外部写入优先保留。目标生效、重排确认、执行记录/跳过/恢复/补录、计划改期/锁定/逐条否决均走该原语。它是补偿回滚，不替代 IndexedDB 原子事务。
-- **重排否决与澄清重试**：确认后的压缩/顺延 diff 渲染 `data-veto` 按钮，绑定当前 `draftId` 与 `planVersion`；旧卡或快照不足时整笔拒绝。`goal.apply()` 返回 `Promise<boolean>`，澄清仅在排程提交成功后结束会话；失败保留建议与 draft，并渲染绑定 revision/planVersion 的重试卡，计划变化后旧卡失效。
-- 入口 `assets/js/api.js`，普通计算与 LLM 调用统一超时 `3000` ms（`AbortController` 主动中断）。普通计算与 LLM 调用统一使用 3000 ms `AbortController` 预算；服务端 `LLM_TIMEOUT_MS` 缺省 30000 ms，客户端 3 秒先于服务端返回属已知差异，是否改为独立预算待产品审定（测试 `test/api-boundaries.test.js` 锁定当前 3 秒行为）。`BASE` 取 `window.__ZX_API_BASE__`（去掉末尾斜杠），否则 `http`/`https` 用同源 `location.origin`，`file://` 用 `http://127.0.0.1:8787`。
+- **重排否决与澄清重试**：确认后的压缩/顺延 diff 渲染 `data-veto` 按钮，绑定当前 `draftId` 与 `planVersion`；旧卡或快照不足时整笔拒绝。`goal.apply()` 返回 `Promise<boolean>`，澄清仅在排程提交成功后结束会话；失败保留建议与 draft，并渲染绑定 revision/planVersion 的重试卡，计划变化后旧卡失效。澄清的拆解建议请求附 `history` 聚合快照（`clarify.js` 的 `historySnapshot()`）：近 7 天有效/补录投入分钟、有记录天数、记录条数，重排采纳/总数，连续断更天数与归因计数；**仅聚合数值与产品固定枚举键，不含任务标题、正文或科目名**，供 LLM 调整节奏与风险，不影响排程计算。
+- 入口 `assets/js/api.js`，普通计算请求统一 3000 ms `AbortController` 预算；LLM 请求（`/api/llm/clarify`、`/api/llm/analyze`）使用独立 30000 ms 预算（2026-11-28 产品裁决），与服务端 `LLM_TIMEOUT_MS` 缺省值对齐；客户端预算固定，服务端把 `LLM_TIMEOUT_MS` 调高到 30s 以上时客户端仍先中断并按超时降级（测试 `test/api-boundaries.test.js` 锁定两条预算）。`BASE` 取 `window.__ZX_API_BASE__`（去掉末尾斜杠），否则 `http`/`https` 用同源 `location.origin`，`file://` 用 `http://127.0.0.1:8787`。
 - **启动与恢复联网**：`main.js` 的 `probeBackend()` 与 `online` 监听只调用 `/api/health`。健康状态仅表示计算可达性；不调用 `getState` / `adopt` / `flush` / `stagePlan` / review / confirm / undo / syncOps，不触发 op 上行或计划自动复核。
 - 凭证：计算请求按需经 `POST /api/auth/session` 取得 `{ token, userId, expiresAt }`，存 `zx.auth_token`；本地按 `expiresAt` 预判过期，401 时清空并重签一次，不循环重试。仅 health / auth 不带凭证，其余当前计算请求带 Bearer。凭证不进入业务备份，也不是本地主数据身份。
 - 当前允许的计算调用：`/api/feasibility`、`/api/schedule`、`/api/replan`、`/api/llm/clarify`、`/api/llm/analyze`。`assets/js/engine.js` 对可行性 / 排程 / 重排采用服务端优先、失败或结构不合约定走同一 `assets/js/rhythm.build.js`，并记录 `ZX.engine.source`；本机产物缺失须提示重建，不静默换语义。`feasibilityNow` / `attributeNow` 直接使用本地产物；`/api/attribute` 仅服务端保留，前端不使用。
@@ -168,8 +168,8 @@
 - **旧队列隔离**：`zx.op_queue` 原字节保留、只读；`queueOp()` 不再写，`pendingCount()` 恒为 0，`legacyPendingCount()` 只统计旧 `pending` 并显示「N 项已隔离」。`flushQueue()` 是兼容空操作，返回 `status='isolated'`、`sent=0`，不发网络请求。删除本机业务数据也不移除旧队列。
 - **旧待复核计划**：`zx.pending_plan` 原样保留，只提供读取入口；不自动复核、不上送、不改变本机计划，删除本机业务数据时仍保留隔离。`zx.server_plan_version` 是历史遗留，当前前端不读不写。
 - **M3 暂缓**：`deferred` 只表示今日暂缓，不是真实改期；退出今日任务表 / 时间带、计划普通块、挽救与重排候选，在今日和计划页独立可见、可恢复，计划日期不变。旧 `deferredTo` 只作兼容提示。v3 真实改期由 `placementModel` 保存具体日期与完整跨日区块，按普通/弹性容量校验；legacy 仍只支持旧星期标签，不声称已迁移。
-- **R8 统计**：`exec.metrics()` 分列任务数完成率、计划工时完成率、实际投入、剩余预估、部分完成及跳过/暂缓/放弃/替代/锁定数量。旧部分任务缺原始分母时 `plannedBasis='unknown'`、完成率为 `null`，界面显示“未知”；补录单列且不混入任务实际投入。
-- **R9 演示隔离**：真实挽救只按 sessions 计算断更；未达 3 天不打开真实挽救、不注入演示天数。对话「演示挽救」使用局部 4 天只读预览，显著标注“演示数据 · 不会修改真实计划”，不调用真实 `detect/open/apply`。
+- **R8 统计**：`exec.metrics()` 分列任务数完成率、计划工时完成率、实际投入、剩余预估、部分完成及跳过/暂缓/放弃/替代/锁定数量。旧部分任务缺原始分母时 `plannedBasis='unknown'`、完成率为 `null`，界面显示“未知”；已知零计划显示“—”，助理消息与今日/数据/首页摘要口径一致；补录单列且不混入任务实际投入。
+- **R9 演示隔离**：真实挽救按 sessions 与 `rescueRecord.at` 恢复锚点计算断更；未达 3 天不打开真实挽救、不注入演示天数。对话「演示挽救」使用局部 4 天只读预览，显著标注“演示数据 · 不会修改真实计划”，不调用真实 `detect/open/apply`。挽救完成当日断更归零，次日从该锚点重新计为 1 天。
 - **备份**：「我的」提供 CSV 与 `nova-backup` v1 完整 JSON。legacy 的 `buffer` 与 `tiredAdopted` 是可选快照字段，旧备份缺字段仍兼容；v3 不保存这两个字段，弹性用量只由 `placementModel` 证明。导入前校验格式、版本、时间、安装标识、snapshot 结构、安全 ID、文本长度及标签 / 控制字符，并拒绝凭据 / 队列字段；用户确认后保存旧 trash 原值，再写覆盖前快照与新 overlay。写入或回读失败时同时回滚 overlay 与 trash；回滚失败明确告警并保留页面。备份不含 token、旧队列或旧待复核计划；v3 备份保留并严格校验 `placementModel`，旧 v1 备份缺该字段时按无模型兼容导入。
 - **CSV 与演示预置**：CSV 保持 10 列；任务状态覆盖今日暂缓、已放弃、已替代与未排入。任务行日期只取合法明确计划日期，缺失/未排入留空；记录行取 `startAt`，目标行取截止日，不再把任务日期伪造成导出当天。周报“演示预置”仅保留静态示例并标注不写入日程，已删除名实不符的撤销/恢复按钮及无效 preset op。
 - **连接文案**：可达且无加载 / 保存异常、无旧 pending 时为「本地主数据 · 服务端仅计算」；有旧 pending 时顶栏显示「本地主数据 · 旧队列已隔离 N」，「我的」页显示「N 项已隔离」。离线基础文案为「离线 · 本地可用」，有旧 pending 时附加隔离数量。离线头像使用 `mascot-inline.js` 的内联 data URI，不依赖网络，不显示待处理角标。
@@ -190,6 +190,7 @@
 - `/api/plan/review` 可重算客户端排程并返回 `committed` / `conflict`，冲突附 `ticket`；收据在进程内，同签名 24 小时内可重放。新建计划建立服务端基线、冲突重交和文件回填仅属服务端历史能力，当前前端不调用、不挂起、不自动补审。
 - `/api/sync/ops` 的 `opId` 是分区内幂等键；`serverSeq` 对应被接受操作，不是单调游标。历史字段合并由 `server/store/memory.js` 的 `policyOf` 实现：墓碑优先，计数求和，`actual` / `durationMin` / `minutes` / `duration` 取最大值，其余最后写入优先；执行记录按 session ID 去重，`plan/dayAssign/moved` 按 taskId 合并。当前前端不生成 op、不上行、不消费 `accepted`。
 - 服务端 JSON 持久化先写同目录临时文件，使用可写描述符执行 `fsync` 后再原子改名；Windows 上不能用只读描述符执行 `fsync`，POSIX 另同步目录项。所有写者共用 `STORE_FILE.lock`，锁含 owner token，仅持有者释放；不自动删除无法确认归属的锁，等待超时由 `NOVA_STORE_LOCK_TIMEOUT_MS`（默认 5000ms）控制并提示人工核实。业务写入与 CLI 都在锁内重读最新存储后再修改，避免旧快照复活已删除分区。计划复核/重排确认提交时在锁内核对 expectedRevision，冲突返回 E3001。`applyOps`、`recordReplan`、`recordSchedule`、`reset` 与删除在失败时回滚内存，失败 opId 不占用幂等索引。启动时拒绝 JSON 语法及根、分区、身份、非安全整数序号、状态、实体嵌套、索引、改期桶或重排记录结构损坏，不自动清空或覆盖；恢复失败保留上一份有效内存缓存，不凭空创建 seed。rename 已提交后的目录项同步失败会记录 `getPersistenceWarning()` 并输出警告，不误报事务回滚。默认旧布局仍每次序列化全部分区；`NOVA_STORE_PARTITIONED=1` 可启用内容寻址分区，只写变化分区并以 `<STORE_FILE>.manifest.json` 原子提交，旧版本与孤儿文件保留。首次分区提交前原子写入 `<STORE_FILE>.partitioned.json` 模式标记；检测到标记或 manifest 后关闭该选项会拒绝启动，标记存在但 manifest 缺失、或两者均缺失却存在非空 parts 时也拒绝回退旧 JSON。历史 manifest 仍可读取并在下次写入补标记。全库备份 envelope 与分区 canonical schema 严格校验，legacy 读取继续兼容。分区旧版本可通过 `node scripts/server-data-admin.js compact --store <path>` 只读盘点；`compact --purge --confirm purge --out <audit.json>` 才会先写独占审计再回收未引用 parts/.tmp，当前引用分区绝不删除。全库备份使用 `node scripts/server-data-admin.js backup-all --out <bundle.json>`；`verify-backup --file <bundle.json>` 只读校验；`restore-all --file <bundle.json> --store <new-store.json> --confirm restore-all --out <audit.json>` 只恢复到不存在的新路径，拒绝覆盖现有存储。
+- 测试存储隔离使用单例显式接口 `setStoreFile(file, partitioned)` + `reload()`：前者切换路径、布局并刷新预算，后者清空内存后从磁盘恢复；持锁期间两者均拒绝执行。测试不得通过删除 `require.cache` 制造多个存储实例，避免各实例的路径与锁状态互相不可见。
 - 资源预算：`NOVA_STORE_MAX_BYTES` 默认 16 MiB（partitioned 含模式标记、manifest 与全部 parts），`NOVA_STORE_MAX_PARTITIONS` 默认 1024；草案/收据分别受 `NOVA_DRAFT_BUDGET_BYTES` 8 MiB 与 `NOVA_RECEIPT_BUDGET_BYTES` 4 MiB 总字节限制并按 FIFO 淘汰；LLM 上下文受 `NOVA_LLM_MAX_REQUEST_BYTES` 256 KiB 限制。重排基准运行 `npm run bench:replan`，覆盖 500 任务，异常或超时非零退出。
 - 幂等索引仅支持显式管理：`node scripts/server-data-admin.js prune-op-index --user <id> --keep-recent <N> --confirm prune-op-index --out <backup.json>` 先在同一锁内写完整备份与 prepared/confirmed 审计，再按 serverSeq 保留最新 N 条；旧 opId 回收后重试可能重复应用，保留期限必须由管理员裁定，系统不自动调用。
 - 服务端 JSON 文件、进程内草案 / 票据 / 收据和凭证身份继续保留，但不构成本机主数据、云端备份或跨设备同步。重启后文件基线可回填，草案 / 票据 / 收据清空；未固定签名密钥时旧凭证失效，凭证到期后也无账户机制恢复原身份。
@@ -237,7 +238,7 @@ Browser Connector 不允许助手直接读取 Storage 或 CDP DOMStorage。已�
 | 引擎产物重建校验 | `npm run build:engine` 后重算 `assets/js/rhythm.build.js` 的 SHA256 | 在源文件未变时，重建前后哈希一致（构建不写时间戳）；源文件有改动则以重新生成的产物为准，再构建应幂等，不钉死历史哈希 |
 | 资源引用全量扫描 | 使用 `FRONTEND-CONTRACT.md` §9 扫描命令提取 `index.html` 的本地 `src`/`href` 并检查存在 | 缺失数为 0；引用清单与数量取本次扫描结果（包含 GL 与 vendor），不钉死引用总数 |
 | 服务冒烟 | `node server/main.js` 后请求 `GET /api/health` | HTTP 200 且 `ok` 为 `true` |
-| 隔离真实浏览器验收 | `python .tools/browser-acceptance.py`；随机端口、合成存储、无持久化 Chromium，HTTP 与 `file://` | M1/M2/M3/M4/S1/S2/S5/S6/S8 与 optional-6/7 全部 pass；不访问真实存储或既有 8787 服务 |
+| 隔离真实浏览器验收 | `python .tools/browser-acceptance.py`；随机端口、合成存储、无持久化 Chromium，HTTP 与 `file://` | M1/M2/M3/M4/S1/S2/S5/S6/S8/PC-VISUAL 与当前 `OPTIONAL` 清单全部 pass；不访问真实存储或既有 8787 服务 |
 | 真实浏览器 GL 验收 | 按 `FRONTEND-CONTRACT.md` §9 在 HTTP 与 `file://` 下检查 GL 开启 / 关闭 / 不可用场景 | 首帧、WebGL / CSS3D 渲染与层级、导航 / 输入 / 滚动 / 弹层、动效闸门与 DOM 回退均实测；记录浏览器与结果 |
 | 本地主数据 / 旧接口隔离 | 按 `FRONTEND-CONTRACT.md` §9 检查启动、`online`、计算、重排、备份导入的 Network 与存储 | overlay v3 元数据与落点模型完整；启动和 `online` 只探测 health；无 state / sync / review / 服务端 confirm / undo 请求；服务端 `draftId` 不参与本机确认 |
 | 加载熔断 / 旧数据隔离 | 预置损坏、无效 v3、`version>3`、损坏落点模型及旧队列 / 待复核计划 | 原 overlay 字节保留并暂停覆盖；旧队列 / pending plan 原字节不变；`pendingCount=0`，旧 pending 显示「N 项已隔离」 |

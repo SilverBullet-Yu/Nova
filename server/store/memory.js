@@ -19,12 +19,12 @@ const BASE_SEQ = 88123;
 
 /** 单批上行上限（契约：≤ 200） */
 const MAX_SYNC_BATCH = 200;
-const STORE_FILE = process.env.NOVA_STORE_FILE || path.join(__dirname, '..', 'data', 'nova-store.json');
-const STORE_PARTITIONED = process.env.NOVA_STORE_PARTITIONED === '1';
-const MANIFEST_FILE = STORE_FILE + '.manifest.json';
-const MODE_MARKER_FILE = STORE_FILE + '.partitioned.json';
-const REVOKED_USERS_FILE = STORE_FILE + '.revoked.json';
-const PARTS_DIR = STORE_FILE + '.parts';
+let STORE_FILE = process.env.NOVA_STORE_FILE || path.join(__dirname, '..', 'data', 'nova-store.json');
+let STORE_PARTITIONED = process.env.NOVA_STORE_PARTITIONED === '1';
+let MANIFEST_FILE = STORE_FILE + '.manifest.json';
+let MODE_MARKER_FILE = STORE_FILE + '.partitioned.json';
+let REVOKED_USERS_FILE = STORE_FILE + '.revoked.json';
+let PARTS_DIR = STORE_FILE + '.parts';
 
 function positiveIntEnv(name, fallback) {
   const raw = process.env[name];
@@ -34,8 +34,8 @@ function positiveIntEnv(name, fallback) {
   return value;
 }
 
-const MAX_STORE_BYTES = positiveIntEnv('NOVA_STORE_MAX_BYTES', 16 * 1024 * 1024);
-const MAX_PARTITIONS = positiveIntEnv('NOVA_STORE_MAX_PARTITIONS', 1024);
+let MAX_STORE_BYTES = positiveIntEnv('NOVA_STORE_MAX_BYTES', 16 * 1024 * 1024);
+let MAX_PARTITIONS = positiveIntEnv('NOVA_STORE_MAX_PARTITIONS', 1024);
 
 function clone(v) {
   return v === undefined ? undefined : JSON.parse(JSON.stringify(v));
@@ -80,7 +80,7 @@ let storeLockToken = null;
 let lastPersistWarning = null;
 let diskPartitions = new Map();
 let revokedUsers = new Set();
-const LOCK_FILE = STORE_FILE + '.lock';
+let LOCK_FILE = STORE_FILE + '.lock';
 
 function createPartition(userId) {
   return {
@@ -268,6 +268,7 @@ function sha256(value) {
 }
 
 const PARTITION_FILE_PATTERN = /^[0-9a-f]{64}-[0-9a-f]{64}\.json$/;
+const PARTITIONED_MODE_MARKER_TEXT = JSON.stringify({ format: 'nova-store-mode', version: 1, layout: 'partitioned' });
 
 function isManifestTempFile(file) {
   const prefix = path.basename(MANIFEST_FILE) + '.';
@@ -313,7 +314,7 @@ function ensurePartitionedModeMarker() {
     validatePartitionedModeMarker();
     return;
   }
-  atomicWriteFile(MODE_MARKER_FILE, JSON.stringify({ format: 'nova-store-mode', version: 1, layout: 'partitioned' }));
+  atomicWriteFile(MODE_MARKER_FILE, PARTITIONED_MODE_MARKER_TEXT);
 }
 
 /* manifest 是唯一提交点；盘点只读取 manifest 和文件元数据，不返回分区内容。 */
@@ -458,9 +459,12 @@ function partitionedDiskBytesUnlocked() {
   return bytes;
 }
 
-/* 内容寻址文件不可覆盖；manifest 是唯一提交点，旧版本和失败事务的孤儿文件均保留。 */
+/* 内容寻址文件不可覆盖；manifest 是唯一提交点，旧版本和已有存储上的失败事务孤儿文件均保留。 */
 function persistPartitionedUnlocked() {
-  ensurePartitionedModeMarker();
+  const markerExisted = storePathExists(MODE_MARKER_FILE);
+  const manifestExisted = storePathExists(MANIFEST_FILE);
+  const partsExisted = storePathExists(PARTS_DIR);
+  if (markerExisted) validatePartitionedModeMarker();
   assertSafePartsDirectory();
   const manifest = { format: 'nova-store-manifest', version: 1, partitions: Object.create(null) };
   const nextDiskPartitions = new Map();
@@ -489,12 +493,35 @@ function persistPartitionedUnlocked() {
     nextDiskPartitions.set(userId, { file: file, sha256: contentHash, seq: p.seq });
   }
   const manifestText = JSON.stringify(manifest);
-  const oldManifestBytes = storePathExists(MANIFEST_FILE) ? fs.lstatSync(MANIFEST_FILE).size : 0;
+  const oldManifestBytes = manifestExisted ? fs.lstatSync(MANIFEST_FILE).size : 0;
   const newPartsBytes = writes.reduce((sum, write) => sum + Buffer.byteLength(write.text, 'utf8'), 0);
-  const bytes = partitionedDiskBytesUnlocked() - oldManifestBytes + newPartsBytes + Buffer.byteLength(manifestText, 'utf8');
+  const markerBytes = markerExisted ? 0 : Buffer.byteLength(PARTITIONED_MODE_MARKER_TEXT, 'utf8');
+  const bytes = partitionedDiskBytesUnlocked() - oldManifestBytes + markerBytes + newPartsBytes + Buffer.byteLength(manifestText, 'utf8');
   if (bytes > MAX_STORE_BYTES) throw new RangeError('持久化字节预算不足：' + bytes + ' / ' + MAX_STORE_BYTES);
-  for (const write of writes) atomicWriteFile(write.target, write.text);
-  atomicWriteFile(MANIFEST_FILE, manifestText);
+
+  const createdParts = [];
+  try {
+    /* 预算通过后才创建模式标记；首次 manifest 提交失败时仅清理本次创建的文件。 */
+    ensurePartitionedModeMarker();
+    for (const write of writes) {
+      createdParts.push(write.target);
+      atomicWriteFile(write.target, write.text);
+    }
+    atomicWriteFile(MANIFEST_FILE, manifestText);
+  } catch (e) {
+    if (!manifestExisted) {
+      for (const target of createdParts) {
+        try { fs.rmSync(target, { force: true }); } catch (cleanupError) { /* 保留原始持久化错误 */ }
+      }
+      if (!markerExisted && storePathExists(MODE_MARKER_FILE)) {
+        try { fs.rmSync(MODE_MARKER_FILE, { force: true }); } catch (cleanupError) { /* 保留原始持久化错误 */ }
+      }
+      if (!partsExisted && storePathExists(PARTS_DIR)) {
+        try { fs.rmdirSync(PARTS_DIR); } catch (cleanupError) { /* 目录非空或已不存在时不删除他人文件 */ }
+      }
+    }
+    throw e;
+  }
   /* 只有 manifest 原子替换成功后才推进内存中的磁盘基线。 */
   diskPartitions = nextDiskPartitions;
 }
@@ -621,6 +648,9 @@ function validatePersisted(raw, strict) {
     }
     if (saved.replanRecords !== undefined && (!Array.isArray(saved.replanRecords) || saved.replanRecords.some(record => !isPlainObject(record)))) throw new Error('invalid replan records');
     if (saved.replanSeq !== undefined && (!Number.isSafeInteger(saved.replanSeq) || saved.replanSeq < 0)) throw new Error('invalid replan seq');
+    if (saved.planBaseline !== undefined && saved.planBaseline !== null && !isPlainObject(saved.planBaseline)) {
+      throw new Error('invalid plan baseline');
+    }
   }
 }
 
@@ -948,6 +978,29 @@ function restore() {
   }
   /* 无分区证据时允许首次写入前兼容旧单 JSON 文件。 */
   restoreLegacy();
+}
+
+function setStoreFile(file, partitioned = STORE_PARTITIONED) {
+  if (storeLockHeld) throw new Error('存储锁持有期间不可切换存储路径');
+  if (typeof file !== 'string' || !file.trim()) throw new TypeError('存储路径必须是非空字符串');
+  STORE_FILE = path.resolve(file);
+  STORE_PARTITIONED = partitioned === true;
+  MANIFEST_FILE = STORE_FILE + '.manifest.json';
+  MODE_MARKER_FILE = STORE_FILE + '.partitioned.json';
+  REVOKED_USERS_FILE = STORE_FILE + '.revoked.json';
+  PARTS_DIR = STORE_FILE + '.parts';
+  LOCK_FILE = STORE_FILE + '.lock';
+  MAX_STORE_BYTES = positiveIntEnv('NOVA_STORE_MAX_BYTES', 16 * 1024 * 1024);
+  MAX_PARTITIONS = positiveIntEnv('NOVA_STORE_MAX_PARTITIONS', 1024);
+}
+
+function reload() {
+  if (storeLockHeld) throw new Error('存储锁持有期间不可重载存储');
+  partitions = new Map();
+  diskPartitions = new Map();
+  revokedUsers = new Set();
+  lastPersistWarning = null;
+  restore();
 }
 
 function partitionOf(userId) {
@@ -1406,7 +1459,14 @@ function pruneOpIndex(userId, keepRecent, expectedFingerprint) {
   };
 }
 
+function isUserRevoked(userId) {
+  return revokedUsers.has(String(userId));
+}
+
 module.exports = {
+  setStoreFile: setStoreFile,
+  reload: reload,
+  isUserRevoked: isUserRevoked,
   reset: reset,
   getSyncInventory: getSyncInventory,
   getPersistenceWarning: function () { return lastPersistWarning; },

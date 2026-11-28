@@ -13,9 +13,8 @@ const DATES = [
 const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
 const plain = value => JSON.parse(JSON.stringify(value));
 
-function boot() {
+function boot(disk = new Map(), withSettings = false) {
   const ops = [], toasts = [], listeners = [];
-  const disk = new Map();
   let renders = 0;
   const ZX = {
     api: { queueOp: op => ops.push(op), pendingCount: () => 0 },
@@ -38,12 +37,14 @@ function boot() {
     }
   };
   const ctx = vm.createContext(sandbox);
-  for (const path of ['util.js', 'state.js', 'flows/planedit.js']) {
+  const scripts = ['util.js', 'state.js', 'flows/planedit.js'];
+  if (withSettings) scripts.push('flows/settings.js');
+  for (const path of scripts) {
     vm.runInContext(fs.readFileSync(require.resolve('../assets/js/' + path), 'utf8'), ctx);
   }
   ZX.util.todayKey = () => DATES[1];
   ZX.render = () => { renders++; };
-  return { ZX, ops, toasts, listeners, renders: () => renders };
+  return { ZX, disk, ops, toasts, listeners, renders: () => renders };
 }
 
 function task(id, est, extra = {}) {
@@ -345,7 +346,6 @@ test('v3 veto 只恢复目标任务的落点，compress 同时恢复 est/time且
   const originals = plain(afterModel.placements.map(item => item.originalSegments));
 
   const bTask = plain(S.tasks.find(item => item.id === 'b'));
-  const cTime = S.tasks.find(item => item.id === 'c').time;
   const snapshotBefore = plain(S.snapshot);
 
   assert.notEqual(ZX.flows.planedit.veto('a', 'compress'), false);
@@ -355,17 +355,18 @@ test('v3 veto 只恢复目标任务的落点，compress 同时恢复 est/time且
   assert.deepEqual(plain(S.placementModel.placements.map(item => item.originalSegments)), originals);
   const aTask = S.tasks.find(item => item.id === 'a');
   assert.equal(aTask.est, 100);
-  assert.equal(aTask.time, '08:00–09:50');
+  assert.equal(aTask.time, beforeTasks.find(item => item.id === 'a').time, 'compress 否决必须恢复快照 time');
   assert.equal(aTask.compressed, undefined);
   assert.equal(aTask.degraded, undefined);
-  assert.deepEqual(plain(S.tasks.find(item => item.id === 'b')), bTask);
-  assert.equal(S.tasks.find(item => item.id === 'c').time, cTime);
+  assert.equal(S.tasks.find(item => item.id === 'b').est, bTask.est);
+  assert.equal(S.tasks.find(item => item.id === 'b').note, bTask.note);
 
   assert.notEqual(ZX.flows.planedit.veto('c', 'defer'), false);
   assert.deepEqual(plain(P.taskSegments(S.placementModel, 'c')), plain(P.taskSegments(beforeModel, 'c')));
   assert.deepEqual(plain(P.taskSegments(S.placementModel, 'b')), bAfter);
-  assert.equal(S.tasks.find(item => item.id === 'c').time, cTime);
-  assert.deepEqual(plain(S.tasks.find(item => item.id === 'b')), bTask);
+  assert.equal(S.tasks.find(item => item.id === 'c').time, '08:00–09:00');
+  assert.equal(S.tasks.find(item => item.id === 'b').est, bTask.est);
+  assert.equal(S.tasks.find(item => item.id === 'b').note, bTask.note);
   assert.deepEqual(plain(S.placementModel.placements.map(item => item.originalSegments)), originals);
   assert.deepEqual(plain(S.week), plain(P.projectWeek(S.placementModel, S.tasks)));
   assert.deepEqual(plain(S.weekShift), plain(S.week));
@@ -373,6 +374,44 @@ test('v3 veto 只恢复目标任务的落点，compress 同时恢复 est/time且
   assert.deepEqual(plain(S.replanRecord.vetoed.map(item => [item.taskId, item.op])), [['a', 'compress'], ['c', 'defer']]);
   assert.equal(ZX.flows.planedit.movedCount(), 1);
   assert.equal(ops.filter(op => op.field === 'vetoed').length, 2);
+});
+
+test('v3 顺延否决从恢复模型重投影 date/time，CSV 与完整备份持久化后保持一致', () => {
+  const disk = new Map();
+  const { ZX } = boot(disk, true);
+  const moved = task('moved', 60, { date: DATES[2], time: '11-18 08:00–11-19 09:30' });
+  const other = task('other', 30, { date: DATES[1], time: '10:00–10:30' });
+  const beforeModel = makeModel([moved, other], [
+    block('moved-a', 'moved', DATES[2], 480, 30),
+    block('moved-b', 'moved', DATES[3], 540, 30),
+    block('other-a', 'other', DATES[1], 600, 30, true)
+  ]);
+  const S = install(ZX, [moved, other], beforeModel);
+  S.placementModel = P.moveTask(beforeModel, 'moved', DATES[5]).model;
+  S.tasks.find(item => item.id === 'moved').date = DATES[5];
+  S.tasks.find(item => item.id === 'moved').time = '18:00–19:00';
+  S.snapshot = { tasks: [plain(moved), plain(other)], beforePlacementModel: beforeModel };
+  S.replanRecord = {};
+  const otherBefore = plain(S.tasks.find(item => item.id === 'other'));
+
+  assert.equal(ZX.flows.planedit.veto('moved', 'defer'), true);
+  const restored = S.tasks.find(item => item.id === 'moved');
+  assert.equal(restored.date, DATES[2]);
+  assert.equal(restored.time, '11-18 08:00–11-19 09:30');
+  assert.deepEqual(plain(S.tasks.find(item => item.id === 'other')), otherBefore, '不得改动其他任务的落点或业务字段');
+  assert.match(ZX.settings.csv(), /任务,moved,数学,任务-moved,60,,0,未开始,2026-11-18,/);
+  assert.equal(ZX.settings.exportBackup().snapshot.tasks.find(item => item.id === 'moved').date, DATES[2]);
+
+  const persisted = JSON.parse(disk.get('zx.overlay')).tasks.find(item => item.id === 'moved');
+  assert.equal(persisted.date, DATES[2]);
+  assert.equal(persisted.time, '11-18 08:00–11-19 09:30');
+  const refreshed = boot(new Map(), true).ZX;
+  refreshed.state.applySnapshot(JSON.parse(disk.get('zx.overlay')));
+  assert.equal(refreshed.state.localLoadFailed, false);
+  assert.equal(refreshed.state.tasks.find(item => item.id === 'moved').date, DATES[2]);
+  assert.equal(refreshed.state.tasks.find(item => item.id === 'moved').time, '11-18 08:00–11-19 09:30');
+  assert.match(refreshed.settings.csv(), /任务,moved,数学,任务-moved,60,,0,未开始,2026-11-18,/);
+  assert.equal(refreshed.settings.exportBackup().snapshot.tasks.find(item => item.id === 'moved').date, DATES[2]);
 });
 
 test('v3 veto 恢复落点若与其他任务冲突，归一化失败时不部分写入', () => {

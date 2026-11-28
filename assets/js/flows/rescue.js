@@ -257,19 +257,22 @@ window.ZX = window.ZX || {};
   }
 
   /* ---------- 识别 ----------
-     数据源 = 执行记录：从 sessions 统计「最近一次有记录的日子距今天几天」。
-     · 今天有记录 → 0；从未有记录（新用户 / 纯种子态）→ 0，不把首日判成中断
+     数据源 = 执行记录与挽救恢复锚点：从最近一次有记录 / 挽救的日子距今天几天。
+     rescueRecord.at 是「连续记录从今天重新开始」的起点，避免次日回看旧 sessions。
+     · 今天有记录或挽救 → 0；从未有记录（新用户 / 纯种子态）→ 0，不把首日判成中断
      · detect() 无参调用即为真实计算；显式传天数仅保留为兼容测试锚点
      · 独立演示使用 preview(days) 局部计算，不调用 detect */
   function zeroDaysFromSessions() {
     var S = ZX.state;
     var list = Array.isArray(S.sessions) ? S.sessions : [];
-    if (!list.length) return 0;
     var days = {};
+    var anchor = S.rescueRecord && U.dayKey(S.rescueRecord.at);
+    if (anchor) days[anchor] = true;
     list.forEach(function (s) {
       var k = U.dayKey(s && (s.endAt || s.startAt));
       if (k) days[k] = true;
     });
+    if (!Object.keys(days).length) return 0;
     var base = U.today0();
     if (days[U.isoDay(base)]) return 0;
     for (var i = 1; i <= 60; i++) {

@@ -8,7 +8,7 @@
 
 ### 1.1 名称与身份锚点
 
-- 产品名与助理同名：`诺瓦 Nova`。页面标题为「诺瓦 Nova · 大学生日常助理」，顶栏品牌区为「Nova诺瓦 / 大学生日常助理」（`index.html`）。
+- 产品名与助理同名：`诺瓦 Nova`。页面标题为「诺瓦 Nova · 学生日程助理」，顶栏品牌区为「Nova诺瓦 / 大学生日常助理」（`index.html`）。
 - 助理侧消息署名固定为「诺瓦」，用户侧署名为「你」（`assets/js/assistant.js`）。助理消息右下角有蜜桃「诺」印落款 `.seal-no`（15×15，`--peach-dk` 底 + `--ac-ink` 字）。
 - 身份锚点是消息右下角的蜜桃落款印 `.seal-no`（CSS 绘制，与形象同源）；立绘（`assets/img/mascot-v4*.svg`）**不刻字、不带印章**——小字号在形象缩放尺寸下不可读，机身保持素净。
 
@@ -94,7 +94,7 @@
 
 - 形象主色 `#4C7FD0`（面罩描边 / 竖条眼 / 耳根透镜）属冷蓝，与 UI 活性色 `--ac #178265`（深薄荷）既不同值也不同色系，互不引用；改 UI 主色不必改形象。
 - 消息落款印已由朱砂改为蜜桃：`--peach-dk #E8955B` 底 + `--ac-ink` 字；专注态的耳、面罩描边与进度环仍用形象侧朱砂 `#A03B2C`，两套色板互不影响。
-- `favicon-v4.svg` 底色 `#FBF7EF` 是图标专用纸底；`index.html` 的 `<meta name="theme-color" content="#07130D">` 对应 `app.css` 深色档的 `--bg`，二者与浅色档 `--bg #EFE9F7` 均不同值，不构成同源同值关系。
+- `favicon-v4.svg` 底色 `#FBF7EF` 是图标专用纸底；`index.html` 的 `<meta name="theme-color" content="#F2F7F5">` 对应首页浅色档 `--bg`，`color-scheme` 为 `light`，与图标底色不同值，不构成同源同值关系。
 
 ### 3.2 墨蓝涂装（产品内使用）
 
@@ -161,7 +161,7 @@
 | 输入台聆听指示 | `index.html`：`<img class="cp-listen" id="cpListen" src="assets/img/avatar-v4.svg" …>`；`assets/js/main.js` `updateListen()` 按「焦点在输入框且有非空文本」在 `window.ZX_MASCOT.listenAvatar` / `idleAvatar` 间切换 | 24×24 |
 | 对话欢迎语首屏 | `assets/js/main.js` `greetingHtml()`：`<img class="msg-mascot" src="assets/img/mascot-v4.svg" width="132" height="116" alt="诺瓦" />` | 132×116 |
 
-`favicon-v4.svg` 底色为 `#FBF7EF`；`<meta name="theme-color" content="#07130D">` 取 `app.css` 深色档 `--bg`，与浅色档 `--bg #EFE9F7` 不同值，详见 §3.1。
+`favicon-v4.svg` 底色为 `#FBF7EF`；`<meta name="theme-color" content="#F2F7F5">` 取首页浅色档 `--bg`，与图标底色不同值，详见 §3.1。
 
 ### 5.3 状态图的使用位置
 

@@ -2442,3 +2442,162 @@ html[data-tab="today"] [data-side="today"],html[data-tab="plan"] [data-side="pla
 
 html:not([data-tab="chat"]) .preset{background:var(--home-color-40);color:var(--txt)}
 html:not([data-tab="chat"]) .subj{background:var(--home-color-40);color:var(--home-color-41)}
+
+/* PC 工作台可读性精修（>860px）：标题与统计分栏，说明独占一行。 */
+@media (min-width:861px){
+  html[data-tab="chat"] .shell,
+  html:not([data-tab="chat"]) .shell{grid-template-columns:minmax(0,1fr) 300px}
+  html[data-tab="chat"] .copilot,
+  html.gl-on[data-tab="chat"] .copilot{padding:40px 40px 32px}
+  html[data-tab="chat"] .home-today,
+  html:not([data-tab="chat"]) .workbench-aside{padding:40px 24px}
+  html:not([data-tab="chat"]) .bench-body{padding:40px 40px 48px}
+
+  .vhead{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:end;gap:14px 24px}
+  .vhead>div:first-child{min-width:0}
+  .vhead .vstats{justify-self:end;max-width:100%;margin-left:0;overflow-x:auto;scrollbar-width:none}
+  .vhead .vstats::-webkit-scrollbar{display:none}
+  .vhead>.note{grid-column:1/-1;max-width:none;margin:0}
+  .vhead .vs{flex:0 0 auto;min-width:88px;padding:10px 12px}
+  .vhead .vs span{min-height:35px;margin-bottom:4px;font-size:12px;line-height:1.45;letter-spacing:.04em}
+  .vhead .vs b{font-size:20px;line-height:1.35}
+  .vhead .vs i{display:block;margin-top:3px;font-size:11.5px;line-height:1.55;letter-spacing:0}
+  .vhead .sc-stats-note{font-size:12.5px;line-height:1.7}
+
+  html[data-tab] .brand-en{font-size:11px;letter-spacing:.08em}
+  html[data-tab] .home-eyebrow{font-size:11.5px}
+  html[data-tab="chat"] .home-today>p,
+  html:not([data-tab="chat"]) .workbench-aside p{font-size:14px}
+  html[data-tab="chat"] .home-today h2,
+  html:not([data-tab="chat"]) .workbench-aside h2{font-size:26px;font-weight:600}
+  html[data-tab="chat"] .home-task{margin-bottom:16px;padding:17px 18px}
+  html[data-tab="chat"] .home-task strong{font-size:15px;font-weight:600;line-height:1.55}
+  html[data-tab="chat"] .home-time{font-size:12.5px}
+  html:not([data-tab="chat"]) .workbench-tip{margin-bottom:16px;padding:17px 18px}
+  html:not([data-tab="chat"]) .workbench-tip b{font-size:15px;font-weight:600}
+  html:not([data-tab="chat"]) .workbench-tip span{font-size:13px;line-height:1.6}
+
+  .meta{font-size:12px}
+  .meta b{font-size:12.5px}
+  .meta .eng{font-size:11px}
+  .cp-acts-h{font-size:11.5px}
+  .chip{min-height:36px;padding:8px 14px;font-size:12.5px;font-weight:600}
+  .composer input{font-size:15px}
+  .send{width:44px;height:44px;flex-basis:44px}
+
+  .sec-h{margin-top:28px;padding-top:12px}
+  .sec-h .n,.sec-h .r{font-size:11.5px}
+  .sec-h .t{font-size:14px;font-weight:600}
+  .sc-link{display:inline-flex;align-items:center;min-height:36px;font-size:12px}
+  .tt-head{padding:10px 14px}
+  .tt-h{font-size:11.5px;letter-spacing:.08em}
+  .tt-row{padding:14px}
+  .subj{font-size:11.5px;font-weight:600}
+  .tt-line h3{font-size:15.5px;font-weight:600}
+  .tt-note,.tt-m,.c-time,.c-est,.c-wt{font-size:12.5px;line-height:1.55}
+  .btn{height:36px;padding:0 14px;font-size:13px}
+  .sa-goal-new,.sc2-replan,.sb-b-btn,.sd-restore-btn,.sd-avail-ops .btn{height:36px;font-size:12.5px}
+  .buffer .bf-t b{font-size:14.5px}
+  .buffer p,.buffer .bf-t span{font-size:12.5px}
+  .tl-cap .t,.rhythm-cap .t{font-size:13px}
+  .tl-cap .d,.rhythm-cap .d,.rhythm-note{font-size:12px}
+  .tl-blk{font-size:11px}
+  .rhythm-seg b{font-size:13px}
+  .rhythm-seg i{font-size:11px}
+  .sc2-blk-t{font-size:12.5px}
+  .sc2-blk-m{font-size:11.5px}
+  .sc2-lock{width:24px;height:24px;flex-basis:24px}
+
+  .panel-b{padding:16px}
+  .panel-h{font-size:12px}
+  .sw,.row2{font-size:13.5px}
+  .sw small,.pref-note,.sd-avail-note{font-size:12px}
+  .row2 .v{font-size:12px}
+  .sd-avail-sum{font-size:12px}
+  .sd-hd,.sd-row-d{font-size:11.5px}
+  .sd-cell{height:40px}
+  .tg{width:48px;height:28px;flex-basis:48px}
+  .tg::after{width:22px;height:22px}
+  .tg.on::after{left:23px}
+
+  .kpi{padding:16px 18px}
+  .kpi span,.kpi .d{font-size:12px}
+  .chart{padding:16px 20px 10px}
+  .brow{font-size:13px}
+  .brow .p{font-size:12px}
+  .report{padding:20px 24px}
+  .report-h b{font-size:14px}
+  .report-h span{font-size:11.5px}
+  .rp-row{grid-template-columns:56px 1fr;gap:14px;padding:9px 0;font-size:13.5px}
+  .rp-row .k{font-size:11.5px}
+  .acard{padding:16px 18px}
+  .acard .h span,.acard p{font-size:12.5px}
+  .formula,.kv,.feas-note{font-size:12.5px}
+  .sheet-x{width:36px;height:36px;flex-basis:36px}
+}
+@media (min-width:1600px){
+  html[data-tab="chat"] .copilot,
+  html.gl-on[data-tab="chat"] .copilot{
+    padding-left:max(40px,calc((100% - 1040px)/2));
+    padding-right:max(40px,calc((100% - 1040px)/2));
+  }
+  html:not([data-tab="chat"]) .wrap{max-width:1120px;margin:0 auto}
+}
+@media (min-width:1181px) and (max-width:1360px){
+  html[data-tab="chat"] .shell,
+  html:not([data-tab="chat"]) .shell{grid-template-columns:minmax(0,1fr) 280px}
+  html[data-tab="chat"] .copilot,
+  html.gl-on[data-tab="chat"] .copilot{padding:36px 32px 30px}
+  html:not([data-tab="chat"]) .bench-body{padding:36px 32px 44px}
+  html[data-tab="chat"] .home-today,
+  html:not([data-tab="chat"]) .workbench-aside{padding:36px 22px}
+}
+@media (min-width:861px) and (max-width:1180px){
+  html[data-tab="chat"] .shell,
+  html:not([data-tab="chat"]) .shell{grid-template-columns:minmax(0,1fr)}
+  html[data-tab="chat"] .home-today,
+  html:not([data-tab="chat"]) .workbench-aside{display:none}
+  html:not([data-tab="chat"]) .bench-body{padding:36px 40px 44px}
+}
+
+/* 今日 / 计划：解释性信息渐进披露，首屏只保留当前决策与操作。 */
+.vhead{overflow:visible}
+.vhead .vstats{position:relative;overflow:visible}
+.vs-more{align-self:stretch;display:flex;align-items:center;border-left:1px solid var(--line)}
+.vs-more summary{list-style:none;display:flex;align-items:center;min-height:44px;padding:0 14px;font-size:12px;color:var(--txt2);cursor:pointer;white-space:nowrap}
+.vs-more summary::-webkit-details-marker{display:none}
+.vs-more summary::after{content:"›";margin-left:7px;font-family:var(--mono);font-size:16px;transition:transform var(--dur) var(--ease)}
+.vs-more[open] summary::after{transform:rotate(90deg)}
+.vs-more summary:hover,.vs-more summary:focus-visible{color:var(--ac);background:var(--wash-row)}
+.vs-more summary:focus-visible,.sc-disclosure summary:focus-visible{outline:2px solid var(--ac);outline-offset:2px;border-radius:8px}
+.vs-more-body{position:absolute;top:calc(100% + 8px);right:0;z-index:12;width:min(520px,90vw);display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:10px;border:1px solid var(--line);border-radius:18px;background:var(--panel);box-shadow:var(--shadow-pop)}
+.vs-more:not([open]) .vs-more-body,.sc-disclosure:not([open])>:not(summary){display:none}
+.vs-more[open] .vs-more-body{display:grid}
+.sc-link{min-width:44px;min-height:36px;justify-content:center;padding:0 9px;border:0;border-radius:999px;background:var(--acbg)}
+.vs-more-body .vs{min-width:0;border:0;border-radius:12px;background:var(--panel2)}
+.vs-more-body .sc-stats-note{grid-column:1/-1;margin:0;padding:8px 10px;font-size:12px;line-height:1.65}
+.sc-disclosure{margin-top:14px;border-top:1px solid var(--line)}
+.sc-disclosure summary{list-style:none;display:flex;align-items:center;gap:8px;min-height:44px;font-size:12.5px;font-weight:600;color:var(--txt2);cursor:pointer}
+.sc-disclosure summary::-webkit-details-marker{display:none}
+.sc-disclosure summary::before{content:"›";font-family:var(--mono);font-size:16px;color:var(--txt3);transition:transform var(--dur) var(--ease)}
+.sc-disclosure[open] summary::before{transform:rotate(90deg)}
+.sc-disclosure summary:hover,.sc-disclosure summary:focus-visible{color:var(--ac)}
+.sc-disclosure summary small{margin-left:auto;font-family:var(--mono);font-size:10.5px;font-weight:400;color:var(--txt3)}
+.sc-timeline .tl{margin-top:0}
+.sc-feas-details{margin-top:10px;padding-top:4px}
+.sc-feas-details .meter{margin-top:26px}
+.sc-feas-details .feas-note{border-top:0;margin-top:14px;padding-top:0}
+.sc-plan-details{margin-top:24px}
+.sc-plan-details .rhythm{margin-top:4px}
+html[data-tab="plan"] .chart .week{height:154px}
+html[data-tab="plan"] .chart .wk-stack{height:104px}
+html[data-tab="plan"] .chart .legend{margin-top:10px}
+@media (max-width:640px){
+  .vhead .vstats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) auto}
+  .vhead .vs{min-width:0;padding-left:9px;padding-right:9px}
+  .vs-more{border-left:1px solid var(--line)}
+  .vs-more summary{padding:0 10px;font-size:0}
+  .vs-more summary::after{font-size:16px;margin-left:0}
+  .vs-more-body{width:100%;grid-template-columns:1fr}
+  .sc-disclosure summary{font-size:13px}
+}

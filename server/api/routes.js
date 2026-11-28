@@ -37,7 +37,7 @@ function jsonBytes(value) {
   return Buffer.byteLength(JSON.stringify(value), 'utf8');
 }
 
-function setBudgeted(map, key, value, maxBytes, maxPerUser, now, maxEntries) {
+function applyBudget(map, key, value, maxBytes, maxPerUser, now, maxEntries) {
   const incomingBytes = jsonBytes(value);
   if (incomingBytes > maxBytes) throw new ApiError('E4002', '单条草案或收据超过字节预算');
   map.delete(key);
@@ -58,6 +58,14 @@ function setBudgeted(map, key, value, maxBytes, maxPerUser, now, maxEntries) {
     if (oldest === key && map.size === 1) throw new ApiError('E4002', '草案或收据总字节预算不足');
     map.delete(oldest);
   }
+}
+
+function setBudgeted(map, key, value, maxBytes, maxPerUser, now, maxEntries) {
+  applyBudget(map, key, value, maxBytes, maxPerUser, now, maxEntries);
+}
+
+function assertBudgeted(map, key, value, maxBytes, maxPerUser, now, maxEntries) {
+  applyBudget(new Map(map), key, value, maxBytes, maxPerUser, now, maxEntries);
 }
 
 function isPlainObject(v) {
@@ -193,10 +201,13 @@ function createRouter(store, auth) {
       return { status: 'conflict', reason: baseline ? 'baseline-changed' : 'baseline-missing', version, ticket };
     }
     const response = { status: 'committed', version: randomUUID() };
+    const now = Date.now();
+    const receipt = { userId, signature, response, expiresAt: now + receiptTtlMs };
+    /* 收据容量必须先预检；同步提交期间不会有其他请求插入，预检成功后实际写入必然可容纳。 */
+    assertBudgeted(planReceipts, key, receipt, MAX_RECEIPT_BYTES, maxReceiptsPerUser, now, maxReceipts);
     store.recordSchedule(userId, response.version, result, current);
     planReviews.delete(key);
-    setBudgeted(planReceipts, key, { userId, signature, response, expiresAt: Date.now() + receiptTtlMs },
-      MAX_RECEIPT_BYTES, maxReceiptsPerUser, Date.now(), maxReceipts);
+    setBudgeted(planReceipts, key, receipt, MAX_RECEIPT_BYTES, maxReceiptsPerUser, now, maxReceipts);
     return response;
   }
 
@@ -293,6 +304,9 @@ function createRouter(store, auth) {
       needString(op.opId, 'ops[' + i + '].opId');
       needString(op.entity, 'ops[' + i + '].entity');
       needString(op.field, 'ops[' + i + '].field');
+      if (!Object.prototype.hasOwnProperty.call(op, 'value') || op.value === undefined) {
+        throw new ApiError('E1001', '缺少字段 ops[' + i + '].value');
+      }
       if (typeof op.entityId !== 'string' && !Number.isSafeInteger(op.entityId)) {
         throw new ApiError('E1001', 'ops[' + i + '].entityId 必须是字符串或安全整数');
       }

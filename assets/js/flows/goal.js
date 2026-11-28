@@ -584,13 +584,27 @@ window.ZX = window.ZX || {};
     var f = feasOf(d);
     if (f.R < GATE) { ZX.ui.toast('R 低于 0.70，先完成校准', 'warn'); return Promise.resolve(false); }
 
-    var all = plan().map(function (it) {
+    var sourcePlan = plan().map(function (it) {
       return { id: it.id, subject: it.s, title: it.title, estMin: it.est, weight: it.weight };
     });
     var slots = buildSlots(d.deadline);
     if (!slots.length) { ZX.ui.toast('没有可用时段，请先在「我的」中设置。当前计划未变更。', 'warn'); return Promise.resolve(false); }
     var stamp = Date.now().toString(36);
-    var approved = JSON.stringify([d, all, slots]);
+    /* 历史会话会保留其任务 ID；新草案不得复用这些 ID，否则备份/overlay 会判定重复任务。 */
+    var usedIds = Object.create(null);
+    (Array.isArray(S.tasks) ? S.tasks : []).forEach(function (task) { usedIds[task.id] = true; });
+    var all = sourcePlan.map(function (it, index) {
+      var id = it.id;
+      if (usedIds[id]) {
+        var base = 'd_' + stamp + '_' + index;
+        id = base;
+        var suffix = 2;
+        while (usedIds[id]) id = base + '_' + suffix++;
+      }
+      usedIds[id] = true;
+      return { id: id, subject: it.subject, title: it.title, estMin: it.estMin, weight: it.weight };
+    });
+    var approved = JSON.stringify([d, sourcePlan, slots]);
     var scheduled;
     try {
       scheduled = ZX.engine.schedule({ tasks: all, slots: slots, params: {} });
@@ -687,6 +701,17 @@ window.ZX = window.ZX || {};
     var bufferTime = bufferWindows.length
       ? fmtMin(bufferWindows[0].startMin) + '–' + fmtMin(bufferWindows[bufferWindows.length - 1].endMin)
       : '';
+    /* 只归档仍被历史会话引用的旧任务：sessions 保持原样，统计仍可找回科目/标题；
+       沿用既有退役标记将其排除出新计划，但不写 abandonedAt，避免伪装成今天放弃。 */
+    var historyIds = Object.create(null);
+    (Array.isArray(S.sessions) ? S.sessions : []).forEach(function (session) {
+      if (session && typeof session.taskId === 'string') historyIds[session.taskId] = true;
+    });
+    var historyTasks = (Array.isArray(S.tasks) ? S.tasks : []).filter(function (task) {
+      return historyIds[task.id] && !U.findById(tasks, task.id);
+    }).map(function (task) {
+      return Object.assign({}, task, { abandoned: true });
+    });
     var patch = {
       goal: Object.assign({}, S.goal, { name: name, deadline: d.deadline, weeks: d.weeks, source: 'user' }),
       feas: { weeklyH: d.weeklyH, weeks: d.weeks, discount: DISCOUNT, demand: d.demand },
@@ -700,12 +725,18 @@ window.ZX = window.ZX || {};
         S.resetTimer();
         Object.assign(S, patch);
         if (S.syncPlacementProjection) S.syncPlacementProjection();
+        /* 历史任务不参与新落点投影，避免其原有时间/日期被清空。 */
+        S.tasks = tasks.concat(historyTasks);
+        /* 写入前用现有完整备份规则预检候选快照（含 sessions / placementModel 引用）；
+           校验抛错时由 transact 整笔回滚，且不会写出 overlay。 */
+        if (ZX.settings && typeof ZX.settings.exportBackup === 'function' &&
+            typeof S.exportSnapshot === 'function' && typeof S.getInstallId === 'function') ZX.settings.exportBackup();
       };
       if (typeof S.transact === 'function') S.transact(commit);
       else commit();
     } catch (e) {
       traceSchedule('failed', S.currentPlanVersion ? S.currentPlanVersion() : null);
-      ZX.ui.toast('排程结果未能保存，当前计划未变更；可重试提交。', 'warn');
+      ZX.ui.toast('排程结果未通过校验或未能保存，当前计划未变更；可重试提交。', 'warn');
       return false;
     }
     traceSchedule('committed', S.currentPlanVersion ? S.currentPlanVersion() : null);

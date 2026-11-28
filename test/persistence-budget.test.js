@@ -12,9 +12,10 @@ function freshStore(file, partitioned = false) {
   process.env.NOVA_STORE_FILE = file;
   if (partitioned) process.env.NOVA_STORE_PARTITIONED = '1';
   else delete process.env.NOVA_STORE_PARTITIONED;
-  const resolved = require.resolve('../server/store/memory.js');
-  delete require.cache[resolved];
-  return require(resolved);
+  const store = require('../server/store/memory.js');
+  store.setStoreFile(file, partitioned);
+  store.reload();
+  return store;
 }
 
 function adminCli(file, args, partitioned = true) {
@@ -76,6 +77,28 @@ for (const partitioned of [false, true]) {
   });
 }
 
+test('partitioned 首次写入预算失败不留半提交状态，恢复预算后可重试', t => {
+  const previous = process.env.NOVA_STORE_MAX_BYTES;
+  process.env.NOVA_STORE_MAX_BYTES = '1';
+  t.after(() => {
+    if (previous === undefined) delete process.env.NOVA_STORE_MAX_BYTES;
+    else process.env.NOVA_STORE_MAX_BYTES = previous;
+  });
+  const file = isolatedFile();
+  const store = freshStore(file, true);
+  const op = { opId: 'first-budget', entity: 'user', entityId: 'u', field: 'name', value: '首次写入', clientTs: 1 };
+  assert.throws(() => store.applyOps('first-user', [op]), /持久化字节预算不足/);
+  for (const target of [file, file + '.partitioned.json', file + '.manifest.json', file + '.parts', file + '.lock']) {
+    assert.equal(fs.existsSync(target), false, target + ' 不应残留');
+  }
+
+  process.env.NOVA_STORE_MAX_BYTES = String(64 * 1024);
+  store.setStoreFile(file, true);
+  store.reload();
+  assert.deepEqual(store.applyOps('first-user', [op]).accepted, [op.opId]);
+  assert.equal(freshStore(file, true).getState('first-user').seed.user.name, '首次写入');
+});
+
 test('匿名分区数量预算拒绝新建第二分区且不改变已有数据', t => {
   const previous = process.env.NOVA_STORE_MAX_PARTITIONS;
   process.env.NOVA_STORE_MAX_PARTITIONS = '1';
@@ -91,6 +114,23 @@ test('匿名分区数量预算拒绝新建第二分区且不改变已有数据',
   assert.throws(() => store.applyOps('second', [{ opId: 'name', entity: 'user', entityId: 'u', field: 'name', value: '拒绝', clientTs: 1 }]), /分区数量超过预算/);
   assert.equal(fs.readFileSync(file, 'utf8'), before);
   assert.deepEqual(Object.keys(JSON.parse(before)), ['first']);
+});
+
+test('测试存储重载复用单例，避免模块实例各自持有独立锁状态', () => {
+  const firstFile = isolatedFile();
+  const secondFile = isolatedFile();
+  const first = freshStore(firstFile);
+  first.applyOps('switch-user', [{ opId: 'name', entity: 'user', entityId: 'u', field: 'name', value: '甲', clientTs: 1 }]);
+  const second = freshStore(secondFile);
+  assert.strictEqual(second, first);
+  assert.notEqual(second.getState('switch-user').seed.user.name, '甲');
+  const reloaded = freshStore(firstFile);
+  assert.strictEqual(reloaded, first);
+  assert.equal(reloaded.getState('switch-user').seed.user.name, '甲');
+  reloaded.withFreshStoreLock(() => {
+    assert.throws(() => reloaded.setStoreFile(secondFile), /存储锁持有期间/);
+    assert.throws(() => reloaded.reload(), /存储锁持有期间/);
+  });
 });
 
 test('JSON 持久化后重新加载仍保留跨日改期和删除墓碑', () => {
@@ -482,6 +522,7 @@ for (const [label, raw] of [
   ['任务元素缺 id', '{"u":{"seq":1,"state":{"tasks":[{}]},"entities":{}}}'],
   ['会话元素为数组', '{"u":{"seq":1,"state":{"sessions":[[]]},"entities":{}}}'],
   ['会话元素为字符串', '{"u":{"seq":1,"state":{"sessions":["bad"]},"entities":{}}}'],
+  ['planBaseline 为数组', '{"u":{"seq":1,"state":{},"entities":{},"planBaseline":[]}}'],
   ['分区序号为非整数', '{"u":{"seq":1.5,"state":{},"entities":{}}}']
 ]) {
   test('持久化深层结构损坏时拒绝启动：' + label, () => {
@@ -877,6 +918,20 @@ test('partitioned reset/delete 仅逻辑删除 manifest 条目并保留旧版本
   assert.equal(fs.existsSync(path.join(file + '.parts', deletedFile)), true);
   const finalStore = freshStore(file, true);
   assert.deepEqual(finalStore.getSyncInventory(true).partitions.map(row => row.userId), ['other']);
+});
+
+test('partitioned 首次 manifest 提交失败时清理本次标记和 parts', () => {
+  const file = isolatedFile();
+  const store = freshStore(file, true);
+  const op = { opId: 'first-commit', entity: 'user', entityId: 'u', field: 'name', value: '首次提交', clientTs: 1 };
+  const restoreRename = failRenameTarget(file + '.manifest.json');
+  try { assert.throws(() => store.applyOps('first-user', [op]), /synthetic rename failure/); }
+  finally { restoreRename(); }
+  for (const target of [file, file + '.partitioned.json', file + '.manifest.json', file + '.parts', file + '.lock']) {
+    assert.equal(fs.existsSync(target), false, target + ' 不应残留');
+  }
+  assert.deepEqual(store.applyOps('first-user', [op]).accepted, [op.opId]);
+  assert.equal(freshStore(file, true).getState('first-user').seed.user.name, '首次提交');
 });
 
 test('partitioned manifest 提交失败时回滚内存和磁盘 hash 基线，重试重新落盘', () => {
@@ -1283,6 +1338,8 @@ test('verifyStoreBackup 严格拒绝损坏 envelope 与分区且不写存储', (
     ['空 userId', value => { value.data[''] = value.data['backup-user']; }],
     ['userId 不符', value => { value.data['backup-user'].userId = 'other'; }],
     ['分区缺 canonical 字段', value => { delete value.data['backup-user'].planBaseline; }],
+    ['planBaseline 为数组', value => { value.data['backup-user'].planBaseline = []; }],
+    ['planBaseline 为字符串', value => { value.data['backup-user'].planBaseline = 'bad'; }],
     ['分区含额外字段', value => { value.data['backup-user'].extra = true; }],
     ['序号损坏', value => { value.data['backup-user'].seq = 'bad'; }],
     ['opIndex 损坏', value => { value.data['backup-user'].opIndex = [['op', 'bad']]; }],

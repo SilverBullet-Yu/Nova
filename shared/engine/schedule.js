@@ -48,8 +48,10 @@
     var startMin = src.startMin !== undefined && src.startMin !== null ? num(src.startMin, null) : null;
     if (!Number.isInteger(estMin) || estMin < 0) throw new TypeError('schedule: estMin 必须是非负整数分钟');
     if (startMin !== null && (!Number.isInteger(startMin) || startMin < 0)) throw new TypeError('schedule: startMin 必须是非负整数分钟');
+    var id = String(src.id !== undefined ? src.id : ('t' + (idx + 1)));
+    if (!id) throw new TypeError('schedule: 任务 ID 必须是非空字符串');
     return {
-      id: String(src.id !== undefined ? src.id : ('t' + (idx + 1))),
+      id: id,
       subject: String(src.subject !== undefined ? src.subject : '未分类'),
       estMin: estMin,
       weight: num(src.weight, 0),
@@ -290,6 +292,11 @@
     var src = input || {};
     var P = normalizeParams(src.params);
     var tasks = (src.tasks || []).map(normalizeTask);
+    var taskIds = Object.create(null);
+    tasks.forEach(function (task) {
+      if (taskIds[task.id]) throw new TypeError('schedule: 任务 ID 重复：' + task.id);
+      taskIds[task.id] = true;
+    });
     var slots = (src.slots || []).map(normalizeSlot);
     validateSlots(slots);
     var st = initState(slots, P);

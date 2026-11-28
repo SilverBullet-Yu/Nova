@@ -278,7 +278,7 @@ test('v3 降级保留放弃任务、释放模型落点并同步记录与队列',
 });
 
 test('v3 顺延只改周期与截止日期，不替换模型或改写任务落点', () => {
-  const tasks = [task('keep', 30, 0.9)];
+  const tasks = [task('keep', 30, 0.9, { time: '08:00–08:30', date: DATES[0] })];
   const model = makeModel(tasks, [block('keep-old', 'keep', DATES[0], 480, 30)]);
   const f = boot({ tasks, model });
   const oldModel = f.S.placementModel;
@@ -289,8 +289,8 @@ test('v3 顺延只改周期与截止日期，不替换模型或改写任务落�
 
   assert.strictEqual(f.S.placementModel, oldModel);
   assert.strictEqual(f.S.tasks, oldTasks);
-  assert.equal(f.S.tasks[0].time, '23:00–23:30');
-  assert.equal(f.S.tasks[0].date, '1999-01-01');
+  assert.equal(f.S.tasks[0].time, '08:00–08:30');
+  assert.equal(f.S.tasks[0].date, DATES[0]);
   assert.deepEqual(plain(P.taskSegments(f.S.placementModel, 'keep')), oldSegments);
   assert.equal(f.S.goal.deadline, '2028-01-01');
   assert.equal(f.S.goal.weeks, 6);

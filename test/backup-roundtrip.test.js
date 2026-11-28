@@ -58,7 +58,7 @@ function boot(disk = new Map()) {
       confirm: async options => { confirmCalls.push(options); return confirmResult; },
       toast: (message, kind) => notices.push([message, kind || ''])
     },
-    render: () => ZX.state.saveOverlay()
+    render: options => { if (!(options && options.skipOverlaySave)) ZX.state.saveOverlay(); }
   };
   const window = {
     ZX, Rhythm: { seed, placementModel: P }, localStorage, document,
@@ -448,6 +448,30 @@ test('未来版本显式导入保留可读 revision 并递增', async () => {
   assert.equal(app.ZX.state.localLoadFailed, true);
   assert.equal(await app.ZX.settings.importBackup(JSON.stringify(validBackup(source))), true);
   assert.equal(JSON.parse(disk.get('zx.overlay')).revision, 101);
+});
+
+test('完整备份导入校验和计时器复位成功后立即重绘，并保留成功提示', async () => {
+  const source = boot();
+  populate(source, '导入后重绘任务');
+  const target = boot();
+  populate(target, '导入前旧任务');
+  target.ZX.state.running = target.ZX.state.tasks[0].id;
+  target.ZX.state.timerStart = 123;
+  const events = [];
+  const nativeReset = target.ZX.state.resetTimer;
+  target.ZX.state.resetTimer = function () {
+    nativeReset();
+    events.push('reset');
+  };
+  target.ZX.render = () => {
+    events.push('render');
+    assert.equal(target.ZX.state.tasks[0].title, '导入后重绘任务', '重绘必须读取导入后的内存状态');
+    assert.equal(target.ZX.state.running, null, '重绘前必须已完成计时器复位');
+  };
+
+  assert.equal(await target.ZX.settings.importBackup(JSON.stringify(validBackup(source))), true);
+  assert.deepEqual(events, ['reset', 'render']);
+  assert.match(target.notices.at(-1)[0], /完整备份导入成功/);
 });
 
 test('成功导入和恢复都会复位计时器，失败导入不复位', async () => {

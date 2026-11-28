@@ -36,25 +36,25 @@ window.ZX = window.ZX || {};
         '<div class="vs"><span>阶段</span><b>基础期</b></div>' +
       '</div></div>' +
 
-      rhythmBand() +
-
       '<div class="sec-h"><span class="n">01</span><span class="t">可行性 R</span><span class="rule"></span>' +
         '<span class="r">T / D · 折扣系数 ' + S.feas.discount + '</span></div>' +
       '<div class="feas">' +
         '<div class="feas-l">' +
           '<div class="r-big"><b>' + f.R.toFixed(2) + '</b><span class="v ' + vc + '">' + f.verdict + '</span></div>' +
+          '<details class="sc-disclosure sc-feas-details"><summary>计算依据</summary>' +
           '<div class="formula">T = <b>' + S.feas.weeklyH + ' h/周 × ' + S.feas.weeks + ' 周 × ' + S.feas.discount + '</b> = ' + f.T + ' h　｜　D = Σ 节点标准工时 × 基础系数 = ' + f.D + ' h</div>' +
           '<div class="meter"><div class="meter-track">' +
             '<div class="zone z1" style="width:43.75%"></div><div class="zone z2" style="width:12.5%"></div>' +
             '<div class="zone z3" style="width:18.75%"></div><div class="zone z4" style="width:25%"></div>' +
           '</div><div class="marker" style="left:' + pos.toFixed(2) + '%"><b>' + f.R.toFixed(2) + '</b></div></div>' +
           '<div class="meter-lab"><span>0</span><span>0.7</span><span>0.9</span><span>1.2</span></div>' +
+          '<p class="feas-note">' + (f.R >= 0.9 ? '可正常进入拆解。若每周再减少 3 h，R 将降至 ' + ((f.T - 3 * S.feas.weeks * S.feas.discount) / f.D).toFixed(2) + '，仍可执行但缓冲消失。' : '低于 0.9，需提高周投入、延长周期或缩小范围后再拆解。') + '</p>' +
+          '</details>' +
         '</div>' +
         '<div class="feas-r">' +
           '<div class="kv"><span>总可用</span><b>' + f.T + '</b><span class="u">h</span></div>' +
           '<div class="kv"><span>需求</span><b>' + f.D + '</b><span class="u">h</span></div>' +
           '<div class="kv"><span>缓冲</span><b>' + Math.max(0, f.T - f.D) + '</b><span class="u">h</span></div>' +
-          '<p class="feas-note">' + (f.R >= 0.9 ? '可正常进入拆解。若每周再减少 3 h，R 将降至 ' + ((f.T - 3 * S.feas.weeks * S.feas.discount) / f.D).toFixed(2) + '，仍可执行但缓冲消失。' : '低于 0.9，需提高周投入、延长周期或缩小范围后再拆解。') + '</p>' +
         '</div>' +
       '</div>' +
 
@@ -63,7 +63,7 @@ window.ZX = window.ZX || {};
         (loadWarnFlag() ? '<img class="warn-flag" src="assets/img/mascot-v4-warn.svg" width="22" height="19" alt="负载预警：增幅已达防雪崩阈值" />' : '') +
         '<span class="rule"></span>' +
         '<span class="r">' + replanLabel() + '</span></div>' +
-      weekChart() +
+      weekChart() + rhythmDisclosure() +
     '</div>';
   }
 
@@ -96,6 +96,11 @@ window.ZX = window.ZX || {};
       '<div class="rhythm-band">' + segs + '</div>' +
       '<p class="rhythm-note">带上的周数为按配比折算的预估视图，不构成排程依据；阶段边界随可行性 R 与偏差归因校准。</p>' +
     '</div>';
+  }
+
+  function rhythmDisclosure() {
+    return '<details class="sc-disclosure sc-plan-details"><summary><span>学期节律</span><small>阶段占比</small></summary>' +
+      rhythmBand() + '</details>';
   }
 
   /* 负载预警：重排后未来 7 天负载增幅 ≥ 20%（与防雪崩断言同阈值）→ 显示提醒态 */

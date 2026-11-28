@@ -66,8 +66,10 @@ test('恢复结果无法保存时不得丢弃回收站快照', async () => {
   ZX.state.dayAssign = { t3: '五' };
   ZX.state.sessions = [{ id: 'after-delete', minutes: 7 }];
   const before = plain({ dayAssign: ZX.state.dayAssign, sessions: ZX.state.sessions });
+  const beforeVersion = ZX.state.currentPlanVersion();
   assert.equal(await ZX.settings.restore(), false);
   assert.deepEqual(plain({ dayAssign: ZX.state.dayAssign, sessions: ZX.state.sessions }), before);
+  assert.equal(ZX.state.currentPlanVersion(), beforeVersion, '恢复失败必须还原计划版本');
   assert.equal(disk.get('zx.trash'), savedTrash);
   assert.ok(notices.some(message => /失败|无法/.test(message)));
 });

@@ -114,7 +114,7 @@
 | `zx.pending_plan` | `api.js` | 旧待复核计划原样保留 | 只提供读取入口；不自动复核、不上送、不影响本机计划；删除本机业务数据时仍保留隔离 |
 | `zx.server_plan_version` | 历史遗留 | 旧服务端计划版本记录 | 当前前端不读取、不写入；不得作为本机计划真值 |
 | `zx.ui_prefs` | `util.js` / `index.html` | util 与首帧脚本均只处理 `{ grid, glow, motion, font }` | 「我的 → 显示与动效」保存这四项；3D 舞台由运行时闸门控制，不读写偏好字段，见 §6 |
-| `zx.trash` | `settings.js` | 删除全部数据或备份导入覆盖前的业务快照 `{ at, snapshot }` | 覆盖 / 删除前写入；保留 7 天，到期清除；可显式恢复；不含 token / 旧队列 |
+| `zx.trash` | `settings.js` | 删除全部数据或备份导入覆盖前的业务快照 `{ at, snapshot }`；snapshot 含 `planVersion` | 覆盖 / 删除前写入；保留 7 天，到期清除；可显式恢复；保存或回读失败时业务字段与计划版本均回滚；不含 token / 旧队列 |
 | `zx.flash` | `settings.js` | 一次性提示文案 | 删除后写入，重载时由 `settings.init()` 消费并 toast |
 
 加载保护：JSON 损坏、格式 / 版本不受支持、v3 元数据缺失或业务结构损坏，以及 `version > 3` 的未来版本，都会保留 `zx.overlay` 原键并置 `localLoadFailed`，暂停后续覆盖；只有显式导入通过校验的完整备份或确认删除全部数据才解除熔断。保存失败置 `overlaySaveFailed` 并提示刷新可能丢失。`replanSnapshot` 须含 `tasks` 数组，否则 `replanned` 回落为 `false`。
@@ -165,6 +165,7 @@
 - 断点：`@media (max-width:860px)` 为主移动断点（另有 1080px、640px、360px）。≤860px 时顶栏改两行网格：第一行品牌与计算连接位，`.tnav`（唯一主导航 `#rail`）占满第二行（`grid-row:2`、`grid-column:1/-1`，高度 `--nav-row`）；`.bench-head` 隐藏；任务表隐藏 `.tt-head` 与 `.c-idx` / `.c-time` / `.c-est` / `.c-wt`，数值改由 `.tt-m` 元行承载。
 - 科目色不写死在 CSS：由 `state.js` 的 `SUBJ` 与 `shared/data/seed.js` 的 `subjectColors` 注入行内 `--c` 变量。
 - 新样式追加到 `app.css` 末尾对应区块，不重排既有规则；新增类名沿用现有前缀族（`.sa-` 目标、`.sb-` 挽救、`.sc-` 执行、`.sc2-` 计划交互、`.sd-` 设置）。
+- PC（>860px）视图标题与统计使用两列网格，长说明独占一行；主任务标题不低于 15px，次级说明不低于 12px。浏览器验收 `PC-VISUAL` 覆盖 1440/1366/1024/1920 四种桌面宽度、五页标题单行、内容宽度、字号、章节间距、控件触达与横向溢出；超宽屏正文列居中并限制阅读宽度。
 
 ## 6. 动效与视觉偏好闸门
 
@@ -219,7 +220,7 @@
 | CSS 审计 | `npm run audit` | 退出码 0；仅 warn（死 token / 死类候选）可过，存在 error 必须先修 |
 | 服务冒烟 | `npm start`（默认监听 `127.0.0.1:8787`，浏览器访问 `http://127.0.0.1:8787`） | `GET /api/health` 返回 200 且含 `"ok":true`；首页返回 200 |
 | 资源引用 | 见下方扫描命令；浏览器另查 Network | 本地 `src` / `href` 文件全部存在（包含 vendor 与 GL），数量取扫描实时输出；HTTP 加载无 404，不能以存在性扫描替代实际执行验证 |
-| DOM-first / GL 降级 | 五页确认 `#gl`/`#css3d` 隐藏且无应用 rAF/clone；`optional-a7` 强制可见并检查 WebGL 不可用、CSS3D 异常、上下文丢失、DOM 回退与增量克隆 | 正常产品路径不得把隐藏舞台通过称为可见 GL 验收；强制可见夹具需单独记录，不替代真实设备/驱动测试 |
+| DOM-first / GL 降级 | 五页确认 `#gl`/`#css3d` 隐藏且无应用 rAF/clone；`optional-a7` 强制可见并检查 WebGL 不可用、CSS3D 异常、上下文丢失、DOM 回退与增量克隆；`optional-a10` 在 `file://` 下强制可见并覆盖 SVG→Canvas→WebGL 纹理路径 | 正常产品路径不得把隐藏舞台通过称为可见 GL 验收；强制可见夹具需单独记录，不替代真实设备/驱动测试 |
 | 离线链路 | 双击 `index.html` 以 `file://` 打开；`optional-a8` 真实开始/结束任务、导出备份、导入并刷新 | 顶栏显示离线褪色形象，`alt` / `title` 为「离线 · 本地可用」；排程 / 记录 / 本机确认 / 撤销 / CSV 与 JSON 备份可用，执行记录与导入结果刷新后保留；不把 CORS 失败伪装成业务失败 |
 | 本地模式在线提示 | 启动服务后刷新；仅允许 `/api/health` 成功 | 无旧 pending 时顶栏为圆点 +「本地主数据 · 服务端仅计算」；Network 中启动和 `online` 事件无 `/api/state`、`/api/sync/ops`、`/api/plan/review`、`/api/replan/confirm`、`/api/replan/undo` 请求 |
 | 离线指示与旧队列 | 停服后刷新；预置含旧 pending 的 `zx.op_queue` | 顶栏出现 `.sync-offline` 头像且不破图，基础文案为「离线 · 本地可用」；离线顶栏附「旧队列已隔离 N」，「我的」页显示「N 项已隔离」，`.sync-pending` 不显示待处理数字；恢复服务后顶栏显示「本地主数据 · 旧队列已隔离 N」，只更新计算可达状态 |

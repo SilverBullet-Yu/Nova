@@ -558,6 +558,20 @@ test('隐藏舞台不克隆 DOM，显示后 refresh 补齐当前页', () => {
   assertActivePage(pages, 'chat');
 });
 
+test('降级后强制可见的舞台不再克隆 DOM', () => {
+  const { h, chat, stream } = stageHarness('chat');
+  const first = stream.children[0];
+  h.document.documentElement.dataset.gl3d = 'off';
+  h.document.getElementById('gl').style.display = 'block';
+  h.document.getElementById('css3d').style.display = 'block';
+  const second = h.element('second-message', chat, 'bubble');
+  second.textContent = 'after fallback';
+  h.notify(chat);
+  h.window.ZX_GL_STAGE.refresh();
+  assert.equal(stream.children.length, 1);
+  assert.equal(stream.children[0], first);
+});
+
 test('stage preserves unchanged bubbles, replaces changed descendants, and tracks append/remove', () => {
   const { h, api, chat, text, stream, pages } = stageHarness();
   assertActivePage(pages, 'chat');

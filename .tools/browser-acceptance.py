@@ -47,8 +47,8 @@ FORBIDDEN_PATHS = {
     "/api/replan/confirm",
     "/api/replan/undo",
 }
-REQUIRED = ("M1", "M2", "M3", "M4", "S1", "S2", "S5", "S6", "S8")
-OPTIONAL = ("optional-7", "optional-6", "optional-concurrency", "optional-a11y", "optional-mobile", "optional-a4", "optional-a7", "optional-a8")
+REQUIRED = ("M1", "M2", "M3", "M4", "S1", "S2", "S5", "S6", "S8", "PC-VISUAL")
+OPTIONAL = ("optional-7", "optional-6", "optional-concurrency", "optional-a11y", "optional-mobile", "optional-a4", "optional-a7", "optional-a8", "optional-a10")
 
 REPORT = {
     "schema": "nova-browser-acceptance-v2",
@@ -1363,13 +1363,14 @@ def run_s8(browser, server_origin: str) -> None:
             replanned: false, snapshot: null, replanRecord: null, replanHistory: [],
             consecutiveZeroDays: 0, interrupted: false, rescueRecord: null, skippedOpen: true
           });
+          const taskDate = S.tasks[0].date, taskTime = S.tasks[0].time;
           S.syncPlacementProjection();
           ZX.render();
           ZX.setTab('today');
           return {
             today, originalModel: original, releasedModel: released.model,
             originalSegments: released.model.placements[0].originalSegments,
-            taskDate: S.tasks[0].date, taskTime: S.tasks[0].time,
+            taskDate, taskTime,
             sessionCount: S.sessions.length
           };
         }""")
@@ -1478,7 +1479,7 @@ def run_m2(browser, server_origin: str) -> None:
             "initialTab": page.evaluate("document.documentElement.dataset.tab"),
             "gl3d": page.evaluate("document.documentElement.dataset.gl3d"),
         }
-        assert evidence["http"]["title"] == "诺瓦 Nova · 大学生日常助理"
+        assert evidence["http"]["title"] == "诺瓦 Nova · 学生日程助理"
         assert evidence["http"]["initialTab"] == "chat"
 
         tabs = []
@@ -2200,7 +2201,8 @@ def run_optional_a8(browser, server_origin: str) -> None:
         dialog = file_page.locator(".ovl[role='dialog']")
         dialog.wait_for(state="visible", timeout=10000)
         dialog.locator("[data-yes]").click()
-        file_page.wait_for_function("ZX.state.tasks[0].title !== 'file 导入前修改'", timeout=10000)
+        # 确认框在异步读文件前已关闭，须等待导入成功提示而非仅等待状态标题变化。
+        file_page.wait_for_function("document.body.innerText.includes('完整备份导入成功')", timeout=10000)
         file_page.wait_for_function("!document.querySelector('.ovl[role=\"dialog\"]')", timeout=10000)
         file_page.reload(wait_until="domcontentloaded")
         file_page.wait_for_function("window.ZX && ZX.state && ZX.engine", timeout=20000)
@@ -2534,6 +2536,163 @@ def run_optional_mobile(browser, server_origin: str) -> None:
             context.close()
 
 
+def run_optional_a10(browser, server_origin: str) -> None:
+    evidence = {}
+    context = None
+    label = "optional-a10"
+    try:
+        context = new_context(browser, server_origin, file_mode=True, gl3d=True)
+        page, errors = open_page(context, label, FILE_URL)
+        page.evaluate("""() => {
+          window.__a10TextureDraws = 0;
+          window.__a10DrawSources = [];
+          window.__a10ImageSources = [];
+          const nativeDraw = CanvasRenderingContext2D.prototype.drawImage;
+          CanvasRenderingContext2D.prototype.drawImage = function (...args) {
+            window.__a10DrawSources.push(args[0] instanceof HTMLImageElement ? args[0].src : String(args[0]?.tagName || args[0]));
+            if (args[0] instanceof HTMLImageElement && /mascot-v4\\.svg(?:\\?|$)/.test(args[0].src)) window.__a10TextureDraws++;
+            return nativeDraw.apply(this, args);
+          };
+          const srcDescriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+          Object.defineProperty(HTMLImageElement.prototype, 'src', {
+            ...srcDescriptor,
+            set(value) { window.__a10ImageSources.push(String(value)); srcDescriptor.set.call(this, value); }
+          });
+        }""")
+        page.evaluate("""() => {
+          document.getElementById('gl').style.display = 'block';
+          document.getElementById('css3d').style.display = 'block';
+          window.dispatchEvent(new Event('resize'));
+        }""")
+        page.wait_for_function("document.documentElement.dataset.gl3d === 'on' && document.documentElement.classList.contains('gl-on') && !!document.querySelector('.gl-stream') && window.__a10TextureDraws > 0", timeout=15000)
+        evidence["fileGl"] = page.evaluate("""() => ({
+          gl3d: document.documentElement.dataset.gl3d,
+          className: document.documentElement.className,
+          canvas: [document.getElementById('gl').width, document.getElementById('gl').height],
+          streamPresent: !!document.querySelector('.gl-stream'),
+          textureDraws: window.__a10TextureDraws || 0,
+          drawSources: window.__a10DrawSources || [],
+          imageSources: window.__a10ImageSources || [],
+          domMessages: document.querySelectorAll('#chat .msg').length
+        })""")
+        evidence["screenshot"] = screenshot(page, "optional-a10-file-gl")
+        evidence["pageErrors"] = errors
+        evidence["httpRequests"] = [row for row in requests_for(label) if row["url"].startswith(("http://", "https://"))]
+        assert not errors, errors
+        assert all(row["decision"] == "aborted-file-http" for row in evidence["httpRequests"]), evidence["httpRequests"]
+        assert evidence["fileGl"]["gl3d"] == "on", evidence["fileGl"]
+        assert "gl-on" in evidence["fileGl"]["className"].split(), evidence["fileGl"]
+        assert all(size > 0 for size in evidence["fileGl"]["canvas"]), evidence["fileGl"]
+        assert evidence["fileGl"]["streamPresent"], evidence["fileGl"]
+        assert evidence["fileGl"]["textureDraws"] > 0, evidence["fileGl"]
+        assert evidence["fileGl"]["domMessages"] > 0, evidence["fileGl"]
+        record(label, "pass", True, evidence)
+    except Exception as exc:
+        evidence["pageErrors"] = locals().get("errors", [])
+        failure_screenshot(locals().get("page"), label, evidence)
+        record(label, "fail", False, evidence, exc)
+    finally:
+        if context:
+            context.close()
+
+
+def run_pc_visual(browser, server_origin: str) -> None:
+    evidence = {"viewports": {}}
+    context = None
+    label = "PC-VISUAL"
+    selectors = {
+        "chat": {".txt": {"size": 15}, ".home-task strong": {"size": 15, "weight": 600}, ".home-time": {"size": 12.5}},
+        "today": {".tt-line h3": {"size": 15, "weight": 600}, ".tt-note": {"size": 12}, ".sec-h .t": {"size": 14, "weight": 600}},
+        "plan": {".sc2-blk-t": {"size": 12}, ".rhythm-note": {"size": 12}, ".sec-h .t": {"size": 14, "weight": 600}},
+        "data": {".rp-row": {"size": 13}, ".kpi span": {"size": 12}, ".sec-h .t": {"size": 14, "weight": 600}},
+        "me": {".sw": {"size": 13}, ".sd-avail-note": {"size": 12}, ".sec-h .t": {"size": 14, "weight": 600}}
+    }
+    try:
+        for width in (1440, 1366, 1024, 1920):
+            context = new_context(
+                browser, server_origin, file_mode=False, gl3d=False,
+                viewport={"width": width, "height": 900}
+            )
+            page, errors = open_page(context, f"{label}-{width}", server_origin + "/")
+            views = {}
+            for tab in ("chat", "today", "plan", "data", "me"):
+                page.locator(f"#rail button[data-tab='{tab}']").click()
+                page.wait_for_function("tab => document.documentElement.dataset.tab === tab", arg=tab)
+                metrics = page.evaluate("""selectors => {
+                  const visible = element => {
+                    const rect = element.getBoundingClientRect();
+                    const style = getComputedStyle(element);
+                    return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden';
+                  };
+                  const title = [...document.querySelectorAll('.home-intro h1, #view .vhead h1')].find(visible);
+                  const titleRect = title.getBoundingClientRect();
+                  const titleStyle = getComputedStyle(title);
+                  const content = [...document.querySelectorAll('.home-intro, #view .wrap')].find(visible);
+                  const controls = [...document.querySelectorAll('button,a,input,select,[role="button"]')]
+                    .filter(visible)
+                    .filter(element => !element.classList.contains('skip-link'))
+                    .map(element => {
+                      const rect = element.getBoundingClientRect();
+                      return {name: element.getAttribute('aria-label') || element.textContent.trim().slice(0, 40),
+                        className: element.className?.toString().slice(0, 80), width: rect.width, height: rect.height};
+                    });
+                  const fonts = Object.fromEntries(Object.entries(selectors).map(([selector, expected]) => {
+                    const element = document.querySelector(selector);
+                    const style = element ? getComputedStyle(element) : null;
+                    return [selector, {minimum: expected.size, actual: style ? parseFloat(style.fontSize) : 0,
+                      expectedWeight: expected.weight, actualWeight: style ? parseInt(style.fontWeight, 10) : 0,
+                      text: element?.textContent.trim().slice(0, 50), className: element?.className}];
+                  }));
+                  const sections = [...document.querySelectorAll('#view .sec-h')].filter(visible)
+                    .map(element => parseFloat(getComputedStyle(element).marginTop));
+                  return {
+                    viewport: [innerWidth, innerHeight], scrollWidth: document.documentElement.scrollWidth,
+                    title: {width: titleRect.width, height: titleRect.height, lineHeight: parseFloat(titleStyle.lineHeight), weight: parseInt(titleStyle.fontWeight, 10)},
+                    contentWidth: content.getBoundingClientRect().width,
+                    visibleStatCount: [...document.querySelectorAll('.vstats .vs')].filter(visible).length,
+                    openDisclosures: [...document.querySelectorAll('#view details[open]')].length,
+                    minControlWidth: Math.min(...controls.map(control => control.width)),
+                    minControlHeight: Math.min(...controls.map(control => control.height)),
+                    smallControls: controls.filter(control => control.width < 24 || control.height < 24),
+                    fonts, sectionMargins: sections
+                  };
+                }""", selectors[tab])
+                shot = screenshot(page, f"pc-visual-{width}-{tab}") if width == 1440 else None
+                assert metrics["scrollWidth"] <= width + 1, metrics
+                assert metrics["title"]["width"] >= 100, metrics
+                assert metrics["title"]["height"] <= metrics["title"]["lineHeight"] * 1.6, metrics
+                assert metrics["title"]["weight"] >= 500, metrics["title"]
+                assert 600 <= metrics["contentWidth"] <= 1200, metrics
+                if tab in ("today", "plan"):
+                    assert metrics["openDisclosures"] == 0, metrics
+                if tab == "today":
+                    assert metrics["visibleStatCount"] <= 4, metrics
+                assert not metrics["smallControls"], metrics["smallControls"]
+                for font in metrics["fonts"].values():
+                    assert font["actual"] >= font["minimum"], font
+                    if font["expectedWeight"] is not None:
+                        assert font["actualWeight"] == font["expectedWeight"], font
+                assert all(margin >= 24 for margin in metrics["sectionMargins"]), metrics["sectionMargins"]
+                metrics["screenshot"] = shot
+                views[tab] = metrics
+            evidence["viewports"][str(width)] = views
+            evidence["pageErrors"] = errors
+            assert not errors, errors
+            context.close()
+            context = None
+        evidence["forbiddenApiRequests"] = forbidden_requests([f"{label}-{width}" for width in (1440, 1366, 1024, 1920)])
+        assert not evidence["forbiddenApiRequests"], evidence["forbiddenApiRequests"]
+        record(label, "pass", True, evidence)
+    except Exception as exc:
+        evidence["pageErrors"] = locals().get("errors", [])
+        evidence["forbiddenApiRequests"] = forbidden_requests([label])
+        failure_screenshot(locals().get("page"), label, evidence)
+        record(label, "fail", False, evidence, exc)
+    finally:
+        if context:
+            context.close()
+
+
 def main() -> int:
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
@@ -2576,6 +2735,8 @@ def main() -> int:
         run_optional_a4(browser, server_origin)
         run_optional_a7(browser, server_origin)
         run_optional_a8(browser, server_origin)
+        run_optional_a10(browser, server_origin)
+        run_pc_visual(browser, server_origin)
     except Exception as exc:
         REPORT["fatalError"] = error_text(exc)
         log("fatal: " + REPORT["fatalError"])

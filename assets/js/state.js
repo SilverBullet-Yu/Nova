@@ -563,8 +563,7 @@ window.ZX = window.ZX || {};
     var P = placementModel();
     state.placementModel = o.placementModel == null ? null : P.normalizeModel(o.placementModel);
     if (state.placementModel) {
-      state.week = P.projectWeek(state.placementModel, state.tasks);
-      state.weekShift = U.clone(state.week);
+      syncPlacementProjection();
     }
     /* 手工改期 / 锁定 / 可用时段 / 通知开关：此前只发 op 不入 overlay，刷新即丢 */
     if (isObject(o.dayAssign)) state.dayAssign = o.dayAssign;
@@ -633,6 +632,11 @@ window.ZX = window.ZX || {};
       setLocalLoadFailure('invalid', '本地数据元数据不完整');
       return false;
     }
+    if (v >= 3 && (typeof o.planVersion !== 'string' || !o.planVersion ||
+        SNAPSHOT_FIELDS.some(function (key) { return !Object.prototype.hasOwnProperty.call(o, key); }))) {
+      setLocalLoadFailure('invalid', '本地 v3 业务快照字段不完整');
+      return false;
+    }
     if (!validateOverlayShape(o)) {
       setLocalLoadFailure('invalid', '本地业务数据结构损坏');
       return false;
@@ -666,6 +670,7 @@ window.ZX = window.ZX || {};
     applyBusinessOverlay(snapshot);
     expireDeferredTasks();
     ensurePlacementWindow();
+    state.syncPlacementProjection();
     clearLocalLoadFailure();
     var saved = saveOverlay(replaceUnreadable, unreadableOverlayRaw);
     if (!saved) {
@@ -832,16 +837,30 @@ window.ZX = window.ZX || {};
         (task.substituted === true && U.dayKey(task.substitutedAt) === date);
     });
   };
-  state.syncPlacementProjection = function () {
+  function syncPlacementProjection() {
     var P = placementModel();
     if (!state.placementModel || !P) return false;
     state.week = P.projectWeek(state.placementModel, state.tasks);
     state.weekShift = U.clone(state.week);
     var dayAssign = {};
-    var segmentsById = state.taskSegmentsMap();
+    var segmentsById = typeof state.taskSegmentsMap === 'function' ? state.taskSegmentsMap() : P.taskSegmentsMap(state.placementModel);
+    var pad = U.pad2;
     state.tasks.forEach(function (task) {
       var segments = segmentsById[String(task.id)] || [];
       if (segments.length) dayAssign[task.id] = ['日', '一', '二', '三', '四', '五', '六'][new Date(segments[0].date + 'T00:00:00Z').getUTCDay()];
+      var first = segments[0];
+      var last = segments[segments.length - 1];
+      var from = first ? pad(Math.floor(first.startMin / 60)) + ':' + pad(first.startMin % 60) : '';
+      var to = last ? pad(Math.floor((last.startMin + last.durMin) / 60)) + ':' + pad((last.startMin + last.durMin) % 60) : '';
+      task.time = segments.length
+        ? (first.date === last.date
+          ? from + '–' + to
+          : first.date.slice(5) + ' ' + from + '–' + last.date.slice(5) + ' ' + to)
+        : '';
+      task.date = segments.length ? segments[0].date : null;
+      var unplaced = state.placementModel.unplanned.find(function (item) { return item.taskId === task.id; });
+      if (unplaced) { task.unplanned = true; task.unplannedReason = unplaced.reason; }
+      else { delete task.unplanned; delete task.unplannedReason; }
     });
     state.dayAssign = dayAssign;
     var today = U.todayKey();
@@ -856,7 +875,8 @@ window.ZX = window.ZX || {};
       free: !todaySummary || todaySummary.bufferUsedMin === 0
     });
     return true;
-  };
+  }
+  state.syncPlacementProjection = syncPlacementProjection;
   /* 「连续未改善」真算：从最近一次重排往回数，连续「被撤销」或「增幅触顶」的次数。
      这是防雪崩断言 3（连续 3 次未改善 → 转目标校准）的数据源，替换原硬编码 0。 */
   var LOAD_GROWTH_CAP = 0.20;
@@ -892,6 +912,7 @@ window.ZX = window.ZX || {};
   /* boot overlay 已应用；此时派生函数和同步投影均已就绪。 */
   expireDeferredTasks();
   ensurePlacementWindow();
+  state.syncPlacementProjection();
 
   ZX.SUBJ = SUBJ;
   ZX.state = state;

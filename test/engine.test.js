@@ -801,6 +801,38 @@ test('replan 原型键锁定、输入不变量和空壳确认均被拒绝', () =
   assert.throws(() => confirmReplan({ needsConfirmation: true }), TypeError);
 });
 
+test('replan 拒绝小数工时，confirmReplan 拒绝字段齐全但内部非法的结果', () => {
+  const week = [{ date: 'D', minutes: 0, capacity: 11, buffer: 0 }];
+  assert.throws(() => replan({ tasks: [{ id: 'p', est: 10.5 }], week }), TypeError);
+  const malformed = {
+    needsConfirmation: true,
+    verdict: 'needsConfirmation',
+    strategies: [1, 2, 3, 4],
+    diff: [null],
+    snapshot: { tasks: [], week: [] },
+    guards: { loadGrowthOk: true, bufferPreserved: true, consecutiveOk: true, compressedShareOk: true },
+    nextTasks: [null],
+    nextPlacements: []
+  };
+  assert.throws(() => confirmReplan(malformed), TypeError);
+  const invalidPlacement = {
+    needsConfirmation: true,
+    verdict: 'needsConfirmation',
+    strategies: [1, 2, 3, 4].map(level => ({ level, name: ['顺延', '压缩', '替代', '放弃'][level - 1], applied: false, growth: 0, reason: '' })),
+    diff: [],
+    snapshot: { tasks: [{ id: 'p', est: 10 }], week: [{ date: 'D' }] },
+    guards: { loadGrowthOk: true, bufferPreserved: true, consecutiveOk: true, compressedShareOk: true },
+    nextTasks: [{ id: 'p', est: 10 }],
+    nextPlacements: [{ task: { id: 'p' }, segs: [{ date: 'D', minutes: 10.5, isBuffer: false }], minutes: 10.5, locked: false }]
+  };
+  assert.throws(() => confirmReplan(invalidPlacement), TypeError);
+});
+
+test('schedule 拒绝空或重复任务 ID，避免产出无法创建落点模型的块', () => {
+  assert.throws(() => schedule({ tasks: [{ id: '', estMin: 30 }], slots: [] }), TypeError);
+  assert.throws(() => schedule({ tasks: [{ id: 'same', estMin: 30 }, { id: 'same', estMin: 30 }], slots: [] }), TypeError);
+});
+
 test('引擎产物与源码同步且构建渲染可通过语法检查', () => {
   assert.equal(buildEngine.check().current, true);
   assert.doesNotThrow(() => new (require('node:vm').Script)(buildEngine.render()));

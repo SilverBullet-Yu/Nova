@@ -222,6 +222,32 @@ test('降载预览绑定任务与版本，运行中或计划变化后旧卡不�
   assert.equal(ZX.state.tasks[1].deferred, true);
 });
 
+test('降载候选、保留数量与今日计划工时只使用 exec.activeTasks()', () => {
+  const { ZX, messages } = boot();
+  const S = ZX.state;
+  const today = ZX.util.todayKey();
+  const tomorrow = ZX.util.isoDay(ZX.util.addDays(ZX.util.today0(), 1));
+  S.tasks = [
+    { id: 'today-low', subject: '数学', title: '今日低权重', est: 30, weight: 0.2, date: today },
+    { id: 'today-high', subject: '英语', title: '今日高权重', est: 60, weight: 0.8, date: today },
+    { id: 'today-done', subject: '政治', title: '今日已完成', est: 20, weight: 0.9, date: today, done: true, actual: 20 },
+    { id: 'future-low', subject: '408', title: '未来更低权重', est: 200, weight: 0.01, date: tomorrow }
+  ].map(task => S.normTask(task));
+  S.tasksOnDate = date => S.tasks.filter(task => task.date === date);
+  S.tiredAdopted = false;
+
+  ZX.assistant.tiredFlow();
+  const html = messages.at(-1);
+  assert.match(html, /今日 −30m/);
+  assert.match(html, /保留<\/span><span class="why">权重更高的项不受影响<\/span><span class="v ac">1 项/);
+  assert.match(html, /今日计划 1h50 → 1h20/);
+  assert.doesNotMatch(html, /未来更低权重/);
+
+  ZX.assistant.adoptTired();
+  assert.equal(S.tasks.find(task => task.id === 'today-low').deferred, true);
+  assert.equal(S.tasks.find(task => task.id === 'future-low').deferred, undefined);
+});
+
 test('顺延任务不再出现在对话今日待办和提醒数量', () => {
   const { ZX, messages } = boot();
   deferredFixture(ZX);

@@ -93,6 +93,26 @@ test('需求工时同步后可从服务端状态回读', async () => {
   assert.equal(state.body.seed.feas.demand, 999);
 });
 
+test('sync/ops 缺失 value 返回 E1001，整批不落盘且重载不损坏', async () => {
+  const user = await newSession();
+  const baseline = await call('POST', '/api/sync/ops', { ops: [
+    { opId: 'missing-value-baseline', entity: 'user', entityId: 'u', field: 'name', value: '基线', clientTs: 1 }
+  ] }, user.token);
+  assert.equal(baseline.status, 200);
+  const beforeSeq = memory.getSeq(user.userId);
+  const rejected = await call('POST', '/api/sync/ops', { ops: [
+    { opId: 'missing-value-valid', entity: 'user', entityId: 'u', field: 'name', value: '不应写入', clientTs: 2 },
+    { opId: 'missing-value-invalid', entity: 'user', entityId: 'u', field: 'role', clientTs: 2 }
+  ] }, user.token);
+  assert.equal(rejected.status, 400);
+  assert.equal(rejected.body.error.code, 'E1001');
+  assert.match(rejected.body.error.message, /value/);
+  memory.reload();
+  assert.equal(memory.getSeq(user.userId), beforeSeq);
+  assert.equal(memory.getModel(user.userId).user.name, '基线');
+  assert.equal(memory.getModel(user.userId).user.role, undefined);
+});
+
 test('GET /api/health 返回 ok:true（无需凭证）', async () => {
   const r = await call('GET', '/api/health');
   assert.equal(r.status, 200);
@@ -204,6 +224,41 @@ test('计划提交的锁内 revision 冲突映射 E3001 且不落库', async () 
     memory.recordReplan = originalReplan;
   }
   assert.equal((await call('GET', '/api/state', undefined, replanUser.token)).body.replan, null);
+});
+
+test('计划复核收据预算不足时先预检，不提交基线且重试仍为 E4002', async () => {
+  const user = await newSession();
+  const input = {
+    tasks: [{ id: 'receipt-budget-task', subject: '数学', estMin: 30, weight: 1 }],
+    slots: [{ date: '三', startMin: 480, durMin: 30 }]
+  };
+  const scheduled = await call('POST', '/api/schedule', input, user.token);
+  assert.equal(scheduled.status, 200);
+  const request = { id: randomUUID(), base: null, input, result: scheduled.body };
+  const routesPath = require.resolve('../server/api/routes.js');
+  const cachedRoutes = require.cache[routesPath];
+  const previousBudget = process.env.NOVA_RECEIPT_BUDGET_BYTES;
+  try {
+    process.env.NOVA_RECEIPT_BUDGET_BYTES = '1';
+    delete require.cache[routesPath];
+    const router = require(routesPath).createRouter(memory, auth);
+    const ctx = { method: 'POST', pathname: '/api/plan/review', body: request, userId: user.userId };
+    await assert.rejects(router.handle(ctx), error => error.code === 'E4002');
+    assert.equal((await call('GET', '/api/state', undefined, user.token)).body.planBaseline, null);
+    await assert.rejects(router.handle(ctx), error => error.code === 'E4002');
+    assert.equal((await call('GET', '/api/state', undefined, user.token)).body.planBaseline, null);
+  } finally {
+    if (previousBudget === undefined) delete process.env.NOVA_RECEIPT_BUDGET_BYTES;
+    else process.env.NOVA_RECEIPT_BUDGET_BYTES = previousBudget;
+    if (cachedRoutes) require.cache[routesPath] = cachedRoutes;
+    else delete require.cache[routesPath];
+  }
+
+  const committed = await call('POST', '/api/plan/review', request, user.token);
+  assert.equal(committed.status, 200);
+  assert.equal(committed.body.status, 'committed');
+  assert.equal((await call('GET', '/api/state', undefined, user.token)).body.planBaseline.version, committed.body.version);
+  assert.deepEqual((await call('POST', '/api/plan/review', request, user.token)).body, committed.body);
 });
 
 test('POST /api/replan 返回四级策略与快照（L4 需确认，不落库）', async () => {
@@ -507,6 +562,23 @@ test('错误：单批上行超过 200 条返回 E4002 / 400', async () => {
 });
 
 /* ── 鉴权：未带凭证 / 伪造凭证 ───────────────────────────────────────── */
+
+test('撤销身份后计算与存储接口统一返回 E4030', async () => {
+  const user = await newSession();
+  await call('POST', '/api/sync/ops', { ops: [
+    { opId: 'revoke-baseline', entity: 'user', entityId: 'u', field: 'name', value: '待撤销', clientTs: 1 }
+  ] }, user.token);
+  const backup = memory.exportUserData(user.userId);
+  memory.deleteUserData(user.userId, backup.fingerprint);
+  for (const [method, path, body] of [
+    ['POST', '/api/feasibility', { weeklyH: 10, weeks: 2, discount: 1, demand: 20 }],
+    ['GET', '/api/state', undefined]
+  ]) {
+    const response = await call(method, path, body, user.token);
+    assert.equal(response.status, 403);
+    assert.equal(response.body.error.code, 'E4030');
+  }
+});
 
 test('鉴权：未带凭证访问业务接口返回 401 / E4010', async () => {
   const cases = [

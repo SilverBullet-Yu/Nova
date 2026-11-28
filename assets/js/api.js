@@ -11,6 +11,9 @@ window.ZX = window.ZX || {};
   'use strict';
 
   var TIMEOUT = 3000;
+  /* LLM 请求独立预算（2026-11-28 裁决）：与服务端 LLM_TIMEOUT_MS 缺省对齐；
+     客户端固定 30s，不随服务端配置变化，服务端调高超过 30s 时客户端仍先中断降级 */
+  var LLM_TIMEOUT = 30000;
   var DEFAULT_BASE = 'http://127.0.0.1:8787';
   var QUEUE_KEY = 'zx.op_queue';
 
@@ -160,23 +163,23 @@ window.ZX = window.ZX || {};
   /* 公开路由不携带凭证；其余一律先确保凭证 */
   var PUBLIC_PATHS = { '/api/health': true, '/api/auth/session': true };
 
-  function signedRequest(method, path, body) {
+  function signedRequest(method, path, body, options) {
     var pub = PUBLIC_PATHS[path] === true;
     return (pub ? Promise.resolve(null) : ensureAuth()).then(function (token) {
-      return request(method, path, body, token).catch(function (e) {
+      return request(method, path, body, token, options).catch(function (e) {
         /* 凭证过期或服务端密钥轮换：清空后重新签发一次再重试，不做循环重试 */
         if (pub || !e || e.status !== 401) throw e;
         clearToken();
         return ensureAuth().then(function (fresh) {
-          return request(method, path, body, fresh);
+          return request(method, path, body, fresh, options);
         });
       });
     });
   }
 
   /* 统一出口：收到 HTTP 响应即视为在线；只有网络失败/超时才标记离线 */
-  function call(method, path, body) {
-    return signedRequest(method, path, body).then(function (r) {
+  function call(method, path, body, options) {
+    return signedRequest(method, path, body, options).then(function (r) {
       status.online = true;
       status.checked = true;
       status.lastError = null;
@@ -232,9 +235,10 @@ window.ZX = window.ZX || {};
   function schedule(p) { return call('POST', '/api/schedule', p || {}); }
   function replan(p) { return call('POST', '/api/replan', p || {}); }
   function health() { return call('GET', '/api/health'); }
-  /* LLM 理解与分析层：失败/未配置由服务端以 E5010/5011/5012 报出，调用方按码降级 */
-  function llmClarify(p) { return call('POST', '/api/llm/clarify', p || {}); }
-  function llmAnalyze(p) { return call('POST', '/api/llm/analyze', p || {}); }
+  /* LLM 理解与分析层：失败/未配置由服务端以 E5010/5011/5012 报出，调用方按码降级；
+     使用独立 30s 预算（LLM_TIMEOUT），普通计算仍走 TIMEOUT 3s */
+  function llmClarify(p) { return call('POST', '/api/llm/clarify', p || {}, { timeout: LLM_TIMEOUT }); }
+  function llmAnalyze(p) { return call('POST', '/api/llm/analyze', p || {}, { timeout: LLM_TIMEOUT }); }
 
   ZX.api = {
     /* op 队列键名的单一事实源（settings.js 的 wipe 也按此键清队列） */

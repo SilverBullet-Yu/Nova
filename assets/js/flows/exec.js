@@ -190,8 +190,8 @@ window.ZX = window.ZX || {};
     };
   }
 
-  function rateText(rate) {
-    if (rate === null || rate === undefined || !Number.isFinite(rate)) return '未知';
+  function rateText(rate, basis) {
+    if (rate === null || rate === undefined || !Number.isFinite(rate)) return basis === 'unknown' ? '未知' : '—';
     return Math.round(Math.min(1, Math.max(0, rate)) * 100) + '%';
   }
 
@@ -328,12 +328,12 @@ window.ZX = window.ZX || {};
     return ext / skipped.length;
   }
 
-  function runAttribution(t, sess, beforeEst) {
+  function runAttribution(t, sess, beforeEst, consecutiveZeroDays) {
     var S = ZX.state;
     var m = metrics();
     var input = {
       planLoadRatio: m.planned / Math.max(1, U.num(S.user.dailyCapMin, 300)),
-      consecutiveZeroDays: (ZX.flows.rescue ? ZX.flows.rescue.zeroDaysFromSessions() : 0),
+      consecutiveZeroDays: consecutiveZeroDays,
       consecutiveTimeoutCount: timeoutCount(),
       efficiencyRatio: U.num(sess.minutes, 0) / Math.max(1, U.num(beforeEst, 1)),
       completion: U.num(sess.completion, 0) / 100,
@@ -505,15 +505,17 @@ window.ZX = window.ZX || {};
     var t = task(id);
     if (!t || t.done || t.skipped || t.deferred || t.abandoned || t.substituted) return;
     var beforeEst = U.num(t.est, 0);
-    var sess, attr, interrupted;
+    var sess, attr, interrupted, consecutiveZeroDays;
     try {
       var commit = function () {
+        /* 本次 session 会补齐今天；归因仍使用写入前的断更事实。 */
+        consecutiveZeroDays = ZX.flows.rescue ? ZX.flows.rescue.zeroDaysFromSessions() : 0;
         sess = applyRecord(id, {
           minutes: mins, completion: completion, feel: feel,
           startAt: startAt, endAt: endAt
         });
         interrupted = ZX.flows.rescue ? ZX.flows.rescue.detect() : false;
-        attr = runAttribution(t, sess, beforeEst);
+        attr = runAttribution(t, sess, beforeEst, consecutiveZeroDays);
       };
       if (typeof S.transact === 'function') S.transact(commit);
       else commit();
@@ -531,7 +533,7 @@ window.ZX = window.ZX || {};
       (feel ? ' · ' + U.esc(feel) : '') + '。';
 
     var rates = '任务完成率 <b class="ac">' + rateText(m.taskRate) + '</b>，计划工时完成率 <b class="ac">' +
-      rateText(m.plannedRate) + '</b>';
+      rateText(m.plannedRate, m.plannedBasis) + '</b>';
     var tail;
     if (completion < 100) {
       tail = '剩余预估 ' + U.hm(t.est) + '，未自动移入弹性位（' + beforeEst + ' → ' + t.est +

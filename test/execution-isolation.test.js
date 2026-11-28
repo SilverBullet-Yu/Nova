@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 const H = require('./helpers');
+const { attribute } = require('../shared/engine/attribute');
 const plain = value => JSON.parse(JSON.stringify(value));
 
 function boot(storage = new Map()) {
@@ -54,6 +55,28 @@ test('部分完成后再次完成，任务实际时长累计且刷新保留', ()
   const refreshed = boot(storage).ZX;
   assert.equal(refreshed.state.tasks[0].actual, 45);
   assert.deepEqual(plain(refreshed.state.sessions.map(s => s.minutes)), [20, 25]);
+});
+
+test('执行归因使用写入本次 session 前的断更天数，记录后中断状态归零', () => {
+  const { ZX } = boot();
+  const oldDay = new Date();
+  oldDay.setDate(oldDay.getDate() - 4);
+  ZX.state.tasks = [{ id: 'a', title: 'A', est: 60 }];
+  ZX.state.sessions = [{ id: 'old', taskId: 'a', endAt: oldDay.getTime(), minutes: 30 }];
+  ZX.flows.rescue.detect();
+  assert.equal(ZX.state.interrupted, true);
+  let attributionInput;
+  ZX.engine.attributeNow = input => {
+    attributionInput = plain(input);
+    return attribute(input);
+  };
+
+  ZX.exec.commitRecord('a', 25, 100, '', Date.now() - 1500000, Date.now());
+
+  assert.equal(attributionInput.consecutiveZeroDays, 4);
+  assert.equal(ZX.state.consecutiveZeroDays, 0);
+  assert.equal(ZX.state.interrupted, false);
+  assert.deepEqual(plain(ZX.state.attrCounts), { '执行中断': 1 });
 });
 
 test('记录当前 A 后复位四元组，归因先于持久化；刷新与重复完成不重计数', () => {

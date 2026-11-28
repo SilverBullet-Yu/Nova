@@ -80,6 +80,15 @@ test('澄清会话：多轮追问 → 画像确认卡 → LLM 建议 → 校准 
     llmAnalyze: (p) => {
       calls.analyze++;
       assert.equal(p.profile.goalName, '2027 考研 · 计算机');
+      /* history 近况快照：聚合数值口径（窗口 7 天、补录单列、负值与窗外滤除）。
+         对象产自 VM 沙箱（原型异域），先 JSON 往返归一到测试域再比较 */
+      const json = (o) => JSON.parse(JSON.stringify(o));
+      assert.deepEqual(json(p.history.recent7d), { activeDays: 2, minutes: 165, sessions: 4, backfillMinutes: 60 });
+      assert.deepEqual(json(p.history.replan), { adopted: 1, total: 2 });
+      assert.equal(p.history.consecutiveZeroDays, 2);
+      assert.deepEqual(json(p.history.attribution), { 计划过载: 2, 外部干扰: 1 });  // 零值键滤除
+      /* 隐私边界：快照不得携带任务标题、正文或科目名 */
+      assert.doesNotMatch(JSON.stringify(p.history), /title|数学|英语/);
       return Promise.resolve({
         summary: '先过一轮数学基础', demandH: 913, weeklyH: 20,
         tasks: [
@@ -91,7 +100,22 @@ test('澄清会话：多轮追问 → 画像确认卡 → LLM 建议 → 校准 
     },
     isOnline: () => true
   };
-  ZX.state = {};   /* applySuggestion 需要 state 承接 goalDraft/planDraft */
+  /* applySuggestion 需要 state 承接 goalDraft/planDraft；同时挂执行数据供 historySnapshot 聚合 */
+  const now = Date.now();
+  const H_ = 3600000, D_ = 86400000;
+  ZX.state = {
+    sessions: [
+      { endAt: now - 1 * H_, minutes: 30, taskId: 't1' },
+      { startAt: now - 2 * H_, minutes: 45, taskId: 't2' },   // 无 endAt → 回退 startAt
+      { endAt: now - 30 * 60000, minutes: 60, isBackfill: true, taskId: 't1' },
+      { endAt: now - 26 * H_, minutes: 90, taskId: 't2' },    // 昨天 → 第 2 个活跃日
+      { endAt: now - 8 * D_, minutes: 120, taskId: 't1' },    // 窗外（8 天前）滤除
+      { endAt: now - 3 * H_, minutes: -5, taskId: 't1' }      // 负分钟滤除
+    ],
+    attrCounts: { 计划过载: 2, 外部干扰: 1, 无偏差: 0 },
+    replanHistory: [{ undone: false }, { undone: true }],
+    consecutiveZeroDays: 2
+  };
   ZX.engine = { feasibilityNow: feasStub({ v: 50 }) };
   ZX.flows.goal = { open() {}, apply() { calls.apply++; } };
 

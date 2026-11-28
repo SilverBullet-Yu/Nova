@@ -81,8 +81,16 @@ with sync_playwright() as p:
                 page.goto(URL, wait_until='domcontentloaded')
                 page.wait_for_selector('#rail button[data-tab="chat"]')
                 page.wait_for_timeout(1000)
-                if page.evaluate('document.documentElement.dataset.gl3d') != mode:
+                expected_mode = 'off' if mode == 'dom' else 'on'
+                if page.evaluate('document.documentElement.dataset.gl3d') != expected_mode:
                     raise AssertionError('GL 模式未生效：' + mode)
+                if mode == 'gl':
+                    page.evaluate("""() => {
+                      document.getElementById('gl').style.display = 'block';
+                      document.getElementById('css3d').style.display = 'block';
+                      window.dispatchEvent(new Event('resize'));
+                    }""")
+                    page.wait_for_function("document.documentElement.dataset.gl3d === 'on' && document.documentElement.classList.contains('gl-on') && !!document.querySelector('.gl-stream')", timeout=15000)
                 for tab in ['today', 'plan', 'data', 'me']:
                     page.locator('#rail button[data-tab="' + tab + '"]').click()
                     page.wait_for_timeout(150)

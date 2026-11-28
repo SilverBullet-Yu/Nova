@@ -67,12 +67,20 @@ window.ZX = window.ZX || {};
       ' 项（退役，不计入剩余）。实际投入仅汇总任务 actual，不含补录。</p>';
   }
 
+  function secondaryStats(m) {
+    return '<details class="vs-more"><summary>更多统计</summary><div class="vs-more-body">' +
+      stat('计划工时', U.hm(Math.max(0, m.planned)), m.plannedBasis === 'unknown' ? '已知项合计 · 分母不完整' : '原始计划分母') +
+      stat('计划工时完成率', rateText(m.plannedRate, m.plannedBasis), m.plannedBasis === 'unknown' ? '旧任务缺原始计划' : '完成项 + 部分项折算', true) +
+      backfillStat(m) +
+      '<div class="vs"><span>弹性位</span><b>' + (ZX.state.buffer.free ? '1 空闲' : '占用') + '</b></div>' +
+      statusSummary(m) + '</div></details>';
+  }
+
   function activeTasks() {
     return ZX.flows.exec.activeTasks();
   }
 
   function today() {
-    var S = ZX.state;
     var m = metrics();
     var list = activeTasks();
     /* 渐进披露：待办平铺，已完成默认收起——页面长度不随完成数增长 */
@@ -85,16 +93,13 @@ window.ZX = window.ZX || {};
         '<h1>今日<span class="sub">基础期</span></h1>' +
       '</div>' +
       '<div class="vstats">' +
-        stat('计划工时', U.hm(Math.max(0, m.planned)), m.plannedBasis === 'unknown' ? '已知项合计 · 分母不完整' : '原始计划分母') +
         stat('任务完成率', rateText(m.taskRate), m.done + ' / ' + m.total + ' 项', true) +
-        stat('计划工时完成率', rateText(m.plannedRate, m.plannedBasis), m.plannedBasis === 'unknown' ? '旧任务缺原始计划' : '完成项 + 部分项折算', true) +
         stat('实际投入', U.hm(Math.max(0, m.worked)), '任务 actual · 不含补录') +
         stat('剩余预估', U.hm(Math.max(0, m.remain)), '未完成且未退役') +
-        backfillStat(m) +
-        '<div class="vs"><span>弹性位</span><b>' + (S.buffer.free ? '1 空闲' : '占用') + '</b></div>' +
-      '</div>' + statusSummary(m) + '</div>' +
+        secondaryStats(m) +
+      '</div></div>' +
 
-      dayBand() +
+      timelineDisclosure() +
 
       '<div class="sec-h"><span class="n">01</span><span class="t">今日任务</span><span class="rule"></span>' +
         '<span class="r">待办 ' + todo.length + ' 项</span>' +
@@ -208,6 +213,11 @@ window.ZX = window.ZX || {};
         }).join('') +
       '</div>' +
     '</div>';
+  }
+
+  function timelineDisclosure() {
+    return '<details class="sc-disclosure sc-timeline"><summary><span>今日时间带</span><small>07:00–23:00</small></summary>' +
+      dayBand() + '</details>';
   }
 
   /* 任务表格：列对齐（编号 / 任务 / 时段 / 工时 / 权重 / 操作），等宽数字右对齐。

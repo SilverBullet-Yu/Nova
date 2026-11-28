@@ -115,6 +115,45 @@ test('v3 overlay 与完整备份保留模型，重载后周图从有效区块重
   assert.equal(JSON.parse(target.disk.get('zx.overlay')).version, 3);
 });
 
+test('v3 overlay 缺少业务字段时熔断且不以种子覆盖原 raw', () => {
+  const disk = new Map();
+  const source = boot(disk).ZX;
+  fixture(source);
+  assert.equal(source.state.saveOverlay(), true);
+  const overlay = JSON.parse(disk.get('zx.overlay'));
+  delete overlay.sessions;
+  const raw = JSON.stringify(overlay);
+  disk.set('zx.overlay', raw);
+  const loaded = boot(disk).ZX;
+  assert.equal(loaded.state.localLoadFailed, true);
+  assert.equal(loaded.state.localLoadError.kind, 'invalid');
+  assert.equal(loaded.state.saveOverlay(), false);
+  assert.equal(disk.get('zx.overlay'), raw);
+});
+
+test('v3 重载从落点模型重建今日弹性位窗口与用量', () => {
+  const disk = new Map();
+  const source = boot(disk).ZX;
+  const tasks = [{ id: 'a', subject: '数学', title: '弹性任务', est: 30, weight: 1 }];
+  const slots = DATES.map(date => ({ date, startMin: 480, durMin: 60, isBuffer: false }));
+  slots.push({ date: START, startMin: 1080, durMin: 60, isBuffer: true });
+  const model = P.createModel({
+    startDate: START, timezone: 'UTC', idPrefix: 'buffer_', tasks, slots,
+    blocks: [{ id: 'buffer-a', taskId: 'a', date: START, startMin: 1080, durMin: 30, isBuffer: true }],
+    unplanned: []
+  });
+  source.state.tasks = tasks.map(task => source.state.normTask(task));
+  source.state.placementModel = model;
+  source.state.syncPlacementProjection();
+  assert.equal(source.state.buffer.time, '18:00–19:00');
+  assert.equal(source.state.buffer.free, false);
+  assert.equal(source.state.saveOverlay(), true);
+  const loaded = boot(disk).ZX;
+  assert.equal(loaded.state.localLoadFailed, false);
+  assert.equal(loaded.state.buffer.time, '18:00–19:00');
+  assert.equal(loaded.state.buffer.free, false);
+});
+
 test('boot overlay 跨周滚动到今日，锁定任务平移且已完成历史不复活', () => {
   const disk = new Map();
   const source = boot(disk).ZX;

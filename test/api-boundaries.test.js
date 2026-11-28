@@ -138,15 +138,23 @@ for (const mode of ['success', 'json-failure', 'fetch-throw', 'fetch-reject']) {
   });
 }
 
-test('LLM 客户端预算保持原 3 秒，服务端 30 秒预算差异待产品审定', async () => {
+test('LLM 请求使用独立 30 秒预算（2026-11-28 裁决），普通计算仍为 3 秒', async () => {
   const body = deferred();
   const f = fixture(() => ({ ok: true, json: () => body.promise }));
   const done = f.api.llmClarify({});
   await turn();
-  assert.equal([...f.timers.values()][0].ms, 3000);
+  assert.equal([...f.timers.values()][0].ms, 30000);
   body.resolve({});
   await done;
   assert.equal(f.timers.size, 0);
+  const body2 = deferred();
+  const f2 = fixture(() => ({ ok: true, json: () => body2.promise }));
+  const done2 = f2.api.health();
+  await turn();
+  assert.equal([...f2.timers.values()][0].ms, 3000);
+  body2.resolve({});
+  await done2;
+  assert.equal(f2.timers.size, 0);
 });
 
 test('旧队列原样隔离：新业务不写队列，健康恢复后 flush 仍不发网络', async () => {

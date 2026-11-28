@@ -237,11 +237,20 @@ function validateTask(task, label) {
   if (hasOwn(task, 'est') && hasOwn(task, 'estMin') && task.est !== task.estMin) {
     fail('invalidStructure', label + ' 的 est 与 estMin 冲突');
   }
-  if (task.weight !== undefined && (typeof task.weight !== 'number' || !Number.isFinite(task.weight))) {
-    fail('invalidStructure', label + '.weight 必须是有限数值');
+  if (task.weight !== undefined && (typeof task.weight !== 'number' || !Number.isFinite(task.weight) || task.weight < 0)) {
+    fail('invalidStructure', label + '.weight 必须是非负有限数值');
   }
+  validateFinite(task.completion, label + '.completion', 0, 100);
+  validateFinite(task.partial, label + '.partial', 0, 100);
   for (const key of TERMINAL.concat('deferred')) {
     if (task[key] !== undefined && typeof task[key] !== 'boolean') fail('invalidStructure', label + '.' + key + ' 必须是布尔值');
+  }
+}
+
+function validateFinite(value, label, min, max) {
+  if (value === undefined || value === null) return;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < min || (max !== undefined && value > max)) {
+    fail('invalidStructure', label + ' 必须是' + (max === undefined ? '不小于 ' + min : ' ' + min + '–' + max) + ' 的有限数值');
   }
 }
 
@@ -273,6 +282,12 @@ function validateSnapshot(snapshot) {
   for (const key of ['goal', 'feas', 'dayAssign', 'locks', 'attrCounts']) {
     if (!isObject(snapshot[key])) fail('invalidStructure', key + ' 必须是对象');
   }
+  Object.keys(snapshot.attrCounts).forEach(key => validateFinite(snapshot.attrCounts[key], 'attrCounts.' + key, 0));
+  validateFinite(snapshot.goal.weeks, 'goal.weeks', 0);
+  validateFinite(snapshot.feas.weeklyH, 'feas.weeklyH', 0);
+  validateFinite(snapshot.feas.weeks, 'feas.weeks', 0);
+  validateFinite(snapshot.feas.discount, 'feas.discount', 0, 1);
+  validateFinite(snapshot.feas.demand, 'feas.demand', 0);
   validateWeek(snapshot.week, 'week');
   validateWeek(snapshot.weekShift, 'weekShift');
   if (snapshot.avail !== null) validateAvail(snapshot.avail);
@@ -316,6 +331,13 @@ function validateSnapshot(snapshot) {
         (typeof session[key] !== 'string' || session[key].length > max)) {
         fail('invalidStructure', 'sessions[' + index + '].' + key + ' 无效');
       }
+    }
+    validateFinite(session.minutes, 'sessions[' + index + '].minutes', 0);
+    validateFinite(session.startAt, 'sessions[' + index + '].startAt', 0);
+    validateFinite(session.endAt, 'sessions[' + index + '].endAt', 0);
+    validateFinite(session.completion, 'sessions[' + index + '].completion', 0, 100);
+    if (typeof session.startAt === 'number' && typeof session.endAt === 'number' && session.endAt < session.startAt) {
+      fail('invalidStructure', 'sessions[' + index + '].endAt 不得早于 startAt');
     }
   });
   for (const key of ['dayAssign', 'locks']) {

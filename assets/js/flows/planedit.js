@@ -533,11 +533,9 @@ window.ZX = window.ZX || {};
           var restored = restorePlacementForVeto(taskId, op);
           if (!restored.ok) throw new Error(restored.message);
           S.placementModel = restored.model;
-          if (restored.task) {
-            var index = S.tasks.findIndex(function (task) { return task.id === taskId; });
-            if (index < 0) throw new Error('无法否决：当前任务不存在');
-            S.tasks[index] = restored.task;
-          }
+          var index = S.tasks.findIndex(function (task) { return task.id === taskId; });
+          if (index < 0) throw new Error('无法否决：当前任务不存在');
+          if (restored.task) S.tasks[index] = restored.task;
           S.syncPlacementProjection();
           syncBuffer(S.placementModel);
         } else if (op === 'compress') {

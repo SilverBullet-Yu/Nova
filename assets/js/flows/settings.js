@@ -591,6 +591,8 @@ window.ZX = window.ZX || {};
         return JSON.stringify(reloaded[key]) !== JSON.stringify(expected[key]);
       })) throw new Error('导入结果重载不一致');
       if (typeof S.resetTimer === 'function') S.resetTimer();
+      /* overlay 已完成提交与重载校验；这里只重绘，不重复持久化。 */
+      ZX.render({ skipOverlaySave: true });
 
       ZX.ui.toast('完整备份导入成功；覆盖前数据可在 7 天内恢复');
       return true;
@@ -816,6 +818,7 @@ window.ZX = window.ZX || {};
     var S = ZX.state;
     var s = t.snapshot || {};
     var previous = {};
+    var previousPlanVersion = S.currentPlanVersion ? S.currentPlanVersion() : null;
     ['tasks', 'sessions', 'goal', 'feas', 'week', 'weekShift', 'placementModel', 'dayAssign', 'locks',
       'notif', 'attrCounts', 'consecutiveZeroDays', 'interrupted', 'rescueRecord', 'replanHistory', 'snapshot', 'replanned', 'avail', 'availSource']
       .forEach(function (key) { previous[key] = S[key]; });
@@ -855,6 +858,7 @@ window.ZX = window.ZX || {};
     var saved;
     try { saved = JSON.parse(window.localStorage.getItem('zx.overlay') || 'null'); } catch (e) { saved = null; }
     var restoredFields = {
+      planVersion: S.currentPlanVersion ? S.currentPlanVersion() : null,
       tasks: S.tasks, sessions: S.sessions, goal: S.goal, feas: S.feas, week: S.week,
       weekShift: S.weekShift, placementModel: S.placementModel || null, dayAssign: S.dayAssign || {}, locks: S.locks || {},
       avail: S.avail || null, availSource: S.availSource || null, notif: S.notif || null,
@@ -869,6 +873,7 @@ window.ZX = window.ZX || {};
         return JSON.stringify(saved[key]) !== JSON.stringify(restoredFields[key]);
       }) : [];
       Object.keys(previous).forEach(function (key) { S[key] = previous[key]; });
+      if (typeof S.restorePlanVersion === 'function') S.restorePlanVersion(previousPlanVersion);
       ZX.ui.toast('无法保存恢复结果' + (mismatched.length ? '（' + mismatched.join('、') + '）' : '') + '，回收站仍保留', 'warn');
       return false;
     }

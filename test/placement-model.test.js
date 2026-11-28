@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const pm = require('../shared/placement-model.js');
+const { replan } = require('../shared/engine/replan.js');
 
 const START = '2026-11-23';
 const DATES = Array.from({ length: 7 }, (_, i) => `2026-11-${String(23 + i).padStart(2, '0')}`);
@@ -688,6 +689,45 @@ test('rollWindow 跨周按原索引平移窗口与当前落点，保留历史、
   const unchanged = pm.rollWindow(rolled, newStart, 'other_');
   assert.deepEqual(unchanged, rolled, '同一天滚动不得改 ID 或重复平移');
   throwsTypeError(() => pm.rollWindow(rolled, '2026-11-01', 'roll_'));
+});
+
+test('rollWindow 后释放再恢复按当前周同星期落点恢复', () => {
+  const model = makeModel({
+    startDate: '2026-11-16',
+    dates: Array.from({ length: 7 }, (_, i) => `2026-11-${String(16 + i).padStart(2, '0')}`),
+    tasks: [{ id: 'p', subject: '数学', estMin: 60 }],
+    blocks: [block('p-old', 'p', '2026-11-17', 480, 60)]
+  });
+  const rolled = pm.rollWindow(model, START, 'roll_');
+  const released = pm.releaseTask(rolled, 'p', '已跳过', 'roll_');
+  const restored = pm.restoreTask(released.model, 'p', 'roll_');
+  assert.equal(restored.ok, true);
+  assert.deepEqual(minutesByDate(restored.model, 'p'), { [DATES[1]]: 60 });
+  assert.deepEqual(restored.model.placements[0].originalSegments, model.placements[0].originalSegments);
+});
+
+test('applyReplan 在 L2 压缩结果中保留锁定任务原有落点', () => {
+  const model = makeModel({
+    normal: 115,
+    buffer: 0,
+    tasks: [
+      { id: 'p1', subject: '数学', estMin: 140 },
+      { id: 'p2', subject: '政治', estMin: 40 }
+    ],
+    blocks: [block('p2-old', 'p2', DATES[0], 480, 40)]
+  });
+  const result = replan({
+    tasks: [{ id: 'p1', subject: '数学', est: 140, weight: 0.9 }, { id: 'p2', subject: '政治', est: 40, weight: 0.1 }],
+    week: DATES.map(date => ({ date, minutes: 100, capacity: 115, buffer: 0 })),
+    locks: { p2: true },
+    params: { loadGrowthCap: 0.2, compressFloor: 0.6, compressedShareCap: 0.3 },
+    history: { consecutiveNoImprove: 0 }
+  });
+  assert.equal(result.strategies[1].applied, true);
+  assert.equal(result.nextTasks.find(task => task.id === 'p1').est, 105);
+  const applied = pm.applyReplan(model, result, 't_');
+  assert.deepEqual(pm.taskSegments(applied, 'p2'), pm.taskSegments(model, 'p2'));
+  assert.equal(applied.unplanned.some(item => item.taskId === 'p2'), false);
 });
 
 test('taskSegmentsMap 一次归一化得到与逐任务查询相同的独立分段索引', () => {

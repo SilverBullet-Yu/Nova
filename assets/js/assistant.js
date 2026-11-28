@@ -332,11 +332,11 @@ window.ZX = window.ZX || {};
   }
 
   /* ---------- flow：降载建议 ----------
-     顺延对象 = 当前权重最低的未完成项（与 adoptTired 同一选取逻辑），数值全部由 state 推导 */
+     顺延对象 = 今日 activeTasks 中当前权重最低的未完成项（与 adoptTired 同一选取逻辑），数值全部由 state 推导 */
   function lowestWeightTask() {
     var pick = null;
-    ZX.state.tasks.forEach(function (x) {
-      if (x.done || x.skipped || x.abandoned || x.substituted || (ZX.state.locks && ZX.state.locks[x.id]) || x.deferred || x.id === ZX.state.running) return;
+    ZX.flows.exec.activeTasks().forEach(function (x) {
+      if (x.done || (ZX.state.locks && ZX.state.locks[x.id]) || x.id === ZX.state.running) return;
       if (!pick || U.num(x.weight, 0) < U.num(pick.weight, 0)) pick = x;
     });
     return pick;
@@ -349,12 +349,13 @@ window.ZX = window.ZX || {};
       return;
     }
     var pick = lowestWeightTask();
+    var active = ZX.flows.exec.activeTasks();
     tiredPreview = pick ? { taskId: pick.id, planVersion: S.currentPlanVersion ? S.currentPlanVersion() : null } : null;
     var est = pick ? U.num(pick.est, 0) : 0;
     /* 计划口径与今日页 KPI 同源（exec.metrics 过滤跳过项） */
     var before = ZX.flows.exec.metrics().planned;
     var after = before - est;
-    var keepN = S.tasks.filter(function (x) { return !x.done && !x.skipped && !x.abandoned && !x.substituted && !x.deferred && (!pick || x.id !== pick.id); }).length;
+    var keepN = active.filter(function (x) { return !x.done && (!pick || x.id !== pick.id); }).length;
     say('<p>今天不追加任务。状态的波动是可预期的，系统不该用计划去对抗它。</p>' +
       '<div class="ecard">' +
         '<div class="ecard-h"><b>降载建议</b><span class="tag warn">保留弹性位</span></div>' +

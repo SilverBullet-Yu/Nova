@@ -321,11 +321,11 @@
       };
     }
 
-    var work = movable.map(clone);
+    var work = pending.map(clone);
     var need = overflow;
     var compressed = [];
 
-    var order = work.slice().sort(byWeightAsc);
+    var order = work.filter(function (t) { return !isLocked(t, locks); }).sort(byWeightAsc);
     for (var i = 0; i < order.length && need > EPS; i++) {
       var t = order[i];
       var est = taskMinutes(t);
@@ -539,7 +539,7 @@
       if (!t || typeof t.id !== 'string' || !t.id) throw new TypeError('replan: tasks[' + i + '].id 必须是非空字符串');
       if (taskIds[t.id]) throw new TypeError('replan: 任务 ID 重复：' + t.id);
       taskIds[t.id] = true;
-      if (!isFiniteNumber(t.est) || t.est < 0) throw new TypeError('replan: 任务工时必须是非负有限数：' + t.id);
+      if (!isFiniteNumber(t.est) || !Number.isInteger(t.est) || t.est < 0) throw new TypeError('replan: 任务工时必须是非负整数分钟：' + t.id);
       if (t.weight !== undefined && (!isFiniteNumber(t.weight) || t.weight < 0)) throw new TypeError('replan: 任务权重必须是非负有限数：' + t.id);
     });
     var dates = Object.create(null);
@@ -733,19 +733,86 @@
     }
   }
 
+  function isObject(v) {
+    return !!v && typeof v === 'object' && !Array.isArray(v);
+  }
+
+  function validId(v) {
+    return typeof v === 'string' && v.length > 0;
+  }
+
+  function validTask(t) {
+    return isObject(t) && validId(t.id) && isFiniteNumber(t.est) && Number.isInteger(t.est) && t.est >= 0;
+  }
+
+  function validateConfirmResult(result) {
+    if (!Array.isArray(result.strategies) || result.strategies.length !== 4 ||
+        !Array.isArray(result.diff) || !isObject(result.snapshot) ||
+        !Array.isArray(result.snapshot.tasks) || !result.snapshot.tasks.every(validTask) ||
+        !Array.isArray(result.snapshot.week) || !result.snapshot.week.every(function (day) { return isObject(day) && validId(day.date); }) ||
+        (result.snapshot.placementModel !== undefined && !isObject(result.snapshot.placementModel)) ||
+        !Array.isArray(result.nextTasks) || !Array.isArray(result.nextPlacements) ||
+        !isObject(result.guards)) {
+      throw new TypeError('confirmReplan: 重排结果结构不完整，拒绝确认');
+    }
+    result.strategies.forEach(function (strategy, i) {
+      if (!isObject(strategy) || strategy.level !== i + 1 || strategy.name !== LEVEL_NAMES[i + 1] ||
+          typeof strategy.applied !== 'boolean' || !isFiniteNumber(strategy.growth) || typeof strategy.reason !== 'string') {
+        throw new TypeError('confirmReplan: 重排策略结构非法，拒绝确认');
+      }
+    });
+    result.diff.forEach(function (item) {
+      if (!isObject(item) || ['defer', 'compress', 'substitute', 'abandon'].indexOf(item.op) < 0 ||
+          !validId(item.taskId) || typeof item.from !== 'string' || typeof item.to !== 'string' || typeof item.detail !== 'string') {
+        throw new TypeError('confirmReplan: 重排差异结构非法，拒绝确认');
+      }
+    });
+    ['loadGrowthOk', 'bufferPreserved', 'consecutiveOk', 'compressedShareOk'].forEach(function (key) {
+      if (typeof result.guards[key] !== 'boolean') throw new TypeError('confirmReplan: 重排守卫结构非法，拒绝确认');
+    });
+    var taskIds = Object.create(null);
+    result.nextTasks.forEach(function (task) {
+      if (!validTask(task) || taskIds[task.id]) throw new TypeError('confirmReplan: 重排任务结构非法，拒绝确认');
+      taskIds[task.id] = true;
+    });
+    var placementIds = Object.create(null);
+    result.nextPlacements.forEach(function (placement) {
+      if (!isObject(placement)) throw new TypeError('confirmReplan: 重排落点结构非法，拒绝确认');
+      var native = !Object.prototype.hasOwnProperty.call(placement, 'taskId') && isObject(placement.task) && Array.isArray(placement.segs);
+      var taskId = native ? placement.task.id : placement.taskId;
+      var segments = native ? placement.segs : placement.segments;
+      if (!validId(taskId) || !taskIds[taskId] || placementIds[taskId] || !Array.isArray(segments) ||
+          !Number.isInteger(placement.minutes) || placement.minutes < 0 ||
+          (native ? (placement.locked !== undefined && typeof placement.locked !== 'boolean') : typeof placement.locked !== 'boolean')) {
+        throw new TypeError('confirmReplan: 重排落点结构非法，拒绝确认');
+      }
+      var total = 0;
+      segments.forEach(function (segment) {
+        if (!isObject(segment) || !validId(segment.date) || !Number.isInteger(segment.minutes) || segment.minutes <= 0 ||
+            typeof segment.isBuffer !== 'boolean') {
+          throw new TypeError('confirmReplan: 重排落点分段非法，拒绝确认');
+        }
+        total += segment.minutes;
+      });
+      if (total !== placement.minutes || (placement.minutes === 0 && segments.length)) {
+        throw new TypeError('confirmReplan: 重排落点分钟不一致，拒绝确认');
+      }
+      placementIds[taskId] = true;
+    });
+  }
+
   /* 确认落库：仅接受 needsConfirmation=true 的结果，返回新的已确认对象（不修改入参） */
   function confirmReplan(result) {
-    if (!result || typeof result !== 'object') {
+    if (!isObject(result)) {
       throw new TypeError('confirmReplan: 需要重排结果对象');
     }
     if (result.needsConfirmation !== true) {
       throw new TypeError('confirmReplan: 该结果无需确认，不能重复确认');
     }
-    if (result.verdict !== 'needsConfirmation' || !Array.isArray(result.strategies) || result.strategies.length !== 4 ||
-        !Array.isArray(result.diff) || !result.snapshot || typeof result.snapshot !== 'object' || Array.isArray(result.snapshot) ||
-        !Array.isArray(result.snapshot.tasks) || !Array.isArray(result.snapshot.week) || !Array.isArray(result.nextTasks) || !Array.isArray(result.nextPlacements)) {
-      throw new TypeError('confirmReplan: 重排结果结构不完整，拒绝确认');
+    if (result.verdict !== 'needsConfirmation') {
+      throw new TypeError('confirmReplan: 重排结果状态非法，拒绝确认');
     }
+    validateConfirmResult(result);
     var out = clone(result);
     out.accepted = true;
     out.needsConfirmation = false;

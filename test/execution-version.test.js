@@ -164,6 +164,7 @@ test('时段来源区分默认、旧版设置与用户编辑，且局部更新�
   assert.match(init(storage).settings.summaryHtml(), /用户设置/);
   const overlay = JSON.parse(storage.get('zx.overlay'));
   assert.equal(overlay.avail[0][0], false);
+  overlay.version = 2;
   delete overlay.availSource;
   storage.set('zx.overlay', JSON.stringify(overlay));
   assert.match(init(storage).settings.summaryHtml(), /旧版设置/);

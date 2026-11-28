@@ -103,7 +103,7 @@
 
 ### 5.3 重排 `replan` / `confirmReplan` / `undoReplan`
 
-输入 `{ tasks[], week[], params, history, locks, allowBuffer?, timestamp? }`；输出 `{ strategies[], diff[], loadDelta, growthApplicable, accepted, needsConfirmation, verdict, snapshot, guards, nextTasks, nextPlacements, nextWeek }`。周元素为 `{ date, minutes, buffer, capacity?, bufferUsed?, releasedMinutes?, releasedBufferMinutes? }`，普通容量 `capacity` 缺省取 `dailyCapMin`，弹性容量 `buffer` 缺省为 0；日期唯一且最多 7 天。任务工时读 `est`。`params` 默认 `loadGrowthCap 0.20`、`compressFloor 0.60`、`compressedShareCap 0.30`、`consecutiveNoImproveCap 3`、`dailyCapMin 300`、`maxTasks 500`、`maxOperations 50000`；`bufferRatio` 当前仅为兼容字段。
+输入 `{ tasks[], week[], params, history, locks, allowBuffer?, timestamp? }`；输出 `{ strategies[], diff[], loadDelta, growthApplicable, accepted, needsConfirmation, verdict, snapshot, guards, nextTasks, nextPlacements, nextWeek }`。周元素为 `{ date, minutes, buffer, capacity?, bufferUsed?, releasedMinutes?, releasedBufferMinutes? }`，普通容量 `capacity` 缺省取 `dailyCapMin`，弹性容量 `buffer` 缺省为 0；日期唯一且最多 7 天。任务工时读非负整数 `est`。`params` 默认 `loadGrowthCap 0.20`、`compressFloor 0.60`、`compressedShareCap 0.30`、`consecutiveNoImproveCap 3`、`dailyCapMin 300`、`maxTasks 500`、`maxOperations 50000`；`bufferRatio` 当前仅为兼容字段。
 
 - 四级顺序执行，首个通过校验即停：L1 顺延（按权重降序填入未来 7 天普通容量；`allowBuffer=true` 时才使用独立弹性容量）、L2 压缩（仅当待排分钟超出剩余容量 `overflow > 0` 时触发，按权重升序压缩，下限 `floor(est × compressFloor)`）、L3 替代（同 `domain` 内 `freq` 与 `weight` 双高者替换低者，原任务标 `substituted` 退出待办）、L4 放弃（只给建议，`accepted=false` 且 `needsConfirmation=true`）。
 - L3 按域预索引候选，已在 pending 的候选产生同一待排集合，首次放置失败后不再重复计算；L4 只排序一次并逐项移除。结果合并使用 ID 索引。`npm run bench:replan` 覆盖 8–500 任务，子进程 1500ms 硬超时、单次 250ms 软预算，异常或超预算均非零退出；当前 500 任务合成基准约 82ms。暂不引入 Worker，保留同步纯函数契约与操作上限，后续若预算扩大再评估可终止线程池。
@@ -136,7 +136,7 @@
 | `zx.ui_prefs` | `util.js` 管理 `grid`、`glow`、`motion`、`font`；首帧内联脚本只写这四项，`gl3d` 不再读取（3D 由运行时闸门控制） |
 | `zx.trash` / `zx.flash` | 删除全部数据或备份导入覆盖前的 7 天恢复快照，以及删除后的一次性提示 |
 
-overlay 损坏、格式 / 版本无效、v3 元数据、落点模型或业务结构不符、未来 `version>3` 会保留原键并暂停覆盖；旧 v1/v2 无模型证据时保持 legacy，不反推日期或从 `total-buf` 猜容量。显式导入有效备份或确认删除才解除熔断。保存失败会单独告警。启动只恢复本机 overlay；启动与 `online` 只探测 health，不拉取或接收服务端状态。
+overlay 损坏、格式 / 版本无效、v3 元数据、v3 必填业务快照缺字段、落点模型或业务结构不符、未来 `version>3` 会保留原键并暂停覆盖；旧 v1/v2 无模型证据时保持 legacy，不反推日期或从 `total-buf` 猜容量。显式导入有效备份或确认删除才解除熔断。保存失败会单独告警。启动只恢复本机 overlay；启动与 `online` 只探测 health，不拉取或接收服务端状态。
 
 跨标签页采用业务快照基线检查：写前重读 `zx.overlay`，外部业务变更/删除/非法元数据即拒绝覆盖并置粘滞冲突；`storage` 事件检测本页未保存修改。冲突时暂停保存、删除、重排确认和撤销，用户先导出本页备份再刷新。仅元数据变化且业务相同可接受新 revision。导入回滚保留另一页的新写入/删除；支持 Web Locks 时导入/删除/恢复事务串行化。不可读 overlay 只能替换本次加载的同一 raw。显式删除先预检并恢复本次 trash 写入，损坏/未来版本仍可显式删除；删除回读异常保留 trash；trash 清理/恢复只删本次 raw；未来版本修复保留可读 revision。该机制不是原子 CAS，只提供顺序旧版本保护，不承诺多页同时写线性一致。
 
@@ -166,7 +166,7 @@ M3 的 `deferred` 仅表示今日暂缓，不是真实改期：任务退出今�
 | --- | --- |
 | 鉴权 | 当前计算接口使用 `Authorization: Bearer <token>`；凭证形态 `nj1.<payloadBase64url>.<sigBase64url>`，HMAC-SHA256 签名，密钥取 `NOVA_AUTH_SECRET`（至少 32 字节），有效期 7 天（`TOKEN_TTL_MS`）。health / auth 免鉴权；业务主数据不依赖服务端身份，凭证不进入完整备份 |
 | 限流 | 服务端固定窗口、单进程内存，按「身份 + 路由」隔离，未认证路由按来源 IP 隔离。阈值：`POST /api/auth/session` 60/60 s（按 IP）、`POST /api/sync/ops` 60/60 s、`POST /api/replan` 与 `/replan/confirm` 12/60 s（`/api/replan/undo` 当前不设限流，2026-11-24 已确认保持现状；前端不调用）、`POST /api/feasibility` 与 `/schedule` 与 `/plan/review` 与 `/attribute` 30/60 s，`/api/llm/clarify` 与 `/api/llm/analyze` 10/60 s；超限返回 429 与 `Retry-After`，不排队也不自动重试。旧业务接口限额仅服务端保留，前端不使用 |
-| CORS | 放行本机来源（`127.0.0.1`/`localhost`/`null`）与同源（`Origin` 的 host 等于请求 `Host`），其余不放行；允许方法 `GET, POST, OPTIONS`，允许头 `Content-Type, Authorization`，`Max-Age 600`，带 `Vary: Origin` |
+| CORS | 仅对 `NOVA_ALLOWED_ORIGINS` 精确白名单中的来源返回 CORS 头；`file://` 的 `null` origin 默认关闭，仅显式列入白名单或设置 `NOVA_ALLOW_NULL_ORIGIN=1` 时放行。同源浏览器请求不依赖 CORS；允许方法 `GET, POST, OPTIONS`，允许头 `Content-Type, Authorization`，`Max-Age 600`，带 `Vary: Origin` |
 | 静态资源 | 白名单 `/`、`/index.html`、`/assets/*`、`/shared/*`；非 GET/HEAD 返回 405 |
 | 请求体 | 上限 1 MiB（`MAX_BODY_BYTES = 1048576`），超限 `E4002`；JSON 非法 `E1001` |
 | 前端计算降级 | 普通请求超时 3000 ms；可行性 / 排程 / 重排调用失败或结构不合约时回退同一本地产物（`ZX.engine.source` 记为 `local`）；确认 / 撤销与归因始终本机执行。顶栏在线基础文案为「本地主数据 · 服务端仅计算」，有旧 pending 时改为「本地主数据 · 旧队列已隔离 N」；离线基础文案为「离线 · 本地可用」并附隔离数量，「我的」页显示「N 项已隔离」；不显示待处理角标。离线 / 聆听头像取自 `mascot-inline.js` 内联 data URI；`zx.pending_plan` 不自动复核，无补传或自动补审 |

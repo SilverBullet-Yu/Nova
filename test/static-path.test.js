@@ -3,6 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const fs = require('node:fs/promises');
+const nodeFs = require('node:fs');
 const { Writable } = require('node:stream');
 const { finished } = require('node:stream/promises');
 const { resolveStatic, serveStatic } = require('../server/static.js');
@@ -53,6 +54,30 @@ test('静态路径：畸形编码与 NUL 拒绝且不抛异常', async () => {
     assert.equal(resolveStatic(pathname), null, pathname);
     assert.equal((await responseFor(pathname)).status, 404, pathname);
   }
+});
+
+test('静态资源读取失败时断开响应且不产生未捕获异常', async () => {
+  const original = nodeFs.createReadStream;
+  const chunks = [];
+  const res = new Writable({
+    write(chunk, encoding, callback) { chunks.push(Buffer.from(chunk)); callback(); }
+  });
+  res.writeHead = (status, headers) => { res.status = status; res.headers = headers; res.headersSent = true; };
+  const closed = new Promise(resolve => res.once('close', resolve));
+  nodeFs.createReadStream = (...args) => {
+    const stream = original(...args);
+    process.nextTick(() => stream.destroy(new Error('synthetic static read failure')));
+    return stream;
+  };
+  try {
+    serveStatic(res, '/assets/js/main.js');
+    await closed;
+  } finally {
+    nodeFs.createReadStream = original;
+  }
+  assert.equal(res.status, 200);
+  assert.equal(res.destroyed, true);
+  assert.equal(Buffer.concat(chunks).length, 0);
 });
 
 test('静态路径：解码和规范化后仍公开的本地资源保持可用', async () => {

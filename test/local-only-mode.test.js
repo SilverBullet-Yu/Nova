@@ -188,10 +188,11 @@ test('engine.confirmReplan 使用本地 Rhythm 结果，计算接口仍保留', 
   vm.runInNewContext(read('../assets/js/engine.js'), sandbox);
   const draft = {
     accepted: false, needsConfirmation: true, verdict: 'needsConfirmation',
-    strategies: [{ level: 1, applied: false }, { level: 2, applied: false }, { level: 3, applied: false }, { level: 4, applied: true }],
-    diff: [{ op: 'abandon', taskId: 't', from: 50, to: 0 }],
+    strategies: [1, 2, 3, 4].map(level => ({ level, name: ['顺延', '压缩', '替代', '放弃'][level - 1], applied: level === 4, growth: 0, reason: '' })),
+    diff: [{ op: 'abandon', taskId: 't', from: '50', to: '0', detail: '' }],
     snapshot: { tasks: [{ id: 't', est: 50 }], week: [] },
-    nextTasks: [{ id: 't', abandoned: true }],
+    guards: { loadGrowthOk: true, bufferPreserved: true, consecutiveOk: true, compressedShareOk: true },
+    nextTasks: [{ id: 't', est: 50, abandoned: true }],
     nextPlacements: []
   };
   const confirmed = await ZX.engine.confirmReplan(draft);
